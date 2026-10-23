@@ -197,8 +197,12 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		rule.Escalations = rungs
 		// The ladder's rungs stand in for tracker.volume: the cache-entry
 		// TTL derives from the top rung so state outlives the whole climb
-		// (the zero-leak default and minimum are domain.TTL's).
-		rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, rungs[len(rungs)-1].At)
+		// (the zero-leak default and minimum are domain.TTL's). Replay
+		// re-derives its TTL per event from the same top rung and keeps
+		// the build TTL zero, as its single-volume form does.
+		if rule.Tracker.Kind != domain.TrackReplay {
+			rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, rungs[len(rungs)-1].At)
+		}
 	}
 
 	for i := range raw.Actions {
@@ -216,7 +220,8 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 // parseTracker builds the rule's tracker config. Rate and bandwidth
 // fix the TTL at build; replay derives it per event, so TTL stays zero.
 // A ladder rule carries no tracker.volume: its rungs stand in for it
-// and the TTL is derived from the top rung at build.
+// (scalar thresholds, replay's in download equivalents) and the TTL is
+// derived from the top rung.
 func parseTracker(id string, raw *rawTracker, ladder bool) (*domain.TrackerConfig, error) {
 	var kind domain.TrackKind
 	switch raw.Track {
@@ -243,21 +248,28 @@ func parseTracker(id string, raw *rawTracker, ladder bool) (*domain.TrackerConfi
 	}
 
 	cfg := &domain.TrackerConfig{Kind: kind, Leak: leak, TargetPrefix: prefix}
-	if kind == domain.TrackReplay {
-		if ladder {
-			return nil, fmt.Errorf("rules: rule %q: escalations: replay ladders land later - replay keeps tracker.volume", id)
+	if ladder {
+		// A ladder replaces tracker.volume outright: its scalar rungs
+		// stand in for it. A volume-method block beside a ladder is its
+		// own refusal - methods scale with Filesize and are exclusive to
+		// the single-volume form - and a scalar volume is the
+		// single-volume rule a ladder is never declared on (replay's
+		// volume may take either shape, hence the split).
+		switch raw.Volume.Kind {
+		case 0:
+		case yaml.MappingNode:
+			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)", id)
+		default:
+			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
 		}
+		return cfg, nil
+	}
+	if kind == domain.TrackReplay {
 		volume, method, err := parseReplayVolume(id, &raw.Volume)
 		if err != nil {
 			return nil, err
 		}
 		cfg.Volume, cfg.VolumeMethod = volume, method
-		return cfg, nil
-	}
-	if ladder {
-		if raw.Volume.Kind != 0 {
-			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
-		}
 		return cfg, nil
 	}
 	if raw.Volume.Kind != 0 && raw.Volume.Kind != yaml.ScalarNode {

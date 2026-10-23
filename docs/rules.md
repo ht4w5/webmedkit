@@ -199,15 +199,20 @@ How it behaves:
   rung's threshold.
 - The tracker cache-entry TTL derives from the ladder's top rung, so
   tracker state outlives the whole climb (the zero-leak default and the
-  one-second minimum are unchanged).
+  one-second minimum are unchanged); a replay ladder's TTL re-derives
+  per event from the same top rung.
 
 Load refuses, each error naming the rule: a ladder beside `actions` or
-beside `tracker.volume`; a ladder without a tracker; fewer than two
-rungs; `at` thresholds that are not strictly ascending; thresholds that
-do not parse in the tracker kind's quantity — bytes for bandwidth
-(`50MB`), plain counts for rate; and a ladder on a replay tracker
-(replay ladders land later; replay keeps `tracker.volume`). Each rung's
-actions are validated by the same action parser as rule actions.
+beside `tracker.volume` — a scalar volume is the single-volume rule a
+ladder is never declared on, and a volume-method block (`constant`,
+`clamped-linear`, `inverse-square`, `step`) stays exclusive to the
+single-volume form; a ladder without a tracker; fewer than two rungs;
+`at` thresholds that are not strictly ascending; and thresholds that do
+not parse in the tracker kind's quantity — bytes for bandwidth
+(`50MB`), plain counts for rate, download equivalents for replay
+(already normalized by Filesize: `2` means two full downloads of that
+path whether it is a 1MB or a 10GB file). Each rung's actions are
+validated by the same action parser as rule actions.
 
 `bandage -t` prints every rung with its threshold and its actions; the
 tracker line carries no volume (the rungs carry every threshold) and
