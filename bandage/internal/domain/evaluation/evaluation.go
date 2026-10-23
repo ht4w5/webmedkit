@@ -85,17 +85,22 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 		if !rule.Filter.Match(event) {
 			continue
 		}
-		reading, matched, err := s.updateTracker(ctx, rule, event)
+		reading, fed, err := s.updateTracker(ctx, rule, event)
 		if err != nil {
 			return err
 		}
-		if !matched {
+		if !fed {
 			continue
 		}
 		// A fired match resolves to the rungs it fired before any action
-		// runs: one implicit rung for a single-volume rule. Dispatch,
-		// terminality and the reading all follow the rungs.
-		rungs := rule.Rungs(reading.Volume)
+		// runs: every rung the post-accumulation value stands above,
+		// lowest first (a single-volume rule is one implicit rung). None
+		// fired means no match. Dispatch, terminality and the reading all
+		// follow the rungs.
+		rungs := rule.Rungs(reading)
+		if len(rungs) == 0 {
+			continue
+		}
 		if err := s.runRungs(ctx, matchContext{chain: chain, rule: rule, reading: reading, event: event}, rungs); err != nil {
 			return err
 		}
@@ -107,9 +112,13 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 }
 
 // runRungs runs every fired rung's full action list in order, lowest rung
-// first; terminality applies only after the lists. Each rung's actions see
-// its trigger-time reading: the reading captured before any action ran,
-// carrying the rung's threshold as its volume.
+// first; terminality applies only after the lists. The fired rungs were
+// decided once from the post-accumulation value before any action ran,
+// and the loader's strictly ascending thresholds make them a prefix of
+// the ladder - so an action within the event can never cancel a rung that
+// already fired. Each rung's actions see its trigger-time reading: the
+// reading captured before any action ran, carrying the rung's threshold
+// as its volume.
 func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.Escalation) error {
 	for _, rung := range rungs {
 		m.reading.Volume = rung.At
@@ -125,7 +134,9 @@ func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.E
 
 // terminal reports whether a fired rung ends chain traversal after the
 // rule's rungs have run: a rung whose action list carries report, goto or
-// stop (the rung's Terminal).
+// stop (the rung's Terminal). A fired jump never ends the chain; a fired
+// goto ran its target chain and ends this chain here, after the
+// remaining fired rungs have run.
 func terminal(rungs []domain.Escalation) bool {
 	for _, rung := range rungs {
 		if rung.Terminal() {
@@ -176,7 +187,10 @@ func (s *Service) runNamedChain(ctx context.Context, rule *domain.Rule, name str
 	return s.runChain(ctx, ci, event)
 }
 
-// updateTracker feeds the rule's tracker (when it has one) and reports the trigger-time reading plus whether the rule matched.
+// updateTracker feeds the rule's tracker (when it has one) and reports
+// the post-accumulation reading. fed is false only for replay warm-up
+// (unknown sizes are skipped entirely); tracker-less rules are always
+// fed. Whether the rule matched is the fired rungs' question (Rule.Rungs).
 func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *domain.Event) (domain.TrackerReading, bool, error) {
 	if rule.Tracker == nil {
 		// Tracker-less rules match on filter alone.
@@ -217,7 +231,7 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		Leak:   cfg.Leak,
 		Volume: volume,
 	}
-	return reading, rec.Overflow(volume), nil
+	return reading, true, nil
 }
 
 // matchKey derives the tracker cache key: the Target, or for replay the Target and path joined with KeySep.

@@ -532,6 +532,288 @@ chains:
         actions: [{report: {reason: shared, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `,
 		},
+
+		// The escalation-ladder matrix: a ladder replaces actions and
+		// tracker.volume, and every refusal names the rule.
+		{
+			name: "ladder beside actions rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        actions: [stop]
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: cannot be declared beside actions`,
+		},
+		{
+			name: "ladder without actions accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+		},
+		{
+			name: "ladder beside tracker.volume rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: cannot be declared beside tracker.volume`,
+		},
+		{
+			name: "ladder without tracker rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: requires a tracker`,
+		},
+		{
+			name: "single rung ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: at least two rungs required`,
+		},
+		{
+			name: "empty ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations: []
+`,
+			wantErr: `rule "r": escalations: at least two rungs required`,
+		},
+		{
+			name: "equal thresholds rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 5
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[1].at: must be strictly ascending`,
+		},
+		{
+			name: "descending thresholds rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 10
+            actions: [stop]
+          - at: 5
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[1].at: must be strictly ascending`,
+		},
+		{
+			name: "byte threshold on rate ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 50MB
+            actions: [stop]
+          - at: 100
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[0].at: invalid quantity`,
+		},
+		{
+			name: "count threshold on rate ladder accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 50
+            actions: [stop]
+          - at: 100
+            actions: [stop]
+`,
+		},
+		{
+			name: "human byte threshold on bandwidth ladder accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [stop]
+          - at: 5GB
+            actions: [stop]
+`,
+		},
+		{
+			name: "unparseable threshold rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [stop]
+          - at: bananas
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[1].at: invalid quantity`,
+		},
+		{
+			name: "missing threshold rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[0].at: required`,
+		},
+		{
+			name: "method-shaped rung threshold rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: {method: constant, value: 5}
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[0].at: must be a quantity`,
+		},
+		{
+			name: "ladder on replay tracker rejected until replay ladders land",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: replay, leak: 1, volume: 5}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: replay ladders land later`,
+		},
+		{
+			name: "rung actions validated by the shared action parser",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: Not A Slug, ttl: 1h, penalty: drop}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: reason`,
+		},
+		{
+			name: "unknown rung action rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [frobnicate]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": unknown action "frobnicate"`,
+		},
 	}
 
 	// One accepted case per closed vocabulary value (the passing side
@@ -722,6 +1004,44 @@ chains:
         actions: [{goto: nowhere}]
 `,
 			wantErr: "nonexistent chain",
+		},
+		{
+			name: "dangling rung jump target rejected",
+			rules: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{jump: nowhere}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: "nonexistent chain",
+		},
+		{
+			name: "rung goto cycle rejected",
+			rules: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [{goto: b}]
+  - name: b
+    rules:
+      - id: s
+        actions: [{goto: a}]
+`,
+			wantErr: "cycle",
 		},
 		{
 			name: "duplicate chain names rejected",
@@ -1232,5 +1552,142 @@ chains:
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
 		}
+	}
+}
+
+// ladderRules is a bandwidth rule with an escalation ladder: a handoff
+// rung and two report rungs, in the tracker's quantity (bytes).
+const ladderRules = `
+version: 0
+chains:
+  - name: download-abuse
+    rules:
+      - id: iso-ladder
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [{jump: inspect}]
+          - at: 5GB
+            actions: [{report: {reason: iso-throttle, ttl: 24h, penalty: limit-bandwidth, rate: 1MB}}]
+          - at: 40GB
+            actions:
+              - log: "debug,MARK:TOP"
+              - report: {reason: iso-ban, ttl: 7d, penalty: drop}
+  - name: inspect
+    rules:
+      - id: watch
+        actions: [{log: "debug,MARK:WATCH"}]
+`
+
+// TestParseRulesEscalations: a ladder parses to rungs with thresholds in
+// the tracker's quantity and their own action lists; the rule carries no
+// action list and no tracker.volume, and the cache-entry TTL derives
+// from the ladder's top rung (zero-leak default and minimum intact).
+func TestParseRulesEscalations(t *testing.T) {
+	chains, err := ParseRules([]byte(ladderRules))
+	if err != nil {
+		t.Fatalf("ParseRules error: %v", err)
+	}
+	iso := chains[0].Rules[0]
+	if len(iso.Actions) != 0 {
+		t.Errorf("rule actions = %+v, want none (the ladder carries the actions)", iso.Actions)
+	}
+	if iso.Tracker == nil || iso.Tracker.Kind != domain.TrackBandwidth || iso.Tracker.Leak != 1e6 {
+		t.Fatalf("tracker = %+v, want bandwidth leak 1e6", iso.Tracker)
+	}
+	if iso.Tracker.Volume != 0 {
+		t.Errorf("tracker volume = %v, want 0 (the ladder's rungs stand in for it)", iso.Tracker.Volume)
+	}
+	if iso.Tracker.TTL != 40000*time.Second {
+		t.Errorf("tracker TTL = %v, want %v (top rung 40GB / leak 1MB)", iso.Tracker.TTL, 40000*time.Second)
+	}
+
+	wantAt := []float64{5e7, 5e9, 4e10}
+	if len(iso.Escalations) != len(wantAt) {
+		t.Fatalf("escalations = %+v, want %d rungs", iso.Escalations, len(wantAt))
+	}
+	for i, at := range wantAt {
+		if iso.Escalations[i].At != at {
+			t.Errorf("rung %d at = %v, want %v", i, iso.Escalations[i].At, at)
+		}
+	}
+	r0 := iso.Escalations[0].Actions
+	if len(r0) != 1 || r0[0].Jump != "inspect" {
+		t.Errorf("rung 0 actions = %+v, want one jump to inspect", r0)
+	}
+	r1 := iso.Escalations[1].Actions
+	if len(r1) != 1 || r1[0].Report == nil || r1[0].Report.Reason != "iso-throttle" {
+		t.Errorf("rung 1 actions = %+v, want one report iso-throttle", r1)
+	}
+	r2 := iso.Escalations[2].Actions
+	if len(r2) != 2 || r2[0].Log == nil || r2[1].Report == nil || r2[1].Report.Reason != "iso-ban" {
+		t.Errorf("rung 2 actions = %+v, want log then report iso-ban", r2)
+	}
+	if p := r2[1].Report.Penalty; p.Action != domain.PenaltyDrop || p.Rate != nil {
+		t.Errorf("rung 2 penalty = %+v, want drop without rate", p)
+	}
+}
+
+// The ladder's cache-entry TTL keeps the zero-leak default and the
+// one-second minimum of the single-volume derivation.
+func TestParseRulesEscalationTTLDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		leak string
+		at   string
+		at2  string
+		kind string
+		want time.Duration
+	}{
+		{name: "zero leak falls back to the default TTL", kind: "rate", leak: "0", at: "5", at2: "10", want: domain.DefaultTTL},
+		{name: "top rung over leak, minimum kept", kind: "rate", leak: "10", at: "5", at2: "5.5", want: domain.MinTTL},
+		{name: "top rung over leak", kind: "rate", leak: "2", at: "5", at2: "20", want: 10 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: " + tt.kind + ", leak: " + tt.leak + "}\n" +
+				"        escalations:\n          - at: " + tt.at + "\n            actions: [stop]\n          - at: " + tt.at2 + "\n            actions: [stop]"
+			chains, err := ParseRules([]byte(yaml))
+			if err != nil {
+				t.Fatalf("ParseRules error: %v", err)
+			}
+			if got := chains[0].Rules[0].Tracker.TTL; got != tt.want {
+				t.Errorf("tracker TTL = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestShowsEscalationRungsInPlan: the --test plan prints every rung with
+// its threshold and its actions, and the tracker line's ttl derives from
+// the ladder's top rung (the rungs stand in for tracker.volume).
+func TestShowsEscalationRungsInPlan(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bandage.yml")
+	rulesPath := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulesPath, []byte(ladderRules), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
+	if err != nil {
+		t.Fatalf("Test error: %v", err)
+	}
+	for _, want := range []string{
+		"tracker: bandwidth leak=1000000 ttl=11h6m40s",
+		"rung at=50000000 jump target=inspect",
+		"rung at=5000000000 report reason=iso-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
+		`rung at=40000000000 log level=debug message="MARK:TOP", report reason=iso-ban ttl=168h0m0s penalty=drop`,
+	} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan does not contain %q:\n%s", want, plan)
+		}
+	}
+	// The ladder's rungs carry every threshold; the tracker line none.
+	if strings.Contains(plan, "tracker: bandwidth leak=1000000 volume=") {
+		t.Errorf("ladder tracker line still prints volume:\n%s", plan)
 	}
 }

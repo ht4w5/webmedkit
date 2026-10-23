@@ -39,6 +39,16 @@ type rawRule struct {
 	Filter  string      `yaml:"filter"`
 	Tracker *rawTracker `yaml:"tracker"`
 	Actions []yaml.Node `yaml:"actions"`
+	// Escalations is the rule's ladder (nil key absent, empty list a
+	// declared empty ladder).
+	Escalations *[]rawEscalation `yaml:"escalations"`
+}
+
+// rawEscalation is one ladder rung: a threshold in the tracker's
+// quantity plus its own ordered action list.
+type rawEscalation struct {
+	At      yaml.Node   `yaml:"at"`
+	Actions []yaml.Node `yaml:"actions"`
 }
 
 // rawTracker keeps leak and volume as yaml.Nodes so presence is
@@ -151,6 +161,15 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 
 	rule := domain.Rule{ID: id}
 
+	// A ladder replaces the rule's action list and its tracker.volume:
+	// never both, and never without a tracker to accumulate.
+	if raw.Escalations != nil && len(raw.Actions) > 0 {
+		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside actions", id)
+	}
+	if raw.Escalations != nil && raw.Tracker == nil {
+		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: requires a tracker", id)
+	}
+
 	flt := raw.Filter
 	if flt == "" {
 		flt = "any"
@@ -163,11 +182,23 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	rule.FilterSource = flt
 
 	if raw.Tracker != nil {
-		cfg, err := parseTracker(id, raw.Tracker)
+		cfg, err := parseTracker(id, raw.Tracker, raw.Escalations != nil)
 		if err != nil {
 			return domain.Rule{}, err
 		}
 		rule.Tracker = cfg
+	}
+
+	if raw.Escalations != nil {
+		rungs, err := parseEscalations(id, *raw.Escalations, rule.Tracker.Kind)
+		if err != nil {
+			return domain.Rule{}, err
+		}
+		rule.Escalations = rungs
+		// The ladder's rungs stand in for tracker.volume: the cache-entry
+		// TTL derives from the top rung so state outlives the whole climb
+		// (the zero-leak default and minimum are domain.TTL's).
+		rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, rungs[len(rungs)-1].At)
 	}
 
 	for i := range raw.Actions {
@@ -184,7 +215,9 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 
 // parseTracker builds the rule's tracker config. Rate and bandwidth
 // fix the TTL at build; replay derives it per event, so TTL stays zero.
-func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
+// A ladder rule carries no tracker.volume: its rungs stand in for it
+// and the TTL is derived from the top rung at build.
+func parseTracker(id string, raw *rawTracker, ladder bool) (*domain.TrackerConfig, error) {
 	var kind domain.TrackKind
 	switch raw.Track {
 	case "":
@@ -211,11 +244,20 @@ func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 
 	cfg := &domain.TrackerConfig{Kind: kind, Leak: leak, TargetPrefix: prefix}
 	if kind == domain.TrackReplay {
+		if ladder {
+			return nil, fmt.Errorf("rules: rule %q: escalations: replay ladders land later - replay keeps tracker.volume", id)
+		}
 		volume, method, err := parseReplayVolume(id, &raw.Volume)
 		if err != nil {
 			return nil, err
 		}
 		cfg.Volume, cfg.VolumeMethod = volume, method
+		return cfg, nil
+	}
+	if ladder {
+		if raw.Volume.Kind != 0 {
+			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
+		}
 		return cfg, nil
 	}
 	if raw.Volume.Kind != 0 && raw.Volume.Kind != yaml.ScalarNode {
@@ -274,6 +316,36 @@ func parseTrackerQuantity(id, field string, node *yaml.Node, kind domain.TrackKi
 		return 0, fmt.Errorf("rules: rule %q: %s: %w", id, field, err)
 	}
 	return v, nil
+}
+
+// parseEscalations builds the rule's ladder: at least two rungs with
+// strictly ascending thresholds in the tracker's quantity, each rung's
+// actions through the shared action parser. Strict ascent keeps the
+// rungs a value stands above a prefix of the ladder.
+func parseEscalations(id string, raw []rawEscalation, kind domain.TrackKind) ([]domain.Escalation, error) {
+	if len(raw) < 2 {
+		return nil, fmt.Errorf("rules: rule %q: escalations: at least two rungs required", id)
+	}
+	rungs := make([]domain.Escalation, len(raw))
+	for i := range raw {
+		at, err := parseTrackerQuantity(id, fmt.Sprintf("escalations[%d].at", i), &raw[i].At, kind)
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 && at <= rungs[i-1].At {
+			return nil, fmt.Errorf("rules: rule %q: escalations[%d].at: must be strictly ascending", id, i)
+		}
+		rung := domain.Escalation{At: at}
+		for j := range raw[i].Actions {
+			action, err := parseAction(id, &raw[i].Actions[j])
+			if err != nil {
+				return nil, err
+			}
+			rung.Actions = append(rung.Actions, action)
+		}
+		rungs[i] = rung
+	}
+	return rungs, nil
 }
 
 // parseReplayVolume parses replay's volume: a plain scalar (the

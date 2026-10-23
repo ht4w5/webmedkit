@@ -21,19 +21,21 @@ func validateChainGraph(chains []domain.Chain) error {
 	edges := make([][]int, len(chains))
 	for i := range chains {
 		for _, rule := range chains[i].Rules {
-			for _, action := range rule.Actions {
-				name, target := "jump", action.Jump
-				if action.Goto != "" {
-					name, target = "goto", action.Goto
+			for _, actions := range rule.ActionLists() {
+				for _, action := range actions {
+					name, target := "jump", action.Jump
+					if action.Goto != "" {
+						name, target = "goto", action.Goto
+					}
+					if target == "" {
+						continue
+					}
+					j, ok := index[target]
+					if !ok {
+						return fmt.Errorf("rules: rule %q: %s targets nonexistent chain %q", rule.ID, name, target)
+					}
+					edges[i] = append(edges[i], j)
 				}
-				if target == "" {
-					continue
-				}
-				j, ok := index[target]
-				if !ok {
-					return fmt.Errorf("rules: rule %q: %s targets nonexistent chain %q", rule.ID, name, target)
-				}
-				edges[i] = append(edges[i], j)
 			}
 		}
 	}
