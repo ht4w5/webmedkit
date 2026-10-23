@@ -129,19 +129,6 @@ func (s *Store) updateLocked(sh *shard, fullKey, ns, key string, ttl time.Durati
 	return e.rec, s.evictLocked(sh)
 }
 
-// Clear empties the record for (ns, key) (the Trigger reset) so later updates
-// start from zero; absent records are a no-op. Counts in no statistics.
-func (s *Store) Clear(_ context.Context, ns, key string) error {
-	fullKey := ns + "\x00" + key
-	sh := s.shardFor(fullKey)
-	sh.mu.Lock()
-	defer sh.mu.Unlock()
-	if el, ok := sh.m[fullKey]; ok {
-		sh.remove(el)
-	}
-	return nil
-}
-
 // SweepExpired removes every expired entry across all shards (no-TTL entries
 // never expire). TTL removals are not evictions: nothing is logged or counted.
 func (s *Store) SweepExpired() {

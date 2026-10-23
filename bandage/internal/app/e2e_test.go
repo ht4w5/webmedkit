@@ -894,14 +894,17 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
-	// Three parses on one path and one dropped line give every counter a
+	// Three parses on one path and one dropped line give most counters a
 	// distinct value (cache_gets == cache_sets is structural: every
-	// Update counts one of each). Distinct absolutes pin each counter to
-	// its key; agreement with /stats alone would let equal-valued
-	// counters swap places unnoticed.
+	// Update counts one of each; so is cache_misses == cache_size here,
+	// with nothing expiring or evicting - every miss inserts a live
+	// entry). Distinct absolutes pin each counter to its key; agreement
+	// with /stats alone would let equal-valued counters swap places
+	// unnoticed.
 	//
-	// The third event alone exceeds volume (3000+3000+12000 > 10000),
-	// so its Trigger clears the tracker entry and leaves cache_size at 1.
+	// The third event alone exceeds volume (3000+3000+12000 > 10000)
+	// and Triggers; nothing resets tracker state, so the filesize record
+	// and the tracker bucket both stay live (cache_size 2).
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
@@ -927,7 +930,7 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 		{"cache_sets", "tracker_cache", "sets", 6},
 		{"cache_misses", "tracker_cache", "misses", 2},
 		{"cache_evictions", "tracker_cache", "evictions", 0},
-		{"cache_size", "tracker_cache", "size", 1},
+		{"cache_size", "tracker_cache", "size", 2},
 	} {
 		var v int64
 		attrInto(t, recs[0], f.key, &v)
@@ -1086,8 +1089,8 @@ chains:
 		c.Cache.MaxEntries = 2
 	})
 
-	// 203.0.113.7 overflows on its third event (value 3 > 2); the fourth
-	// event re-arms the emptied bucket at value 1, the entry an insert can evict.
+	// 203.0.113.7 overflows on its third event (value 3 > 2); the write
+	// leaves the bucket in place, the entry the next insert evicts.
 	for i := 0; i < 3; i++ {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
 	}
@@ -1096,15 +1099,16 @@ chains:
 	if len(doc.Reports) != 1 || doc.Reports[0].Tracker.Value != 3 || doc.Reports[0].UpdatedAt != wallBase {
 		t.Fatalf("first trigger: %+v", doc.Reports)
 	}
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
-	d.waitProcessed(t, 4)
 
 	// The new target caps the cache and evicts 203.0.113.7's bucket, so
-	// that bucket's next event must not Match (no stale Match).
+	// that bucket's next event must not Match (no stale Match). The two
+	// events are serialized: the insert of 203.0.113.9's bucket must land
+	// first so the eviction is deterministic.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
+	d.waitProcessed(t, 4)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/api", 200, 0))
-	d.waitProcessed(t, 6)
+	d.waitProcessed(t, 5)
 	// The eviction is logged with its tracker namespace and Target.
 	if evictions := d.logs.withMessage("tracker cache eviction"); !slices.ContainsFunc(evictions, func(r capturedLog) bool {
 		return r.Attrs["namespace"] == "bursty-api" && r.Attrs["target"] == "203.0.113.7/32"
@@ -1114,7 +1118,7 @@ chains:
 	// The log action shows the fresh event did not Match (the report write
 	// is suppressed while the report is alive, so marks are the observable).
 	if got := marks(d); len(got) != 1 {
-		t.Errorf("log-action marks = %v, want 1 (only the first episode matched)", got)
+		t.Errorf("log-action marks = %v, want 1 (only the pre-eviction overflow matched)", got)
 	}
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 || doc.Reports[0].UpdatedAt != wallBase || doc.Reports[0].Tracker.Value != 3 {
@@ -1129,7 +1133,7 @@ chains:
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/api", 200, 0))
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/api", 200, 0))
-	d.waitProcessed(t, 8)
+	d.waitProcessed(t, 7)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
@@ -1143,7 +1147,7 @@ chains:
 			r.CreatedAt, r.UpdatedAt)
 	}
 	if got := marks(d); len(got) != 2 {
-		t.Errorf("log-action marks = %v, want 2 (one match per re-accumulated episode)", got)
+		t.Errorf("log-action marks = %v, want 2 (the pre-eviction overflow and the re-accumulated one)", got)
 	}
 }
 
@@ -1265,8 +1269,9 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 150 + 150 = 300 > 200 overflows on the second event; the third
-	// event re-accumulates a partial episode (150) while the report is alive.
+	// 150 + 150 = 300 > 200 overflows on the second event and writes;
+	// the third event keeps accumulating (450) while its write is
+	// suppressed - nothing resets the record.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
@@ -1283,8 +1288,8 @@ chains:
 		t.Fatalf("after delete: %+v, want none", doc.Reports)
 	}
 
-	// The partial episode survives the delete: the report comes back
-	// carrying the accumulated reading.
+	// The accumulation survives the delete: the report comes back
+	// carrying the kept reading.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 4)
@@ -1296,8 +1301,8 @@ chains:
 	if r.CreatedAt != "2025-10-17T18:10:00Z" {
 		t.Errorf("created_at = %q, want a fresh %q (deleted report is gone)", r.CreatedAt, "2025-10-17T18:10:00Z")
 	}
-	if r.Tracker.Value != 300 {
-		t.Errorf("tracker value = %v, want 300 (deletion touched no tracker state: 150 kept + 150 new)", r.Tracker.Value)
+	if r.Tracker.Value != 600 {
+		t.Errorf("tracker value = %v, want 600 (deletion touched no tracker state: 450 kept + 150 new)", r.Tracker.Value)
 	}
 	if r.Sample.Time != eventTime2At {
 		t.Errorf("sample time = %q, want %q", r.Sample.Time, eventTime2At)

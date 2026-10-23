@@ -110,9 +110,11 @@ chains:
 	}
 }
 
-// TestE2ESuppressedTriggersStillEmptyTheTracker: each Trigger empties the
-// tracker even while the write is suppressed.
-func TestE2ESuppressedTriggersStillEmptyTheTracker(t *testing.T) {
+// TestE2ESuppressedTriggersKeepTheTrackerRecord: a suppressed Trigger
+// leaves the tracker record intact and the report untouched; after the
+// report dies, the next matching event writes fresh at the accumulation's
+// current stance.
+func TestE2ESuppressedTriggersKeepTheTrackerRecord(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -126,7 +128,7 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// 150 + 150 = 300 > 200 overflows on every second event: event 2
-	// writes, event 4 is suppressed. Both Triggers empty the bucket.
+	// writes, events 3 and 4 are suppressed. No Trigger empties anything.
 	for range 4 {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	}
@@ -140,29 +142,25 @@ chains:
 		t.Fatalf("delete count = %d, want 1", n)
 	}
 
-	// The suppressed Trigger emptied the bucket: a fresh 150-byte event
-	// must stay quiet.
+	// The record kept accumulating across the writes and the delete: the
+	// next matching event writes fresh at the current stance (4x150 kept
+	// + 150 new), its Sample and tracker reading describing that event.
 	clock.Advance(10 * time.Minute) // 18:10
-	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 150))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big2", 200, 150))
 	d.waitProcessed(t, 5)
-	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports after one fresh event = %+v, want none (a fresh episode, not a running total)", doc.Reports)
-	}
-
-	// One full volume later the re-armed write lands with a fresh episode's
-	// reading: 150 kept + 150 new.
-	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 150))
-	d.waitProcessed(t, 6)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want the re-armed write", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Tracker.Value != 300 {
-		t.Errorf("tracker value = %v, want 300 (150 kept from the quiet event + 150 new)", r.Tracker.Value)
+	if r.Tracker.Value != 750 {
+		t.Errorf("tracker value = %v, want 750 (the accumulation as it stands: 600 kept + 150 new)", r.Tracker.Value)
 	}
 	if r.CreatedAt != "2025-10-17T18:10:00Z" || r.UpdatedAt != "2025-10-17T18:10:00Z" {
 		t.Errorf("created_at/updated_at = %q/%q, want a fresh 18:10 write", r.CreatedAt, r.UpdatedAt)
+	}
+	if r.Sample.Time != eventTime2At || r.Sample.Path != "/big2" {
+		t.Errorf("sample = %+v, want the writing event's", r.Sample)
 	}
 }
 

@@ -369,7 +369,6 @@ func (o *episodeOracle) event(ev domain.Event, wall time.Time) {
 			st.touched, st.lastTouch = true, wall
 			st.value++
 			if st.value > benchEpisodeVolume {
-				st.value = 0 // the Trigger empties the tracker
 				o.triggers++
 				cell := ledgerCell{rule: key.rule, target: key.target, life: o.life}
 				if !st.written {
@@ -463,11 +462,11 @@ func TestEvaluateBenchScenarios(t *testing.T) {
 				}
 				return
 			}
-			// The report action runs on every episode; the write lands per
-			// the contract.
+			// The report action runs on every overflow; the write lands
+			// once per report lifetime per the contract.
 			if run.sink.triggers != oracle.triggers {
-				t.Errorf("triggers = %d, want %d (one Trigger per %d-event episode)",
-					run.sink.triggers, oracle.triggers, benchEpisodeLen)
+				t.Errorf("triggers = %d, want %d (the report action runs on every overflow above volume)",
+					run.sink.triggers, oracle.triggers)
 			}
 			assertWrites(t, run.ledger, oracle.writes)
 		})

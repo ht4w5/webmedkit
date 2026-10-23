@@ -15,20 +15,15 @@ type matchAll struct{}
 
 func (matchAll) Match(*domain.Event) bool { return true }
 
-// stubCache is a TrackerCache test double recording updates and clears.
+// stubCache is a TrackerCache test double recording updates.
 type stubCache struct {
 	records map[string]domain.Record
 	updates []stubUpdate
-	clears  []stubClear
 }
 
 type stubUpdate struct {
 	ns, key string
 	ttl     time.Duration
-}
-
-type stubClear struct {
-	ns, key string
 }
 
 func (c *stubCache) Update(_ context.Context, ns, key string, ttl time.Duration, fn func(*domain.Record)) (domain.Record, error) {
@@ -41,13 +36,6 @@ func (c *stubCache) Update(_ context.Context, ns, key string, ttl time.Duration,
 	c.records[full] = r
 	c.updates = append(c.updates, stubUpdate{ns: ns, key: key, ttl: ttl})
 	return r, nil
-}
-
-// Clear empties the record for (ns, key) and records the call.
-func (c *stubCache) Clear(_ context.Context, ns, key string) error {
-	c.clears = append(c.clears, stubClear{ns: ns, key: key})
-	delete(c.records, ns+"\x00"+key)
-	return nil
 }
 
 // stubSink is a ReportSink double capturing reports; the next failures
@@ -340,43 +328,45 @@ func TestReplayTTLDerivedPerEvent(t *testing.T) {
 	}
 }
 
-// A Trigger empties the matched rule's tracker record for the match's key:
-// one Trigger per accumulation episode, not per event.
-func TestTriggerEmptiesTrackerRecord(t *testing.T) {
+// A Trigger whose write lands leaves the tracker record intact: the
+// value keeps accumulating across writes (report aliveness alone bounds
+// writes; nothing resets the record).
+func TestTriggerLeavesTrackerRecordIntact(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 2},
 		domain.Action{Report: &domain.ReportAction{Reason: "overflow", TTL: time.Hour}})
 
-	// 1 + 1 + 1 = 3 > 2 overflows on the third event: one Trigger.
+	// 1 + 1 + 1 = 3 > 2 overflows on the third event: one write, reading 3.
 	for i := 0; i < 3; i++ {
 		h.evaluate(t, event(int64(100+i), "/a", 100, 0))
 	}
 	if h.sink.attempts != 1 {
-		t.Fatalf("report writes = %d, want 1 (one Trigger per episode)", h.sink.attempts)
+		t.Fatalf("report writes = %d, want 1", h.sink.attempts)
 	}
 	if got := h.sink.upserts[0].Tracker.Value; got != 3 {
-		t.Errorf("trigger reading = %v, want 3 (the Trigger-time reading, pre-reset)", got)
-	}
-	if got := h.cch.clears; len(got) != 1 || got[0].ns != "rate-overflow" || got[0].key != "203.0.113.7/32" {
-		t.Errorf("tracker clears = %+v, want the match's Target key emptied once", got)
+		t.Errorf("trigger reading = %v, want 3 (the Trigger-time reading)", got)
 	}
 
-	// Re-armed: two more events accumulate 2 and the third Triggers again
-	// (a full volume must recur).
-	for i := 0; i < 2; i++ {
-		h.evaluate(t, event(int64(200+i), "/a", 100, 0))
-	}
-	if h.sink.attempts != 1 {
-		t.Fatalf("report writes = %d, want still 1 (a full volume must recur)", h.sink.attempts)
-	}
-	h.evaluate(t, event(300, "/a", 100, 0))
+	// The record kept accumulating: the next event reads 4 and Triggers
+	// again (this stub records every write; the live report would suppress
+	// it at the report service).
+	h.evaluate(t, event(200, "/a", 100, 0))
 	if h.sink.attempts != 2 {
-		t.Fatalf("report writes = %d, want 2 (second episode Triggered)", h.sink.attempts)
+		t.Fatalf("report writes = %d, want 2 (the record keeps accumulating across writes)", h.sink.attempts)
+	}
+	if got := h.sink.upserts[1].Tracker.Value; got != 4 {
+		t.Errorf("second trigger reading = %v, want 4 (the kept accumulation)", got)
+	}
+	for full, r := range h.cch.records {
+		if r.Value != 4 {
+			t.Errorf("record %q = %+v, want value 4 (a Trigger empties nothing)", full, r)
+		}
 	}
 }
 
-// A replay Trigger empties the (Target, path) record the match keyed on:
-// per-path accumulation re-arms while other paths keep their state.
-func TestTriggerEmptiesReplayTrackerPerPath(t *testing.T) {
+// A replay Trigger leaves the (Target, path) record it keyed on intact:
+// per-path accumulation continues across writes and other paths' records
+// are untouched.
+func TestTriggerLeavesReplayTrackerRecordPerPath(t *testing.T) {
 	h := newHarness(t, &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0, Volume: 2})
 
 	// /a and /b accumulate a full download each per event. /a reaches
@@ -387,9 +377,8 @@ func TestTriggerEmptiesReplayTrackerPerPath(t *testing.T) {
 	if h.sink.attempts != 1 {
 		t.Fatalf("report writes = %d, want 1 (/a overflows)", h.sink.attempts)
 	}
-	want := "203.0.113.7/32\x00/a"
-	if got := h.cch.clears; len(got) != 1 || got[0].ns != "iso-replay" || got[0].key != want {
-		t.Fatalf("tracker clears = %+v, want only (%q, %q) emptied", got, "iso-replay", want)
+	if got := h.sink.upserts[0].Tracker.Value; got != 3 {
+		t.Errorf("/a trigger reading = %v, want 3", got)
 	}
 
 	// /b kept its accumulation: its next download overflows (3 > 2).
@@ -397,15 +386,33 @@ func TestTriggerEmptiesReplayTrackerPerPath(t *testing.T) {
 	if h.sink.attempts != 2 {
 		t.Fatalf("report writes = %d, want 2 (/b kept its state)", h.sink.attempts)
 	}
-	// while /a re-armed and needs a full volume again.
+	// and /a kept its record across the write: its next download Triggers
+	// at 4.
 	h.evaluate(t, event(106, "/a", 100, 100))
-	if h.sink.attempts != 2 {
-		t.Fatalf("report writes = %d, want still 2 (/a re-arms from empty)", h.sink.attempts)
+	if h.sink.attempts != 3 {
+		t.Fatalf("report writes = %d, want 3 (/a kept its state across the write)", h.sink.attempts)
+	}
+	if got := h.sink.upserts[2].Tracker.Value; got != 4 {
+		t.Errorf("/a trigger reading = %v, want 4 (per-path accumulation continues)", got)
+	}
+
+	// The two paths' records hold 4 and 3 - only the match's key moved.
+	want := map[string]float64{
+		"iso-replay\x00203.0.113.7/32\x00/a": 4,
+		"iso-replay\x00203.0.113.7/32\x00/b": 3,
+	}
+	if len(h.cch.records) != len(want) {
+		t.Fatalf("records = %d, want %d (one per (Target, path))", len(h.cch.records), len(want))
+	}
+	for full, r := range h.cch.records {
+		if w, ok := want[full]; !ok || r.Value != w {
+			t.Errorf("record %q = %+v, want value %v", full, r, want[full])
+		}
 	}
 }
 
 // A failed report write leaves the tracker record intact and the next
-// matching event retries the report.
+// matching event retries the report at the kept accumulation.
 func TestFailedReportWriteLeavesTrackerRecordIntact(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 2},
 		domain.Action{Report: &domain.ReportAction{Reason: "overflow", TTL: time.Hour}})
@@ -417,31 +424,30 @@ func TestFailedReportWriteLeavesTrackerRecordIntact(t *testing.T) {
 	if h.sink.attempts != 1 || len(h.sink.upserts) != 0 {
 		t.Fatalf("attempts = %d, upserts = %d, want one failed write", h.sink.attempts, len(h.sink.upserts))
 	}
-	if got := h.cch.clears; len(got) != 0 {
-		t.Fatalf("tracker clears = %+v, want none (a failed write is not a Trigger outcome)", got)
+	for full, r := range h.cch.records {
+		if r.Value != 3 {
+			t.Fatalf("record %q = %+v, want value 3 (a failed write empties nothing)", full, r)
+		}
 	}
 
-	// The kept episode overflows again (4 > 2) and the retry lands.
+	// The kept record overflows again (4 > 2) and the retry lands with
+	// the accumulation as it stands.
 	h.evaluate(t, event(200, "/a", 100, 0))
 	if h.sink.attempts != 2 || len(h.sink.upserts) != 1 {
 		t.Fatalf("attempts = %d, upserts = %d, want the retry to land", h.sink.attempts, len(h.sink.upserts))
 	}
-	// The landed Trigger emptied the record: a lone event no longer overflows.
-	h.evaluate(t, event(300, "/a", 100, 0))
-	if h.sink.attempts != 2 {
-		t.Fatalf("attempts = %d, want still 2 (the landed Trigger emptied the record)", h.sink.attempts)
+	if got := h.sink.upserts[0].Tracker.Value; got != 4 {
+		t.Errorf("retry reading = %v, want 4 (the kept accumulation: 3 kept + 1 new)", got)
 	}
 }
 
-// A match whose actions contain no report action never empties the tracker.
+// A match whose actions contain no report action writes nothing; the
+// tracker keeps accumulating.
 func TestMatchWithoutReportActionKeepsTracker(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 100},
 		domain.Action{Log: &domain.LogAction{Level: domain.LevelDebug, Message: "SEEN:"}})
 	for i := 0; i < 5; i++ {
 		h.evaluate(t, event(int64(100+i), "/a", 100, 0))
-	}
-	if got := h.cch.clears; len(got) != 0 {
-		t.Errorf("tracker clears = %+v, want none (no report action ran)", got)
 	}
 	for full, r := range h.cch.records {
 		if r.Value != 5 {
@@ -453,9 +459,9 @@ func TestMatchWithoutReportActionKeepsTracker(t *testing.T) {
 	}
 }
 
-// Tracker-less rules have nothing to empty: every match Triggers on filter
-// alone and no record is ever cleared.
-func TestTrackerlessRuleClearsNothing(t *testing.T) {
+// Tracker-less rules have no tracker record at all: every match Triggers
+// on filter alone and the cache is never touched.
+func TestTrackerlessRuleTouchesNoTracker(t *testing.T) {
 	h := newRuleHarness(t, nil,
 		domain.Action{Report: &domain.ReportAction{Reason: "tripwire", TTL: time.Hour}})
 	for i := 0; i < 3; i++ {
@@ -464,8 +470,9 @@ func TestTrackerlessRuleClearsNothing(t *testing.T) {
 	if h.sink.attempts != 3 {
 		t.Errorf("report writes = %d, want 3 (tracker-less rules match on filter alone)", h.sink.attempts)
 	}
-	if got := h.cch.clears; len(got) != 0 {
-		t.Errorf("tracker clears = %+v, want none (nothing to clear)", got)
+	if len(h.cch.updates) != 0 || len(h.cch.records) != 0 {
+		t.Errorf("cache updates = %d, records = %d, want none (there is no tracker record)",
+			len(h.cch.updates), len(h.cch.records))
 	}
 }
 

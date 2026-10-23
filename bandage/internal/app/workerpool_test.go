@@ -106,23 +106,22 @@ func TestWorkerPoolConcurrentEventsOneTarget(t *testing.T) {
 		t.Fatalf("reports = %+v, want exactly one (one live report per (rule, Target))", doc.Reports)
 	}
 
-	// After Delete the next events accumulate on the emptied bucket:
-	// 5x100 + 600 = 1100 overflows on the last and reads the exact total.
+	// After Delete the next matching event writes at the accumulation's
+	// current stance: the probe's own 100 bytes on top of the storm's
+	// 24x2000 reads the exact total, so every concurrent event was counted
+	// once and nothing reset the record.
 	if _, n := d.del(t, url.Values{"rule": {"egress"}}); n != 1 {
 		t.Fatalf("delete count = %d, want 1", n)
 	}
-	for range 5 {
-		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/small", 200, 100))
-	}
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/small", 200, 600))
-	d.waitProcessed(t, events+6)
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/small", 200, 100))
+	d.waitProcessed(t, events+1)
 
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want exactly one", doc.Reports)
 	}
-	if v := doc.Reports[0].Tracker.Value; v != 1100 {
-		t.Errorf("tracker value = %v, want 1100 (atomic accumulation: every event counted once)", v)
+	if v := doc.Reports[0].Tracker.Value; v != 48100 {
+		t.Errorf("tracker value = %v, want 48100 (atomic accumulation: every event counted once)", v)
 	}
 }
 

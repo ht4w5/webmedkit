@@ -64,6 +64,19 @@ The `sample`:
 | `sent` | number | response payload bytes sent |
 | `size` | number | the estimated total size of `path` in bytes; `0` when unknown |
 
+### Lifecycle
+
+A report is written once per (rule, target) per report lifetime. While
+the report is alive, further Triggers write nothing: the record freezes
+at its write. The report dies at its `expires_at` or when
+`DELETE /reports` removes it; the next matching event then writes a
+fresh report whose `sample` and `tracker` reading come from that event
+— the tracker's record is never emptied by a Trigger
+([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)), so
+the reading describes the accumulation as it stands. `created_at` is
+fixed at the row's first insert and survives a fresh write over a
+still-stored row (expired but not yet swept).
+
 ### Timestamps
 
 Every timestamp in the document is an RFC 3339 UTC string (a `Z`

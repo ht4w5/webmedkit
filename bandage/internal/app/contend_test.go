@@ -17,7 +17,7 @@ import (
 var errWriteFailed = errors.New("stub report write failure")
 
 // contendRules overflows on any single 2000-byte event and logs a MARK per
-// Trigger: report count is the detection, mark count is the Trigger cadence.
+// Match: report count is the detection, mark count is the match cadence.
 const contendRules = `
 version: 0
 chains:
@@ -83,7 +83,7 @@ func TestE2EFailedConcurrentWriteDoesNotLoseTheDetection(t *testing.T) {
 	}
 
 	// The live report suppresses the next write; the suppressed Trigger
-	// still empties the tracker.
+	// leaves the tracker record intact.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 2000))
 	d.waitProcessed(t, 3)
 	if n := len(store.entered); n != 1 {
@@ -93,12 +93,16 @@ func TestE2EFailedConcurrentWriteDoesNotLoseTheDetection(t *testing.T) {
 		t.Fatalf("reports = %+v, want still exactly one", doc.Reports)
 	}
 
-	// The probe adds exactly the volume: it must not Trigger over the
-	// emptied bucket.
+	// The probe adds exactly the volume: it could never overflow alone,
+	// but the record is intact (6000 kept + 1000), so it matches and its
+	// write is suppressed at the live report all the same.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 1000))
 	d.waitProcessed(t, 4)
-	if got := marks(d); len(got) != 2 {
-		t.Errorf("log-action marks = %v, want 2 (the landed and the suppressed Trigger; the probe must not Trigger over a cleared bucket)", got)
+	if got := marks(d); len(got) != 3 {
+		t.Errorf("log-action marks = %v, want 3 (the probe matched over the intact record; its write stayed suppressed)", got)
+	}
+	if n := len(store.entered); n != 1 {
+		t.Errorf("%d writes after the probe, want 1 (the probe's write was suppressed)", n)
 	}
 }
