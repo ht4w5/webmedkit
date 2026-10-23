@@ -11,12 +11,10 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
-// TrackerCache is the tracker-state port: records keyed by (ns, key) with sliding TTL and atomic per-key updates.
+// TrackerCache is the tracker-state port: records keyed by (ns, key) with sliding TTL and atomic per-key updates. Nothing empties a record: a Trigger suppresses or writes, never resets (ADR 0013).
 type TrackerCache interface {
 	// Update applies fn to the record for (ns, key) under the store's per-key lock; fn must not do I/O or use ctx. ttl 0 means no expiry.
 	Update(ctx context.Context, ns, key string, ttl time.Duration, fn func(*domain.Record)) (domain.Record, error)
-	// Clear empties the record for (ns, key) - the Trigger reset: the bucket re-arms (ADR 0008).
-	Clear(ctx context.Context, ns, key string) error
 }
 
 // ReportSink is the report write path: a Trigger upserts one report per (rule, target).
@@ -222,7 +220,7 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 	return reading, rec.Overflow(volume), nil
 }
 
-// matchKey derives the tracker cache key: the Target, or for replay the Target and path joined with KeySep; the key a Trigger empties.
+// matchKey derives the tracker cache key: the Target, or for replay the Target and path joined with KeySep.
 func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 	target := cfg.TargetString(event.RemoteAddr)
 	if cfg.Kind == domain.TrackReplay {
@@ -231,7 +229,7 @@ func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 	return domain.TrackerKey(target)
 }
 
-// trigger runs the rule's report action and, on success, empties the matched rule's tracker record; a failed write is not a Trigger outcome (ADR 0008).
+// trigger runs the rule's report action: a Trigger suppresses or writes, and never empties the matched rule's tracker record (ADR 0013) - report aliveness alone bounds the writes. A failed write is not a Trigger outcome (ADR 0008): the record stays intact and the next matching event retries.
 func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.ReportAction) error {
 	now := s.now()
 	penalty := action.Penalty // the stance of the rules loaded at write time
@@ -254,15 +252,5 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		},
 		Penalty: &penalty,
 	}
-	if err := s.reports.Trigger(ctx, rec); err != nil {
-		return err
-	}
-	if m.rule.Tracker == nil {
-		// Tracker-less rules have nothing to empty.
-		return nil
-	}
-	if err := s.cache.Clear(ctx, m.rule.ID, matchKey(m.rule.Tracker, m.event)); err != nil {
-		return fmt.Errorf("evaluate rule %q: %w", m.rule.ID, err)
-	}
-	return nil
+	return s.reports.Trigger(ctx, rec)
 }

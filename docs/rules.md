@@ -8,7 +8,9 @@ stop). The filter expression language and the full DSL are specified
 in [PLAN.md](../PLAN.md) §1.
 
 Two glossary entries govern what happens at runtime
-([GLOSSARY.md](../GLOSSARY.md), [ADR 0008](adr/0008-trigger-semantics-one-live-report.md)):
+([GLOSSARY.md](../GLOSSARY.md),
+[ADR 0008](adr/0008-trigger-semantics-one-live-report.md) as amended by
+[ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)):
 
 - **Match** — the rule's filter accepts the Event and its tracker (if
   any) overflows; the rule's actions then run. A rule without a tracker
@@ -16,23 +18,24 @@ Two glossary entries govern what happens at runtime
 - **Trigger** — a Match that ran the rule's report action. The report
   action is the only write path to reports.
 
-Trigger semantics hold for every rule (ADR 0008):
+Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 
 - One **Report** per (rule, Target) per report lifetime. While the
   report for (rule, Target) is alive, further Triggers write nothing:
   the report freezes — its Sample and update time stay at the first
   write. The rule itself is untouched: it keeps matching and its other
   actions keep running per event.
-- Each Trigger empties the rule's tracker for the Target (per
-  (Target, path) for replay trackers), so abuse must accumulate a full
-  volume again before the next write. Tracker-less rules have nothing
-  to empty.
+- A Trigger never empties the rule's tracker for the Target (or the
+  (Target, path) records of a replay tracker). The record keeps
+  accumulating across writes — landed or suppressed — so a Tracker used
+  as a threshold gate for downstream rules never flickers shut on a
+  write. Only the tracker cache's TTL and eviction restart a record.
 - A failed report write is not a Trigger outcome: the tracker stays
   intact and the next matching event retries the report.
 - Deleting a report (`DELETE /reports`) or letting its `ttl` expire
-  re-arms writing — immediately on the next matching event for
-  tracker-less rules, after a fresh accumulation episode for tracker
-  rules.
+  re-arms writing: the next matching event writes a fresh report whose
+  Sample and tracker reading come from that event and the accumulation
+  as it stands.
 
 Validate config and rules before deploying: `bandage -t -c bandage.yml
 -r rules.yml` prints the validated plan and exits without ingesting.
@@ -156,7 +159,7 @@ chains:
 How it behaves:
 
 - Every matching event is a Match and therefore a Trigger — there is no
-  tracker to overflow and none to empty.
+  tracker to overflow.
 - Its `penalty: drop` recommends discarding the offending source's
   traffic — the stance a flag this serious warrants. `drop` carries no
   `rate` (see [penalty and rate](#penalty-and-rate) above).
@@ -185,8 +188,8 @@ How it behaves:
   case-sensitively without normalization; `and`, `or` and `not` are
   reserved and must be quoted when used as values.
 
-Rules with a tracker work the same way with two differences, both in
-the Trigger semantics: a Match additionally requires the tracker to
-overflow, and each Trigger empties the tracker for the Target, so a
-deleted or expired report is rewritten only after a fresh accumulation
-episode.
+Rules with a tracker work the same way with one difference in the
+Trigger semantics: a Match additionally requires the tracker to
+overflow. Nothing empties the tracker on a Trigger, so a deleted or
+expired report is rewritten on the next matching event, its Sample and
+tracker reading reflecting the accumulation as it stands.
