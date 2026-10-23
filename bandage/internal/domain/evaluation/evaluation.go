@@ -1,5 +1,5 @@
 // Package evaluation runs the rule model over events: prefilter, tracker
-// update, match (filter and overflow) and action dispatch.
+// update, match (filter and overflow) and rung dispatch.
 package evaluation
 
 import (
@@ -65,7 +65,8 @@ func (s *Service) Evaluate(ctx context.Context, event *domain.Event) error {
 	return nil
 }
 
-// matchContext is one rule match in progress: rule, chain, trigger-time tracker reading and event.
+// matchContext is one fired rung in progress: rule, chain, event and the
+// trigger-time tracker reading (the rung's threshold as its volume).
 type matchContext struct {
 	chain   *domain.Chain
 	rule    *domain.Rule
@@ -93,25 +94,47 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 		if !matched {
 			continue
 		}
-		if err := s.runActions(ctx, matchContext{chain: chain, rule: rule, reading: reading, event: event}); err != nil {
+		// A fired match resolves to the rungs it fired before any action
+		// runs: one implicit rung for a single-volume rule. Dispatch,
+		// terminality and the reading all follow the rungs.
+		rungs := rule.Rungs(reading.Volume)
+		if err := s.runRungs(ctx, matchContext{chain: chain, rule: rule, reading: reading, event: event}, rungs); err != nil {
 			return err
 		}
-		if rule.Terminal() {
+		if terminal(rungs) {
 			break
 		}
 	}
 	return nil
 }
 
-// runActions runs a matching rule's full action list in order; terminality applies only after the list.
-func (s *Service) runActions(ctx context.Context, m matchContext) error {
-	dispatch := actionDispatch{svc: s, ctx: ctx, m: m}
-	for _, action := range m.rule.Actions {
-		if err := action.Accept(&dispatch); err != nil {
-			return err
+// runRungs runs every fired rung's full action list in order, lowest rung
+// first; terminality applies only after the lists. Each rung's actions see
+// its trigger-time reading: the reading captured before any action ran,
+// carrying the rung's threshold as its volume.
+func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.Escalation) error {
+	for _, rung := range rungs {
+		m.reading.Volume = rung.At
+		dispatch := actionDispatch{svc: s, ctx: ctx, m: m}
+		for _, action := range rung.Actions {
+			if err := action.Accept(&dispatch); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// terminal reports whether a fired rung ends chain traversal after the
+// rule's rungs have run: a rung whose action list carries report, goto or
+// stop (the rung's Terminal).
+func terminal(rungs []domain.Escalation) bool {
+	for _, rung := range rungs {
+		if rung.Terminal() {
+			return true
+		}
+	}
+	return false
 }
 
 // actionDispatch is the evaluation side of Action.Accept: it executes one action variant for a match.
