@@ -131,6 +131,29 @@ type Matcher interface {
 	Match(event *Event) bool
 }
 
+// Escalation is a rung on one tracker's ladder (GLOSSARY): a volume
+// threshold in the tracker's quantity paired with its own ordered
+// action list. A rule without a ladder is exactly one implicit rung
+// carrying its volume and its action list.
+type Escalation struct {
+	// At is the rung's volume threshold in the tracker's quantity.
+	At float64
+	// Actions is the rung's ordered action list.
+	Actions []Action
+}
+
+// Terminal reports whether the rung's action list ends chain traversal
+// after it has run (report, goto or stop actions) - a static property of
+// the action list (ADR 0013).
+func (e Escalation) Terminal() bool {
+	for _, a := range e.Actions {
+		if a.Report != nil || a.Goto != "" || a.Stop {
+			return true
+		}
+	}
+	return false
+}
+
 // Rule is a named condition-action pairing: a filter, at most one tracker
 // and ordered actions. It matches when the filter accepts and the tracker (if any) overflows; the ID namespaces tracker state.
 type Rule struct {
@@ -143,15 +166,12 @@ type Rule struct {
 	Actions      []Action
 }
 
-// Terminal reports whether a match of this rule ends chain traversal
-// after its action list has run (report, goto or stop actions).
-func (r Rule) Terminal() bool {
-	for _, a := range r.Actions {
-		if a.Report != nil || a.Goto != "" || a.Stop {
-			return true
-		}
-	}
-	return false
+// Rungs resolves a fired match to the rungs it fired: a rule without a
+// ladder is exactly one implicit rung carrying its volume and its
+// action list. volume is the trigger-time reading's volume, so a fired
+// rung's threshold is always the reading's volume.
+func (r Rule) Rungs(volume float64) []Escalation {
+	return []Escalation{{At: volume, Actions: r.Actions}}
 }
 
 // Chain is an ordered group of rules traversed for each event.
