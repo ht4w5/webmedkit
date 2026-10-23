@@ -14,18 +14,24 @@ Two glossary entries govern what happens at runtime
 [ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)):
 
 - **Match** — the rule's filter accepts the Event and its tracker (if
-  any) overflows; the rule's actions then run. A rule without a tracker
-  matches on the filter alone.
+  any) overflows; the rule's actions then run — or, on a ladder, the
+  actions of every rung the value stands above, lowest first. A rule
+  without a tracker matches on the filter alone.
 - **Trigger** — a Match that ran the rule's report action. The report
   action is the only write path to reports.
 
 Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 
 - One **Report** per (rule, Target) per report lifetime. While the
-  report for (rule, Target) is alive, further Triggers write nothing:
-  the report freezes — its Sample and update time stay at the first
-  write. The rule itself is untouched: it keeps matching and its other
-  actions keep running per event.
+  report for (rule, Target) is alive, a Trigger at or below the volume
+  recorded in its `tracker` reading — the threshold of the rung that
+  last wrote it — writes nothing: no downgrade and no rewrite. A
+  Trigger from a strictly higher rung overrides the report **in place**:
+  reason, penalty, rate, Sample, tracker reading, update time and
+  expiry all move to the overriding rung's values, and its `ttl` runs
+  from that write. Only `created_at` stays frozen at first flagged. The
+  rule itself is untouched: it keeps matching and its other actions
+  keep running per event.
 - A Trigger never empties the rule's tracker for the Target (or the
   (Target, path) records of a replay tracker). The record keeps
   accumulating across writes — landed or suppressed — so a Tracker used
@@ -34,9 +40,11 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 - A failed report write is not a Trigger outcome: the tracker stays
   intact and the next matching event retries the report.
 - Deleting a report (`DELETE /reports`) or letting its `ttl` expire
-  re-arms writing: the next matching event writes a fresh report whose
-  Sample and tracker reading come from that event and the accumulation
-  as it stands.
+  re-arms writing: the next matching event writes a fresh report at the
+  accumulation's current stance — a dead report's stance is not
+  remembered, and one event's writes climb the crossed rungs, each
+  overriding the last. Its Sample and tracker reading come from that
+  event and the accumulation as it stands.
 
 Validate config and rules before deploying: `bandage -t -c bandage.yml
 -r rules.yml` prints the validated plan and exits without ingesting.
@@ -144,7 +152,9 @@ A rule trades its action list and its `tracker.volume` for an
 `escalations` list of two or more rungs, each an `at` threshold in the
 tracker's quantity and its own ordered action list. One tracker
 accumulates the target's traffic and the response climbs as the value
-does:
+does. The shipped rules config carries the worked ladder below
+(`iso-egress-ladder` in [`configs/rules.yml`](../configs/rules.yml)): a
+handoff rung, a throttle recommendation, a ban:
 
 ```yaml
       - id: iso-egress-ladder
@@ -166,6 +176,12 @@ does:
                   ttl: 7d
                   penalty: drop
 ```
+
+Each rung's `at` is a quantity in the tracker's kind and nothing else:
+plain request counts for `rate`, human byte sizes (`50MB`, `5GB`) for
+`bandwidth`, download equivalents for `replay` — the same quantity
+language as `volume`, so `50MB` on a rate rule is a load error and not
+a runtime surprise.
 
 How it behaves:
 
@@ -189,11 +205,16 @@ How it behaves:
 - The idiomatic handoff rung is **`jump`, not `goto`**: a `goto` rung
   ends the chain on every event above its threshold, starving the rules
   after the ladder, while `jump` keeps them running beside the handoff.
-- A report action on a rung writes exactly like a single-volume rule's
-  report action (the Trigger semantics above): one Report per
-  (rule, Target), silent while that report is alive. Rung reasons may be
-  distinct or shared; each report action carries its own `ttl` and
-  `penalty`.
+- A report rung writes exactly like a single-volume rule's report
+  action (the Trigger semantics above): one Report per (rule, Target)
+  whose stance escalates **in place**. A Trigger from a strictly higher
+  rung overrides the live Report — reason, penalty, rate, Sample, the
+  tracker reading, update time and expiry move to the overriding rung's
+  values — while a rung at or below its recorded threshold is silent;
+  only `created_at` stays frozen at first flagged, so the Sample always
+  backs the report's current stance. Rung reasons may be distinct or
+  shared; each report action carries its own `ttl` (the ban's lifetime
+  runs from the ban rung) and `penalty`.
 - `log` actions on any rung log the same rule, Target, Event and
   tracker reading detail as today; the reading's `volume` is the firing
   rung's threshold.
@@ -212,11 +233,12 @@ not parse in the tracker kind's quantity — bytes for bandwidth
 (`50MB`), plain counts for rate, download equivalents for replay
 (already normalized by Filesize: `2` means two full downloads of that
 path whether it is a 1MB or a 10GB file). Each rung's actions are
-validated by the same action parser as rule actions.
+validated by the same action parser as rule actions, and rung
+`goto`/`jump` targets join the same acyclic chain-graph validation.
 
-`bandage -t` prints every rung with its threshold and its actions; the
-tracker line carries no volume (the rungs carry every threshold) and
-its `ttl` from the top rung:
+The shipped ladder's `bandage -t` output shows every rung with its
+threshold and its actions; the tracker line carries no volume (the
+rungs carry every threshold) and its `ttl` from the top rung:
 
 ```
   rule iso-egress-ladder
@@ -281,7 +303,8 @@ How it behaves:
   reserved and must be quoted when used as values.
 
 Rules with a tracker work the same way with one difference in the
-Trigger semantics: a Match additionally requires the tracker to
-overflow. Nothing empties the tracker on a Trigger, so a deleted or
-expired report is rewritten on the next matching event, its Sample and
-tracker reading reflecting the accumulation as it stands.
+Match semantics: a Match additionally requires the tracker to overflow
+(on a ladder, stand above a rung — then the fired rungs' actions run,
+lowest first). Nothing empties the tracker on a Trigger, so a deleted
+or expired report is rewritten on the next matching event, its Sample
+and tracker reading reflecting the accumulation as it stands.

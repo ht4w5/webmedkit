@@ -2,8 +2,10 @@
 #
 # A rule matches when its filter accepts the event and its tracker
 # overflows; its report action then writes a report about the offending
-# target. Filter expressions beyond "any", replay trackers and the
-# goto/jump/stop actions arrive with later tickets.
+# target. An escalation ladder (iso-egress-ladder below) climbs the
+# response as one accumulation grows: a handoff rung, a throttle
+# recommendation, a ban. Validate before deploying: bandage -t -c
+# bandage.yml -r rules.yml.
 version: 0
 
 chains:
@@ -50,3 +52,44 @@ chains:
               ttl: 12h
               penalty: limit-req-rate
               rate: 200
+
+  # The worked escalation ladder: one bandwidth accumulation, the
+  # response climbing from a handoff rung (jump to per-path inspection)
+  # to a throttle recommendation to a ban recommendation.
+  - name: iso-egress
+    rules:
+      - id: iso-egress-ladder
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [{jump: inspect}]
+          - at: 5GB
+            actions:
+              - report:
+                  reason: iso-egress-throttle
+                  ttl: 24h
+                  penalty: limit-bandwidth
+                  rate: 1MB
+          - at: 40GB
+            actions:
+              - report:
+                  reason: iso-egress-ban
+                  ttl: 7d
+                  penalty: drop
+
+  # The handoff target: per-path replay inspection of suspect targets.
+  - name: inspect
+    rules:
+      - id: iso-replay-inspect
+        filter: 'path suffix ".iso"'
+        tracker:
+          track: replay
+          leak: 0.1
+          volume: 3
+          target_prefix: {ipv4: 24, ipv6: 64}
+        actions:
+          - report:
+              reason: iso-replay-overflow
+              ttl: 24h
+              penalty: limit-bandwidth
+              rate: 1MB
