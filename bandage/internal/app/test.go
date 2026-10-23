@@ -43,50 +43,73 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 				if rule.Tracker.Kind == domain.TrackReplay {
 					ttl = "per-event"
 				}
-				fmt.Fprintf(&b, "    tracker: %s leak=%s volume=%s ttl=%s\n",
-					rule.Tracker.Kind, fmtFloat(rule.Tracker.Leak), rule.Tracker.VolumeDesc(), ttl)
+				if len(rule.Escalations) > 0 {
+					// The ladder's rungs carry every threshold.
+					fmt.Fprintf(&b, "    tracker: %s leak=%s ttl=%s\n",
+						rule.Tracker.Kind, fmtFloat(rule.Tracker.Leak), ttl)
+				} else {
+					fmt.Fprintf(&b, "    tracker: %s leak=%s volume=%s ttl=%s\n",
+						rule.Tracker.Kind, fmtFloat(rule.Tracker.Leak), rule.Tracker.VolumeDesc(), ttl)
+				}
 			}
 			for _, action := range rule.Actions {
-				// The describer cannot fail; Accept is shared with evaluation.
-				_ = action.Accept(actionDescriber{b: &b})
+				fmt.Fprintf(&b, "    action %s\n", actionText(action))
+			}
+			for _, rung := range rule.Escalations {
+				fmt.Fprintf(&b, "    rung at=%s", fmtFloat(rung.At))
+				if len(rung.Actions) > 0 {
+					parts := make([]string, 0, len(rung.Actions))
+					for _, action := range rung.Actions {
+						parts = append(parts, actionText(action))
+					}
+					fmt.Fprintf(&b, " %s", strings.Join(parts, ", "))
+				}
+				fmt.Fprintln(&b)
 			}
 		}
 	}
 	return b.String()
 }
 
+// actionText renders one action's plan text (no indentation or
+// newline). The describer cannot fail; Accept is shared with evaluation.
+func actionText(a domain.Action) string {
+	var ab strings.Builder
+	_ = a.Accept(actionDescriber{b: &ab})
+	return ab.String()
+}
+
 // actionDescriber is the --test side of Action.Accept, appending one
-// action line to the plan.
+// action's text to the plan.
 type actionDescriber struct {
 	b *strings.Builder
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "    action report reason=%s ttl=%s penalty=%s", a.Reason, a.TTL, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", a.Reason, a.TTL, a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}
-	fmt.Fprintln(d.b)
 	return nil
 }
 
 func (d actionDescriber) VisitLog(a *domain.LogAction) error {
-	fmt.Fprintf(d.b, "    action log level=%s message=%q\n", a.Level, a.Message)
+	fmt.Fprintf(d.b, "log level=%s message=%q", a.Level, a.Message)
 	return nil
 }
 
 func (d actionDescriber) VisitGoto(target string) error {
-	fmt.Fprintf(d.b, "    action goto target=%s\n", target)
+	fmt.Fprintf(d.b, "goto target=%s", target)
 	return nil
 }
 
 func (d actionDescriber) VisitJump(target string) error {
-	fmt.Fprintf(d.b, "    action jump target=%s\n", target)
+	fmt.Fprintf(d.b, "jump target=%s", target)
 	return nil
 }
 
 func (d actionDescriber) VisitStop() error {
-	fmt.Fprintf(d.b, "    action stop\n")
+	fmt.Fprint(d.b, "stop")
 	return nil
 }
 

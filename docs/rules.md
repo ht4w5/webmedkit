@@ -4,7 +4,8 @@ Rules live in the rules file (`configs/rules.yml` is a complete
 example): `version: 0`, an ordered list of chains, each chain an
 ordered list of rules. A **Rule** is an id, a filter, at most one
 tracker, and an ordered list of actions (report, log, goto, jump,
-stop). The filter expression language and the full DSL are specified
+stop) — or an [escalation ladder](#escalation-ladders) of action lists
+instead of one. The filter expression language and the full DSL are specified
 in [PLAN.md](../PLAN.md) §1.
 
 Two glossary entries govern what happens at runtime
@@ -131,6 +132,92 @@ per second:
 These pairings are idiomatic, not enforced: `limit-pkt-rate` (packets
 per second) and `reject` round out the vocabulary for rules whose
 traffic calls for them.
+
+## Escalation ladders
+
+A rule trades its action list and its `tracker.volume` for an
+**Escalation** ladder ([GLOSSARY.md](../GLOSSARY.md),
+[ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)): an
+`escalations` list of two or more rungs, each an `at` threshold in the
+tracker's quantity and its own ordered action list. One tracker
+accumulates the target's traffic and the response climbs as the value
+does:
+
+```yaml
+      - id: iso-egress-ladder
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [{jump: inspect}]
+          - at: 5GB
+            actions:
+              - report:
+                  reason: iso-egress-throttle
+                  ttl: 24h
+                  penalty: limit-bandwidth
+                  rate: 1MB
+          - at: 40GB
+            actions:
+              - report:
+                  reason: iso-egress-ban
+                  ttl: 7d
+                  penalty: drop
+```
+
+How it behaves:
+
+- A ladder rule matches when the filter accepts and the accumulated
+  value stands above a rung. The fired rungs are decided **once** from
+  the post-accumulation value, before any action runs: every rung the
+  value stands above fires, lowest first. Thresholds ascend strictly at
+  load, so the fired rungs are always a prefix of the ladder — a
+  transfer that flew past rungs cannot skip the lower responses, and
+  actions within the event can never cancel a rung that already fired.
+- Rungs are level-triggered: they fire on every matching event while
+  the value stays above them, and stop as `leak` decays it below. A
+  handoff rung therefore feeds its downstream chain continuously, not
+  in flickers.
+- Terminality is declared per rung's action list, and applies only to
+  rungs that fired: the chain ends after the rule only when a fired rung
+  carried `report`, `goto` or `stop`. A fired `jump` runs its target
+  chain and resumes; a fired `goto` runs its target chain and ends this
+  chain after the remaining fired rungs have run. An unfired rung above
+  the value ends nothing.
+- The idiomatic handoff rung is **`jump`, not `goto`**: a `goto` rung
+  ends the chain on every event above its threshold, starving the rules
+  after the ladder, while `jump` keeps them running beside the handoff.
+- A report action on a rung writes exactly like a single-volume rule's
+  report action (the Trigger semantics above): one Report per
+  (rule, Target), silent while that report is alive. Rung reasons may be
+  distinct or shared; each report action carries its own `ttl` and
+  `penalty`.
+- `log` actions on any rung log the same rule, Target, Event and
+  tracker reading detail as today; the reading's `volume` is the firing
+  rung's threshold.
+- The tracker cache-entry TTL derives from the ladder's top rung, so
+  tracker state outlives the whole climb (the zero-leak default and the
+  one-second minimum are unchanged).
+
+Load refuses, each error naming the rule: a ladder beside `actions` or
+beside `tracker.volume`; a ladder without a tracker; fewer than two
+rungs; `at` thresholds that are not strictly ascending; thresholds that
+do not parse in the tracker kind's quantity — bytes for bandwidth
+(`50MB`), plain counts for rate; and a ladder on a replay tracker
+(replay ladders land later; replay keeps `tracker.volume`). Each rung's
+actions are validated by the same action parser as rule actions.
+
+`bandage -t` prints every rung with its threshold and its actions; the
+tracker line carries no volume (the rungs carry every threshold) and
+its `ttl` from the top rung:
+
+```
+  rule iso-egress-ladder
+    filter: any
+    tracker: bandwidth leak=1000000 ttl=11h6m40s
+    rung at=50000000 jump target=inspect
+    rung at=5000000000 report reason=iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000
+    rung at=40000000000 report reason=iso-egress-ban ttl=168h0m0s penalty=drop
+```
 
 ## Pattern: the tracker-less tripwire
 

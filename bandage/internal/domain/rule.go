@@ -164,14 +164,51 @@ type Rule struct {
 	Filter       Matcher
 	Tracker      *TrackerConfig
 	Actions      []Action
+	// Escalations is the rule's ladder: rungs with strictly ascending
+	// thresholds in the tracker's quantity, each with its own action
+	// list (GLOSSARY). A rule carries an action list or a ladder, never
+	// both; nil is the single-volume form.
+	Escalations []Escalation
 }
 
-// Rungs resolves a fired match to the rungs it fired: a rule without a
-// ladder is exactly one implicit rung carrying its volume and its
-// action list. volume is the trigger-time reading's volume, so a fired
-// rung's threshold is always the reading's volume.
-func (r Rule) Rungs(volume float64) []Escalation {
-	return []Escalation{{At: volume, Actions: r.Actions}}
+// Rungs resolves one post-accumulation reading to the rungs a match
+// fired, decided once before any action runs: every rung whose threshold
+// the reading's value stands above, lowest first. The loader's strictly
+// ascending thresholds make the fired rungs a prefix of the ladder.
+// A rule without a ladder is one implicit rung carrying the reading's
+// volume and the rule's action list, fired when the value stands above
+// the volume; a tracker-less rule always fires its implicit rung (it
+// matches on filter alone).
+func (r Rule) Rungs(reading TrackerReading) []Escalation {
+	if r.Tracker == nil {
+		return []Escalation{{Actions: r.Actions}}
+	}
+	if len(r.Escalations) == 0 {
+		if reading.Value > reading.Volume {
+			return []Escalation{{At: reading.Volume, Actions: r.Actions}}
+		}
+		return nil
+	}
+	var fired []Escalation
+	for _, e := range r.Escalations {
+		if e.At < reading.Value {
+			fired = append(fired, e)
+		}
+	}
+	return fired
+}
+
+// ActionLists returns every ordered action list the rule can run: the
+// rule's action list for the single-volume form, else each rung's.
+func (r Rule) ActionLists() [][]Action {
+	if len(r.Escalations) == 0 {
+		return [][]Action{r.Actions}
+	}
+	lists := make([][]Action, 0, len(r.Escalations))
+	for _, e := range r.Escalations {
+		lists = append(lists, e.Actions)
+	}
+	return lists
 }
 
 // Chain is an ordered group of rules traversed for each event.
