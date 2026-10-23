@@ -764,7 +764,74 @@ chains:
 			wantErr: `rule "r": escalations[0].at: must be a quantity`,
 		},
 		{
-			name: "ladder on replay tracker rejected until replay ladders land",
+			name: "replay ladder with plain-number thresholds accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: replay, leak: 1}
+        escalations:
+          - at: 2
+            actions: [stop]
+          - at: 5
+            actions: [stop]
+`,
+		},
+		{
+			name: "byte threshold on replay ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: replay, leak: 1}
+        escalations:
+          - at: 50MB
+            actions: [stop]
+          - at: 100
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations[0].at: invalid quantity`,
+		},
+		{
+			name: "volume method beside a replay ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: replay, leak: 1, volume: {method: constant, value: 5}}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)`,
+		},
+		{
+			name: "volume method beside a rate ladder rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: {method: constant, value: 5}}
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)`,
+		},
+		{
+			name: "ladder on a replay single-volume rule rejected",
 			yaml: `
 version: 0
 chains:
@@ -778,7 +845,7 @@ chains:
           - at: 10
             actions: [stop]
 `,
-			wantErr: `rule "r": escalations: replay ladders land later`,
+			wantErr: `rule "r": escalations: cannot be declared beside tracker.volume`,
 		},
 		{
 			name: "rung actions validated by the shared action parser",

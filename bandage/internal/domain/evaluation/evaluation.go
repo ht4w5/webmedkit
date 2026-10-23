@@ -215,8 +215,14 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		size := float64(event.SizeBytes)
 		increment = math.Min(float64(event.SentBytes)/size, 1)
 		// Volume is the volume method's output for this event's estimate;
-		// the cache-entry TTL is re-derived from it per event.
+		// the cache-entry TTL is re-derived from it per event. A ladder's
+		// scalar rungs stand in for the volume - download equivalents,
+		// already normalized by Filesize - so the TTL re-derives from the
+		// top rung and state outlives the whole climb.
 		volume = cfg.VolumeFor(size)
+		if n := len(rule.Escalations); n > 0 {
+			volume = rule.Escalations[n-1].At
+		}
 		ttl = domain.TTL(cfg.Leak, volume)
 	}
 	rec, err := s.cache.Update(ctx, rule.ID, key, ttl, func(r *domain.Record) {
