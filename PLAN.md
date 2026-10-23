@@ -122,15 +122,25 @@ chains:
   - `goto` — run the target chain, then end this chain.
   - `jump` — run the target chain, then resume this chain.
   - `stop` — end traversal of this chain.
-- **Terminality is per-rule**: if any of `report` / `goto` / `stop` is
-  present, chain traversal ends after this rule (all its actions still run);
-  other chains are still evaluated. The `goto`/`jump` graph must be
-  **acyclic**, validated at rule build time; shared target chains are
-  allowed (a DAG, not a forest).
+- `escalations` — alternative to `actions` and `tracker.volume`: an
+  **escalation ladder** (GLOSSARY, ADR 0013) of two or more rungs, each
+  an `at` threshold in the tracker's quantity (scalar only — volume
+  methods stay exclusive to the single-volume form) and its own ordered
+  action list; thresholds strictly ascending at load. Every rung the
+  accumulated value stands above fires on a match, lowest first; the
+  tracker cache-entry TTL derives from the ladder's top rung.
+- **Terminality is per action list**: the rule's in the single-volume
+  form, per fired rung on a ladder. If any of `report` / `goto` /
+  `stop` is present in the list that ran, chain traversal ends after
+  this rule (all its actions still run); other chains are still
+  evaluated. An unfired rung's actions end nothing. The `goto`/`jump`
+  graph must be **acyclic**, validated at rule build time; shared
+  target chains are allowed (a DAG, not a forest).
 
 Tracker semantics are flux's, unchanged: `value += inc`; on `Δt > 0`,
 `value = max(0, value − leak·Δt)`; overflow when `value > volume`; in-memory
-cache entries with TTL `volume/leak` (default 1h when leak is 0). `rate`
+cache entries with TTL `volume/leak` (the top rung's `at` stands in for
+`volume` on a ladder; default 1h when leak is 0). `rate`
 increments by 1, `bandwidth` by `sent`, `replay` by `min(sent/size, 1)` —
 skipped when `event.SizeBytes` is `FilesizeUnknown`. Decay uses **event
 time** (the log timestamp, flux parity); out-of-order events do not decay.
@@ -261,12 +271,14 @@ log:
    warm-up gated by `minSamples`); `replay` trackers read it.
 4. **Evaluate** — per event: traverse chains in order; a rule updates its
    tracker (only when its filter matches), checks overflow, and on match runs
-   its actions.
+   its actions — or the fired rungs' actions on a ladder.
 5. **Report** — the `report` action upserts through the `ReportRepository`
    (keyed by (rule, target)): insert or overwrite the record with the current
    tracker reading and sample. Report time is **wall clock**: `created_at`
    is set once on insert; `updated_at` and `expires_at = now + ttl` are
-   recomputed unconditionally on every trigger. This is the **only writer**
+   recomputed unconditionally on every write (a suppressed Trigger writes
+   nothing; a Trigger from a strictly higher rung overrides in place —
+   ADR 0013). This is the **only writer**
    to the table.
 6. **Expire** — a periodic sweeper (internal cadence) deletes rows whose
    `expires_at` has passed; `GET /reports` also excludes expired rows as a
@@ -393,9 +405,11 @@ serialization and a byte-exact example — is the consumer contract in
 formerly given here.
 
 One entry per (rule, target). `tracker` and `sample` are the snapshot from
-the last trigger; timestamps RFC 3339 UTC. `created_at` is fixed at the
-trigger that created the row; `updated_at` and `expires_at` (`now + ttl`,
-recomputed regardless of any previous value) reflect the latest trigger.
+the rung that last wrote it; timestamps RFC 3339 UTC. `created_at` is fixed
+at the write that created the row; `updated_at` and `expires_at` (`now + ttl`,
+recomputed regardless of any previous value) reflect the latest write — a
+Trigger from a strictly higher rung overrides the row in place (ADR 0013),
+a suppressed Trigger writes nothing.
 Reports are sorted by `created_at` descending, then `rule` and `target`
 ascending.
 
@@ -434,15 +448,21 @@ No `/v1` prefix, no debug endpoints. The API never writes reports; only
   not a slug (`^[a-z0-9][a-z0-9_-]*$`), non-positive `ttl`, unknown
   `penalty` values, `rate` with `drop`/`reject`, missing or non-positive
   `rate` on `limit-*` penalties, out-of-range `target_prefix`
-  (ipv4 ≤ 32, ipv6 ≤ 64).
+  (ipv4 ≤ 32, ipv6 ≤ 64). Escalation ladders add: `escalations` beside
+  `actions` or `tracker.volume` (a volume-method block gets its own
+  refusal — methods are exclusive to the single-volume form), a ladder
+  without a tracker, fewer than two rungs, non-strictly-ascending rung
+  `at` thresholds, and a rung `at` unparseable in the tracker kind's
+  quantity; each rung's actions reuse the same action validation.
 - The report document served by `GET /reports` is the canonical contract
   in [docs/reports.md](docs/reports.md) — envelope, record fields
   (including the penalty), timestamps, ordering, evolution policy —
   pinned byte-for-byte by a test that reproduces the doc's example from
   a driven daemon run.
 - No hot reload in v0: config and rules changes take effect on restart.
-- `bandage -t` (`--test`) prints the validated chain plan, headed by the
-  build identity header, and exits without ingesting. Command-line
+- `bandage -t` (`--test`) prints the validated chain plan (every rule's
+  actions, and every rung with its threshold and its actions), headed by
+  the build identity header, and exits without ingesting. Command-line
   overrides follow flag > config > default precedence (`-l` log level,
   `-w` workers); an unknown flag prints the error plus usage and exits 2.
 
