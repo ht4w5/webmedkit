@@ -798,6 +798,90 @@ chains:
 			wantErr: `rule "r": action report: reason`,
 		},
 		{
+			name: "rung report ttl validated like a rule's",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: x, ttl: one hour, penalty: drop}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: report.ttl`,
+		},
+		{
+			name: "rung report penalty validated like a rule's",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: x, ttl: 1h, penalty: ban}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: penalty: unknown penalty`,
+		},
+		{
+			name: "rung report rate rules validated like a rule's",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: x, ttl: 1h, penalty: drop, rate: 200}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: rate: not allowed`,
+		},
+		{
+			name: "rung limit penalty needs its rate like a rule's",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: rate: required`,
+		},
+		{
+			name: "rung report actions accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [{report: {reason: throttle, ttl: 24h, penalty: limit-bandwidth, rate: 1MB}}]
+          - at: 5GB
+            actions: [{report: {reason: ban, ttl: 7d, penalty: drop}}]
+`,
+		},
+		{
 			name: "unknown rung action rejected",
 			yaml: `
 version: 0

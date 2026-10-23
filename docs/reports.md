@@ -38,10 +38,10 @@ future additive fields append after it.
 | `reason` | string | the machine-readable trigger code (a slug), the report's downstream identity |
 | `target` | string | the aggregated source prefix the report is about, e.g. `203.0.113.7/32` |
 | `created_at` | string | when the record was first written, RFC 3339 UTC |
-| `updated_at` | string | when the record was last written; frozen while the report is alive ([ADR 0008](adr/0008-trigger-semantics-one-live-report.md)) |
-| `expires_at` | string | when the report dies: `updated_at` plus the rule's `ttl` |
+| `updated_at` | string | when the record was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
+| `expires_at` | string | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it |
 | `tracker` | object | the tracker reading that justified the report (below) |
-| `sample` | object | the most recent event that created the report (below) |
+| `sample` | object | the event that justified the report's current stance (below) |
 | `penalty` | object | the advisory enforcement stance (below); present on every canonical record |
 
 The `tracker` reading:
@@ -66,12 +66,24 @@ The `sample`:
 
 ### Lifecycle
 
-A report is written once per (rule, target) per report lifetime. While
-the report is alive, further Triggers write nothing: the record freezes
-at its write. The report dies at its `expires_at` or when
-`DELETE /reports` removes it; the next matching event then writes a
-fresh report whose `sample` and `tracker` reading come from that event
-— the tracker's record is never emptied by a Trigger
+One report lives per (rule, target). A Trigger writes it when no report
+for the pair is alive. While one is alive, a Trigger at or below the
+volume recorded in the report's `tracker` reading — the threshold of
+the rung that last wrote it — writes nothing: no downgrade and no
+rewrite. A Trigger from a strictly higher rung overrides the report in
+place: `reason`, `penalty`, the `tracker` reading, `sample`, `updated_at`
+and `expires_at` all move to the overriding rung's values, and
+`expires_at` runs from its `ttl`. `created_at` alone stays frozen at
+first flagged
+([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). The
+`sample` is the event that justified the report's current stance, so
+the evidence always backs the penalty the report carries.
+
+The report dies at its `expires_at` or when `DELETE /reports` removes
+it; the next matching event then writes a fresh report at the
+accumulation's current stance — a dead report's stance is not
+remembered, and one event's writes climb the crossed rungs, each
+overriding the last. The tracker's record is never emptied by a Trigger
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)), so
 the reading describes the accumulation as it stands. `created_at` is
 fixed at the row's first insert and survives a fresh write over a
@@ -121,11 +133,12 @@ and it validates the penalty for well-formedness only — never against the
 rule's tracker or reason. A consumer may apply the penalty as stated, as
 part of a stricter policy, or not at all.
 
-The penalty is written with its report and freezes while the report is
-alive ([ADR 0008](adr/0008-trigger-semantics-one-live-report.md)), so
-the stance always matches the sample that justified it. A replacement
-report — after deletion or expiry — carries the penalty of the rules
-loaded at its write time.
+The penalty is written with its report and moves with an override: a
+higher rung's Trigger replaces it together with the sample and the
+tracker reading, so the stance always matches the sample that justified
+it ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). A
+replacement report — after deletion or expiry — carries the penalty of
+the rules loaded at its write time.
 
 ## Evolution policy
 
