@@ -42,8 +42,7 @@ type Repository interface {
 	DeleteExpired(ctx context.Context, now time.Time) (int, error)
 }
 
-// Service is the one report lifecycle module: Trigger upserts one report per (rule, target);
-// while a report is alive Triggers write nothing but return nil (ADR 0008).
+// Service is the one report lifecycle module: Trigger upserts one report per (rule, target) whose stance escalates in place. While a report is alive, a Trigger whose rung threshold (the tracker volume it records) is at or below the recorded one writes nothing (ADR 0013).
 type Service struct {
 	repo Repository
 
@@ -58,11 +57,15 @@ type reportKey struct {
 }
 
 // liveEntry is one (rule, target)'s suppression state: settled expiry decides
-// aliveness at Trigger time; a non-nil inflight marks a pending write.
+// aliveness at Trigger time; volume is the threshold recorded in the live
+// report's tracker reading (the writing rung's threshold), deciding what may
+// override it; a non-nil inflight marks a pending write.
 type liveEntry struct {
 	expiresAt time.Time
+	volume    float64
 	// inflight is non-nil only while this key's write is in flight; closed under
-	// s.mu once settled (entry kept on success, deleted on failure).
+	// s.mu once settled (the entry is kept on success and rolled back to what
+	// stood before the write on failure).
 	inflight chan struct{}
 }
 
@@ -70,11 +73,15 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, live: make(map[reportKey]*liveEntry)}
 }
 
-// Trigger records the report for (rule, target) unless it is already alive, in
-// which case the write is suppressed; concurrent Triggers produce at most one write.
+// Trigger records the report for (rule, target): a Trigger from a strictly
+// higher rung than the live report's recorded threshold overrides the row in
+// place, one at or below it is suppressed; concurrent Triggers for one key
+// never interleave writes (ADR 0013). A failed write is not a Trigger
+// outcome: whatever stood before it stands still, and the next matching
+// event retries the report.
 func (s *Service) Trigger(ctx context.Context, rec domain.Report) error {
 	key := reportKey{rule: rec.Rule, target: rec.Target}
-	var e *liveEntry
+	var e, prev *liveEntry
 	for {
 		s.mu.Lock()
 		cur, ok := s.live[key]
@@ -90,10 +97,13 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report) error {
 				return fmt.Errorf("trigger report: %w", ctx.Err())
 			}
 		}
-		if ok && cur.expiresAt.After(rec.UpdatedAt) {
+		// A live report suppresses every Trigger at or below its recorded
+		// threshold; only a strictly higher rung overrides it in place.
+		if ok && cur.expiresAt.After(rec.UpdatedAt) && rec.Tracker.Volume <= cur.volume {
 			s.mu.Unlock()
 			return nil
 		}
+		prev = cur
 		e = &liveEntry{inflight: make(chan struct{})}
 		s.live[key] = e
 		s.mu.Unlock()
@@ -102,7 +112,13 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report) error {
 	if err := s.repo.Upsert(ctx, rec); err != nil {
 		s.mu.Lock()
 		if s.live[key] == e {
-			delete(s.live, key)
+			if prev != nil {
+				// The failed write left the old row standing: its entry
+				// keeps suppressing against the recorded threshold.
+				s.live[key] = prev
+			} else {
+				delete(s.live, key)
+			}
 		}
 		ch := e.inflight
 		e.inflight = nil
@@ -112,6 +128,7 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report) error {
 	}
 	s.mu.Lock()
 	e.expiresAt = rec.ExpiresAt
+	e.volume = rec.Tracker.Volume
 	ch := e.inflight
 	e.inflight = nil
 	close(ch)
@@ -130,7 +147,9 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 	}
 	live := make(map[reportKey]*liveEntry, len(rows))
 	for _, rec := range rows {
-		live[reportKey{rule: rec.Rule, target: rec.Target}] = &liveEntry{expiresAt: rec.ExpiresAt}
+		// The recorded threshold (the writing rung's tracker volume)
+		// survives the restart with the row it is stored in.
+		live[reportKey{rule: rec.Rule, target: rec.Target}] = &liveEntry{expiresAt: rec.ExpiresAt, volume: rec.Tracker.Volume}
 	}
 	for key, e := range s.live {
 		if e.inflight != nil {
