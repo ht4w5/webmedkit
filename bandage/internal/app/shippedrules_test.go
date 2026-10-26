@@ -8,13 +8,8 @@ import (
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
-// The shipped rules config at the loader and validated-plan seams:
-// configs/rules.yml loads and validates, and its worked escalation
-// ladder prints every rung with its threshold and its actions in the
-// --test plan. The rules-guide fences get the treatment
-// reportdoc_test.go gives the report document: the guide's worked
-// example is the shipped ladder verbatim and the guide's plan excerpt
-// is what bandage -t prints, so guide, config and plan cannot drift.
+// The shipped rules config at the loader and validated-plan seams: configs/rules.yml
+// loads and validates, and the rules-guide fences keep guide, config and plan from drifting.
 
 const (
 	shippedRulesPath  = "../../../configs/rules.yml"
@@ -22,7 +17,6 @@ const (
 	rulesGuidePath    = "../../../docs/rules.md"
 )
 
-// readShipped reads one shipped artifact (config, rules or guide).
 func readShipped(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -32,8 +26,6 @@ func readShipped(t *testing.T, path string) string {
 	return string(data)
 }
 
-// sectionFence extracts the fenced block containing marker from the
-// first section titled heading in doc.
 func sectionFence(t *testing.T, doc, heading, marker string) string {
 	t.Helper()
 	i := strings.Index(doc, heading)
@@ -64,17 +56,13 @@ func sectionFence(t *testing.T, doc, heading, marker string) string {
 	}
 }
 
-// TestShippedRulesLoad: the shipped rules config loads and validates —
-// the ladder validation matrix and the chain graph included.
 func TestShippedRulesLoad(t *testing.T) {
 	if _, err := LoadRules(shippedRulesPath); err != nil {
 		t.Fatalf("LoadRules(%s) error: %v", shippedRulesPath, err)
 	}
 }
 
-// TestShippedRulesPlanShowsEveryRung: bandage -t on the shipped config
-// prints every rung of the worked ladder with its threshold and its
-// actions, and the rules guide's plan excerpt is that output verbatim.
+// The rules guide's plan excerpt is that output verbatim.
 func TestShippedRulesPlanShowsEveryRung(t *testing.T) {
 	plan, err := Test(shippedConfigPath, shippedRulesPath, identity.For("bandage"))
 	if err != nil {
@@ -106,9 +94,6 @@ func TestShippedRulesPlanShowsEveryRung(t *testing.T) {
 	}
 }
 
-// TestShippedRulesCarryTheGuideLadder: the rules guide's worked example
-// is the shipped ladder verbatim — the reference example operators copy
-// and the shipped config cannot drift apart.
 func TestShippedRulesCarryTheGuideLadder(t *testing.T) {
 	excerpt := sectionFence(t, readShipped(t, rulesGuidePath), "## Escalation ladders", "escalations:")
 	if !strings.Contains(readShipped(t, shippedRulesPath), excerpt) {

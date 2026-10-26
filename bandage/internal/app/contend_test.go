@@ -82,8 +82,7 @@ func TestE2EFailedConcurrentWriteDoesNotLoseTheDetection(t *testing.T) {
 		t.Fatalf("%d write retries entered the store, want 1 (the waiting Trigger carried the write itself)", n)
 	}
 
-	// The live report suppresses the next write; the suppressed Trigger
-	// leaves the tracker record intact.
+	// The suppressed Trigger leaves the tracker record intact.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 2000))
 	d.waitProcessed(t, 3)
 	if n := len(store.entered); n != 1 {
@@ -93,9 +92,7 @@ func TestE2EFailedConcurrentWriteDoesNotLoseTheDetection(t *testing.T) {
 		t.Fatalf("reports = %+v, want still exactly one", doc.Reports)
 	}
 
-	// The probe adds exactly the volume: it could never overflow alone,
-	// but the record is intact (6000 kept + 1000), so it matches and its
-	// write is suppressed at the live report all the same.
+	// The probe could never overflow alone; it matches over the intact record and its write stays suppressed.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 1000))
 	d.waitProcessed(t, 4)

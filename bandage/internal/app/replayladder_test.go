@@ -9,19 +9,9 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
-// Replay escalation ladders at the daemon seam: thresholds in download
-// equivalents (already normalized by Filesize), warm-up blindness, the
-// per-event cache-entry TTL from the ladder's top rung, and the same
-// firing, terminality and report behaviour as rate and bandwidth
-// ladders. Report rungs write one Report per (rule, Target) whose
-// stance escalates in place; the override fields themselves are pinned
-// at the escalation suites.
+// Replay escalation ladders at the daemon seam: thresholds in download equivalents
+// (normalized by Filesize), warm-up blindness, the top-rung TTL, and rate/bandwidth parity.
 
-// TestE2EReplayLadderRungsAreDownloadEquivalents: a replay ladder's
-// thresholds mean full downloads of that path whether the file is a
-// kilobyte or a hundred kilobytes - the Filesize enrichment normalizes
-// the accumulation. Every crossed rung fires lowest first with the
-// rung's threshold as its reading volume.
 func TestE2EReplayLadderRungsAreDownloadEquivalents(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -39,9 +29,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// A 1000-byte file: the first 4 samples warm the size estimate and
-	// are skipped; the next 3 full downloads add 1 each, so the value
-	// stands above the low rung at 2 and above both rungs at 3.
+	// The first 4 samples warm the size estimate and are skipped; only known sizes climb.
 	send := func(client, path string, sent int64, i int) {
 		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), client, "GET", path, 200, sent))
 	}
@@ -60,8 +48,6 @@ chains:
 		t.Fatalf("marks = %v, want %v (one low mark per event above the rung)", got, want)
 	}
 
-	// A 100000-byte file climbs the same ladder: two full downloads are
-	// two download equivalents regardless of the file's size.
 	for i := 7; i < 11; i++ {
 		send("203.0.113.8", "/big.iso", 100000, i)
 	}
@@ -78,8 +64,7 @@ chains:
 		t.Fatalf("marks = %v, want %v (the same climb for both file sizes)", got, want)
 	}
 
-	// Each rung's log actions see the shared post-accumulation value
-	// with the rung's own threshold as its volume.
+	// Each rung's log actions see the shared post-accumulation value with the rung's own threshold as its volume.
 	byTarget := map[string][]float64{}
 	for _, rec := range d.logs.withMessage("MARK:LOW") {
 		var reading domain.TrackerReading
@@ -99,8 +84,6 @@ chains:
 		}
 	}
 
-	// One report per (rule, Target): the top rung's write at value 3,
-	// its threshold as the reading's volume.
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 2 {
 		t.Fatalf("reports = %+v, want one per target", doc.Reports)
@@ -132,10 +115,6 @@ chains:
 	}
 }
 
-// TestE2EReplayLadderWarmUpSkipsTheTrackerEntirely: events whose
-// Filesize is unknown skip the ladder's tracker entirely - no
-// increment, no decay, no cache touch - until the estimate warms; only
-// the known-size samples climb the rungs.
 func TestE2EReplayLadderWarmUpSkipsTheTrackerEntirely(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -153,11 +132,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Warm-up (the first 4 of 5 samples): the size estimate is unknown,
-	// so every event is skipped entirely - nothing fires and nothing is
-	// written. The /stats cache counters show the skip reaches the
-	// store: one Update per event (the file-size record alone), never
-	// the tracker bucket.
+	// The /stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker bucket.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
 	}
@@ -175,9 +150,7 @@ chains:
 		}
 	}
 
-	// Samples 5..7 are enriched (size 1000): each full transfer adds one
-	// download equivalent and only those three climb - the report's
-	// reading counts the known samples alone.
+	// Only the known-size samples climb: the report's reading counts those alone.
 	for i := 4; i < 7; i++ {
 		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
 	}
@@ -197,9 +170,7 @@ chains:
 	}
 }
 
-// TestE2EReplayLadderTrackerTTLFromTopRung: the cache-entry TTL
-// re-derives per event from the ladder's top rung (top/leak), so replay
-// state outlives the whole climb and restarts from zero past it.
+// The per-event TTL from the top rung lets replay state outlive the whole climb.
 func TestE2EReplayLadderTrackerTTLFromTopRung(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -217,16 +188,12 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Warm-up: 4 of 5 samples, skipped entirely.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
 	}
 	d.waitProcessed(t, 4)
 
-	// Events share one event second (no leak decay between them) and
-	// arrive 5s apart on the wall clock - well inside the top rung's
-	// 20s TTL: the bucket keeps its state and climbs 1..5, and the rung
-	// at 1 fires while the value stands above it (events 2..5).
+	// Events share one event second (no leak decay) and sit 5s apart on the wall clock, well inside the top rung's 20s TTL.
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			clock.Advance(5 * time.Second)
@@ -238,8 +205,6 @@ chains:
 		t.Fatalf("marks = %v, want one per event above the rung (4)", got)
 	}
 
-	// Past the 20s TTL the entry expires and the bucket restarts empty:
-	// the next event contributes 1 alone and the rung holds silent.
 	clock.Advance(30 * time.Second)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
 	d.waitProcessed(t, 10)
@@ -247,7 +212,6 @@ chains:
 		t.Errorf("marks = %v, want still 4 (state restarted past the TTL)", got)
 	}
 
-	// Within the TTL the climb resumes from the fresh state.
 	clock.Advance(5 * time.Second)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
 	d.waitProcessed(t, 11)
@@ -256,11 +220,7 @@ chains:
 	}
 }
 
-// TestE2EReplayLadderRungTerminalityAndReportBehaviour: fired rungs and
-// per-fired-rung terminality behave exactly as for rate and bandwidth
-// ladders - a fired jump rung runs its chain and leaves later rules
-// running, a fired report rung ends the chain - and the report rung
-// writes one report carrying its threshold as the reading's volume.
+// Parity check: fired rungs and terminality behave exactly as for rate and bandwidth ladders.
 func TestE2EReplayLadderRungTerminalityAndReportBehaviour(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -289,14 +249,7 @@ chains:
 		d.waitProcessed(t, int64(i+1))
 	}
 
-	// Warm-up events (1..4) skip the tracker: the rule does not match,
-	// the later rule and the file-order inspect traversal still run.
-	// Event 5 (value 1) matches nothing: no rung stands below 1 alone.
-	// Event 6 (value 2) fires the handoff rung only: its jump dispatches
-	// the inspect chain and the rule's chain keeps going (AFTER).
-	// Event 7 (value 3) fires both rungs: the handoff runs, the report
-	// rung ends the chain after the rule (no AFTER); the inspect chain's
-	// own file-order traversal closes each event.
+	// Each event closes with the inspect chain's own file-order traversal (MARK:WATCH).
 	var want []string
 	for i := 0; i < 5; i++ {
 		want = append(want, "MARK:AFTER", "MARK:WATCH")
@@ -332,12 +285,7 @@ chains:
 	}
 }
 
-// TestE2EReplayLadderReportRungsKeepOneReportPerRuleTarget: report rungs
-// keep exactly one Report per (rule, Target) as the climb fires them,
-// and `created_at` stays frozen at first flagged. (Which fired rung's
-// reason, reading and timestamps the row carries is pinned at the
-// in-place override suites; only the identity and the frozen creation
-// time are pinned here.)
+// Which fired rung's fields the row carries is pinned at the override suites; only identity and frozen created_at are pinned here.
 func TestE2EReplayLadderReportRungsKeepOneReportPerRuleTarget(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -360,10 +308,7 @@ chains:
 	}
 	d.waitProcessed(t, 4)
 
-	// Samples 5 and 6 (values 1 and 2) fire the low report rung alone;
-	// sample 7 (value 3) fires both report rungs. The wall clock moves
-	// between the first write and the climb so a frozen created_at is
-	// observable either way the row is written.
+	// The wall clock moves between the first write and the climb so a frozen created_at is observable.
 	d.send(nginxLine("1734345938", "203.0.113.7", "GET", "/releases.iso", 200, 1000))
 	d.waitProcessed(t, 5)
 	d.send(nginxLine("1734345939", "203.0.113.7", "GET", "/releases.iso", 200, 1000))

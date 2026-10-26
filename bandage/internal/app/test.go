@@ -44,7 +44,7 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 					ttl = "per-event"
 				}
 				if len(rule.Escalations) > 0 {
-					// The ladder's rungs carry every threshold.
+					// The ladder's rungs carry every threshold, not the tracker line.
 					fmt.Fprintf(&b, "    tracker: %s leak=%s ttl=%s\n",
 						rule.Tracker.Kind, fmtFloat(rule.Tracker.Leak), ttl)
 				} else {
@@ -71,16 +71,14 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 	return b.String()
 }
 
-// actionText renders one action's plan text (no indentation or
-// newline). The describer cannot fail; Accept is shared with evaluation.
+// actionText renders one action's plan text (no indentation or newline); the describer cannot fail.
 func actionText(a domain.Action) string {
 	var ab strings.Builder
 	_ = a.Accept(actionDescriber{b: &ab})
 	return ab.String()
 }
 
-// actionDescriber is the --test side of Action.Accept, appending one
-// action's text to the plan.
+// actionDescriber is the --test side of Action.Accept, appending one action's text to the plan.
 type actionDescriber struct {
 	b *strings.Builder
 }

@@ -9,15 +9,10 @@ import (
 	"time"
 )
 
-// Trigger tests at the daemon seam: report aliveness alone bounds the
-// writes — one write per report lifetime, never per volume of traffic;
-// a dead report re-arms a fresh write at the accumulation's current
-// stance and nothing ever resets the tracker.
+// Trigger tests at the daemon seam: report aliveness alone bounds the writes (one
+// write per report lifetime), and nothing ever resets the tracker.
 
-// TestE2EOneWritePerReportLifetime: while the report is alive further
-// Triggers write nothing and the row freezes; after it dies the next
-// matching event writes a fresh report whose Sample and tracker reading
-// come from that event and the kept accumulation.
+// After the report dies the next matching event writes fresh at the kept accumulation.
 func TestE2EOneWritePerReportLifetime(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -31,14 +26,12 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 6000 alone does not overflow volume 10000.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
 	d.waitProcessed(t, 1)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("after 1 event: %+v, want none (6000 <= 10000)", doc.Reports)
 	}
 
-	// The second event overflows (12000 > 10000): the lifetime's one write.
 	clock.Advance(10 * time.Minute) // 18:10
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
 	d.waitProcessed(t, 2)
@@ -50,9 +43,6 @@ chains:
 		t.Errorf("tracker value = %v, want 12000 (the Trigger-time reading)", v)
 	}
 
-	// Further overflows keep matching and Triggering, but the report is
-	// alive: exactly one row per (rule, Target), updated_at does not move,
-	// and the tracker record keeps accumulating (nothing resets it).
 	for range 2 {
 		clock.Advance(10 * time.Minute)
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
@@ -74,9 +64,7 @@ chains:
 		t.Errorf("log-action marks = %v, want 3 (every overflowing event matches and runs its actions)", got)
 	}
 
-	// The report dies (30m after the 18:10 write) and is swept; the next
-	// matching event writes a fresh report at the accumulation's current
-	// stance: Sample and tracker reading from that event.
+	// The report dies (30m ttl) and is swept; the next matching event writes fresh.
 	clock.Advance(35 * time.Minute) // 19:05 - past the 18:40 expiry
 	if n, err := d.sweepOnce(context.Background()); err != nil || n != 1 {
 		t.Fatalf("sweepOnce = (%d, %v), want (1, nil)", n, err)
@@ -99,9 +87,7 @@ chains:
 	}
 }
 
-// singleVolumeMethodRules is a replay rule whose tolerated volume is the
-// step volume method's per-event estimate: volume_low 1 below the 1000-byte
-// file-size threshold, volume_high 2 from it.
+// singleVolumeMethodRules derives its tolerated volume per event from the step volume method.
 const singleVolumeMethodRules = `
 version: 0
 chains:
@@ -115,27 +101,17 @@ chains:
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 
-// warmThenOverflow sends the warm-up samples that blind a path's file-size
-// estimate, then full transfers past the rung-less rule's volume: 2
-// transfers overflow volume 1 (small paths), 3 overflow volume 2 (big ones).
 func warmThenOverflow(d *testDaemon, epoch int, path string, sent int64, overflow int) {
 	for i := range 4 + overflow {
 		d.send(nginxLine(fmt.Sprintf("%d", epoch+i), "203.0.113.7", "GET", path, 200, sent))
 	}
 }
 
-// TestE2ESingleVolumeRuleNeverOverridesItsLiveReport: a rule without a
-// ladder writes at most once per report lifetime - one write, updated_at
-// frozen (US 26, "behave exactly as before"). Its reading's volume is the
-// volume method's per-event estimate, so a later event can carry a larger
-// volume than the recorded one and still never move the live report: only
-// a ladder rung may override in place (ADR 0013).
+// US 26 "behave exactly as before": even a later event with a larger derived volume never moves the live report - only a ladder rung may override (ADR 0013).
 func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", singleVolumeMethodRules)
 
-	// /small.iso (estimate 100) overflows its derived volume 1 on its
-	// second full transfer: the lifetime's one write at 18:00.
 	warmThenOverflow(d, 1734345934, "/small.iso", 100, 2)
 	d.waitProcessed(t, 6)
 	doc := d.getReports(t, nil)
@@ -146,9 +122,6 @@ func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 		t.Fatalf("tracker = %+v, want the volume_low 1 estimate at the first write", doc.Reports[0].Tracker)
 	}
 
-	// /big.iso (estimate 10 000) grows the derived volume to 2 and its
-	// third transfer (value 3 > 2) Triggers again with a larger reading
-	// volume than the recorded one - the live report stands.
 	clock.Advance(10 * time.Minute) // 18:10
 	warmThenOverflow(d, 1734345944, "/big.iso", 10000, 3)
 	d.waitProcessed(t, 13)
@@ -169,10 +142,6 @@ func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 	}
 }
 
-// TestE2ESingleVolumeRuleNeverOverridesAfterRestart: the live set is
-// rebuilt from the report table at startup, so the one-write-per-lifetime
-// bound holds across a restart - a post-restart event with a larger
-// derived volume still writes nothing over the stored report.
 func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	dbPath := filepath.Join(t.TempDir(), "reports.db")
@@ -200,9 +169,6 @@ func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 	}
 }
 
-// TestE2EConcurrentTriggersLeaveTheRecordIntact: concurrent Triggers
-// never reset the tracker — the storm's accumulation survives intact,
-// every event counted once.
 func TestE2EConcurrentTriggersLeaveTheRecordIntact(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -219,8 +185,7 @@ chains:
 	})
 
 	// Timestamps are out of order on purpose; each of the 24 events
-	// overflows volume 1000 on its own, so all Trigger concurrently and
-	// the live report keeps their writes to one.
+	// overflows volume 1000 on its own, so all Trigger concurrently.
 	const events = 24
 	times := []string{eventTime1, "1734346934.123"}
 	for i := range events {
@@ -236,9 +201,7 @@ chains:
 		t.Fatalf("reports = %+v, want exactly one", doc.Reports)
 	}
 
-	// Delete the report and probe with exactly the volume: 1000 alone
-	// could never overflow, so the write's reading proves the storm's
-	// accumulation survived intact (24x2000 kept + 1000).
+	// 1000 alone could never overflow: the write's reading proves the storm's accumulation survived.
 	if _, n := d.del(t, url.Values{"rule": {"egress"}}); n != 1 {
 		t.Fatalf("delete count = %d, want 1", n)
 	}

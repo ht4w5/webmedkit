@@ -894,17 +894,8 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
-	// Three parses on one path and one dropped line give most counters a
-	// distinct value (cache_gets == cache_sets is structural: every
-	// Update counts one of each; so is cache_misses == cache_size here,
-	// with nothing expiring or evicting - every miss inserts a live
-	// entry). Distinct absolutes pin each counter to its key; agreement
-	// with /stats alone would let equal-valued counters swap places
-	// unnoticed.
-	//
-	// The third event alone exceeds volume (3000+3000+12000 > 10000)
-	// and Triggers; nothing resets tracker state, so the filesize record
-	// and the tracker bucket both stay live (cache_size 2).
+	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
+	// Nothing resets tracker state, so the filesize record and the tracker bucket both keep cache_size at 2.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
@@ -1089,8 +1080,7 @@ chains:
 		c.Cache.MaxEntries = 2
 	})
 
-	// 203.0.113.7 overflows on its third event (value 3 > 2); the write
-	// leaves the bucket in place, the entry the next insert evicts.
+	// The write leaves the bucket in place: the entry the next insert evicts.
 	for i := 0; i < 3; i++ {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
 	}
@@ -1101,9 +1091,8 @@ chains:
 	}
 
 	// The new target caps the cache and evicts 203.0.113.7's bucket, so
-	// that bucket's next event must not Match (no stale Match). The two
-	// events are serialized: the insert of 203.0.113.9's bucket must land
-	// first so the eviction is deterministic.
+	// that bucket's next event must not Match (no stale Match).
+	// The two events are serialized so the eviction is deterministic.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
 	d.waitProcessed(t, 4)
@@ -1269,9 +1258,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 150 + 150 = 300 > 200 overflows on the second event and writes;
-	// the third event keeps accumulating (450) while its write is
-	// suppressed - nothing resets the record.
+	// The third event keeps accumulating while its write is suppressed: nothing resets the record.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
@@ -1288,8 +1275,6 @@ chains:
 		t.Fatalf("after delete: %+v, want none", doc.Reports)
 	}
 
-	// The accumulation survives the delete: the report comes back
-	// carrying the kept reading.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 4)

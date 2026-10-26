@@ -462,8 +462,7 @@ func TestEvaluateBenchScenarios(t *testing.T) {
 				}
 				return
 			}
-			// The report action runs on every overflow; the write lands
-			// once per report lifetime per the contract.
+			// The report action runs on every overflow; the write lands once per report lifetime per the contract.
 			if run.sink.triggers != oracle.triggers {
 				t.Errorf("triggers = %d, want %d (the report action runs on every overflow above volume)",
 					run.sink.triggers, oracle.triggers)

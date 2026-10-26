@@ -19,12 +19,7 @@ type TrackerCache interface {
 
 // ReportSink is the report write path: a Trigger upserts one report per (rule, target).
 type ReportSink interface {
-	// Trigger writes rec for (rule, target). allowOverride marks the
-	// write as a ladder rung's Trigger: only such a Trigger may override
-	// a live report in place, and only from strictly above the volume it
-	// records (the rung's static threshold). A rule without a ladder
-	// never overrides its live report - one write per report lifetime
-	// (ADR 0013) - so its Trigger passes false.
+	// Trigger writes rec for (rule, target); allowOverride marks a ladder rung's write.
 	Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error
 }
 
@@ -98,11 +93,6 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 		if !fed {
 			continue
 		}
-		// A fired match resolves to the rungs it fired before any action
-		// runs: every rung the post-accumulation value stands above,
-		// lowest first (a single-volume rule is one implicit rung). None
-		// fired means no match. Dispatch, terminality and the reading all
-		// follow the rungs.
 		rungs := rule.Rungs(reading)
 		if len(rungs) == 0 {
 			continue
@@ -117,14 +107,8 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 	return nil
 }
 
-// runRungs runs every fired rung's full action list in order, lowest rung
-// first; terminality applies only after the lists. The fired rungs were
-// decided once from the post-accumulation value before any action ran,
-// and the loader's strictly ascending thresholds make them a prefix of
-// the ladder - so an action within the event can never cancel a rung that
-// already fired. Each rung's actions see its trigger-time reading: the
-// reading captured before any action ran, carrying the rung's threshold
-// as its volume.
+// runRungs runs every fired rung's full action list in order, lowest rung first.
+// The rungs are decided before any action runs and form a ladder prefix, so no action cancels one.
 func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.Escalation) error {
 	for _, rung := range rungs {
 		m.reading.Volume = rung.At
@@ -138,11 +122,8 @@ func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.E
 	return nil
 }
 
-// terminal reports whether a fired rung ends chain traversal after the
-// rule's rungs have run: a rung whose action list carries report, goto or
-// stop (the rung's Terminal). A fired jump never ends the chain; a fired
-// goto ran its target chain and ends this chain here, after the
-// remaining fired rungs have run.
+// terminal reports whether a fired rung ends chain traversal after the rule's rungs
+// have run; a fired jump never ends the chain, a fired goto only after the remaining rungs.
 func terminal(rungs []domain.Escalation) bool {
 	for _, rung := range rungs {
 		if rung.Terminal() {
@@ -193,10 +174,8 @@ func (s *Service) runNamedChain(ctx context.Context, rule *domain.Rule, name str
 	return s.runChain(ctx, ci, event)
 }
 
-// updateTracker feeds the rule's tracker (when it has one) and reports
-// the post-accumulation reading. fed is false only for replay warm-up
-// (unknown sizes are skipped entirely); tracker-less rules are always
-// fed. Whether the rule matched is the fired rungs' question (Rule.Rungs).
+// updateTracker feeds the rule's tracker (when it has one) and reports the
+// post-accumulation reading. fed is false only for replay warm-up with an unknown size.
 func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *domain.Event) (domain.TrackerReading, bool, error) {
 	if rule.Tracker == nil {
 		// Tracker-less rules match on filter alone.
@@ -220,11 +199,8 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		// at 1 per event.
 		size := float64(event.SizeBytes)
 		increment = math.Min(float64(event.SentBytes)/size, 1)
-		// Volume is the volume method's output for this event's estimate;
-		// the cache-entry TTL is re-derived from it per event. A ladder's
-		// scalar rungs stand in for the volume - download equivalents,
-		// already normalized by Filesize - so the TTL re-derives from the
-		// top rung and state outlives the whole climb.
+		// Volume is the volume method's output; the TTL re-derives from it per event.
+		// A ladder's rungs stand in for the volume, so its TTL derives from the top rung.
 		volume = cfg.VolumeFor(size)
 		if top, ok := rule.TopRung(); ok {
 			volume = top.At
@@ -255,7 +231,6 @@ func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 	return domain.TrackerKey(target)
 }
 
-// trigger runs the rule's report action: a Trigger suppresses or writes, and never empties the matched rule's tracker record (ADR 0013) - report aliveness alone bounds the writes. Only a ladder rung's Trigger may override the live report in place (its static threshold rides the reading's volume); a rule without a ladder writes at most once per report lifetime. A failed write is not a Trigger outcome (ADR 0008): the record stays intact and the next matching event retries.
 func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.ReportAction) error {
 	now := s.now()
 	penalty := action.Penalty // the stance of the rules loaded at write time

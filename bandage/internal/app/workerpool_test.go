@@ -106,10 +106,7 @@ func TestWorkerPoolConcurrentEventsOneTarget(t *testing.T) {
 		t.Fatalf("reports = %+v, want exactly one (one live report per (rule, Target))", doc.Reports)
 	}
 
-	// After Delete the next matching event writes at the accumulation's
-	// current stance: the probe's own 100 bytes on top of the storm's
-	// 24x2000 reads the exact total, so every concurrent event was counted
-	// once and nothing reset the record.
+	// The exact total proves every concurrent event counts once and nothing resets the record.
 	if _, n := d.del(t, url.Values{"rule": {"egress"}}); n != 1 {
 		t.Fatalf("delete count = %d, want 1", n)
 	}

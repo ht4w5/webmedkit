@@ -14,18 +14,9 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 )
 
-// Escalation ladders at the daemon seam: fired-rung dispatch,
-// handoff rungs that fire on every Event while the value stays above
-// their threshold, per-fired-rung terminality, the
-// ladder-derived tracker TTL and the report rungs' in-place escalation
-// (ADR 0013): one Report per (rule, Target) whose stance follows the
-// top rung the accumulation stands above.
+// Escalation ladders at the daemon seam: fired-rung dispatch and per-fired-rung
+// terminality, the ladder-derived tracker TTL, and one Report per (rule, Target) whose stance escalates in place (ADR 0013).
 
-// TestE2EEscalationFiresEveryCrossedRungLowestFirst: on each matching
-// event every rung the accumulated value stands above fires, lowest
-// first — a transfer that flew past rungs cannot skip the lower
-// responses. The fired rungs are decided once from the post-accumulation
-// value, before any action runs.
 func TestE2EEscalationFiresEveryCrossedRungLowestFirst(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -45,14 +36,12 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 250 bytes stand above the low and mid rungs, not the high one.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 1)
 	if got, want := marks(d), []string{"MARK:LOW", "MARK:MID"}; !slices.Equal(got, want) {
 		t.Fatalf("marks = %v, want %v (every crossed rung, lowest first)", got, want)
 	}
 
-	// The second transfer takes the value to 500: all three fire.
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 2)
 	want := []string{"MARK:LOW", "MARK:MID", "MARK:LOW", "MARK:MID", "MARK:HIGH"}
@@ -60,8 +49,7 @@ chains:
 		t.Errorf("marks = %v, want %v", got, want)
 	}
 
-	// Each rung's actions see one reading: the shared post-accumulation
-	// value with the rung's own threshold as its volume.
+	// Each rung's actions see the shared post-accumulation value with the rung's own threshold as its volume.
 	checks := []struct {
 		msg    string
 		values []float64
@@ -86,10 +74,7 @@ chains:
 	}
 }
 
-// TestE2EEscalationHandoffRungFiresEveryEvent: a handoff rung fires
-// on every matching event while the value stays above its threshold,
-// feeding the target chain continuously rather than in flickers, and stops once leak has decayed the value
-// below (no report rungs here: nothing resets the bucket mid-climb).
+// No report rungs here: nothing resets the bucket mid-climb.
 func TestE2EEscalationHandoffRungFiresEveryEvent(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -111,17 +96,12 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Three transfers keep the value at 100 (100 bytes added and 100
-	// leaked per second), above the handoff rung: the inspect chain runs
-	// twice per event (the jump dispatch plus its own file-order
-	// traversal).
+	// The inspect chain runs twice per event: the jump dispatch plus its own file-order traversal.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/a", 200, 100))
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/a", 200, 100))
 	d.send(nginxLine("1734345936.123", "203.0.113.7", "GET", "/a", 200, 100))
 	d.waitProcessed(t, 3)
 
-	// A quiet gap decays the value to 0: the rung stops firing and only
-	// the inspect chain's own traversal runs for the next event.
 	d.send(nginxLine("1734345946.123", "203.0.113.7", "GET", "/a", 200, 1))
 	d.waitProcessed(t, 4)
 
@@ -142,8 +122,6 @@ chains:
 	}
 }
 
-// TestE2EEscalationJumpRungNeverEndsTheChain: a fired jump rung runs its
-// target chain and resumes - the rule's later rules still see the event.
 func TestE2EEscalationJumpRungNeverEndsTheChain(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -179,9 +157,6 @@ chains:
 	}
 }
 
-// TestE2EEscalationGotoRungEndsChainAfterRemainingRungs: a fired goto
-// rung runs its target chain and ends this chain after the remaining
-// fired rungs have run.
 func TestE2EEscalationGotoRungEndsChainAfterRemainingRungs(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -207,18 +182,13 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
-	// The goto dispatch runs the topic chain, the rest of the goto rung
-	// and the higher fired rung run, and the chain ends after the rule
-	// (MARK:AFTER absent); the topic chain's own file-order traversal
-	// closes the sequence.
+	// The trailing MARK:TOPIC is the topic chain's own file-order traversal, not a second dispatch.
 	want := []string{"MARK:TOPIC", "MARK:R1-TAIL", "MARK:HIGH", "MARK:TOPIC"}
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (goto dispatch, remaining fired rungs, then chain end)", got, want)
 	}
 }
 
-// TestE2EEscalationReportRungEndsTheChain: a fired report rung ends the
-// chain after the rule.
 func TestE2EEscalationReportRungEndsTheChain(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -247,9 +217,6 @@ chains:
 	}
 }
 
-// TestE2EEscalationTerminalityFollowsFiredRungs: chain traversal ends
-// only for a rung that actually fired - an unfired goto rung above the
-// value leaves later rules running.
 func TestE2EEscalationTerminalityFollowsFiredRungs(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -275,22 +242,14 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
-	// Only the low rung fired, so the chain continued (MARK:AFTER); the
-	// unfired goto never dispatched its chain - the topic chain's lone
-	// MARK:TOPIC is its own file-order traversal, not a dispatch.
+	// The lone MARK:TOPIC is the topic chain's own file-order traversal, not a goto dispatch.
 	want := []string{"MARK:LOW", "MARK:AFTER", "MARK:TOPIC"}
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (terminality follows the fired rungs)", got, want)
 	}
 }
 
-// TestE2EEscalationReportRungsEscalateOneReportPerRuleTarget: report
-// rungs write one Report per (rule, Target) whose stance escalates in
-// place. With the value above several rungs and no live Report, one
-// matching event produces one Report at the TOP crossed rung's stance:
-// the lower crossed rung's write is overridden within the same event.
-// Later Triggers from rungs at or below the recorded threshold are
-// suppressed - no downgrade and no rewrite.
+// The lower crossed rung's write is overridden within the same event, so the one Report stands at the top rung's stance.
 func TestE2EEscalationReportRungsEscalateOneReportPerRuleTarget(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -326,9 +285,6 @@ chains:
 		t.Errorf("tracker reading = %+v, want value 150 with the top crossed rung's threshold 100 as volume", r.Tracker)
 	}
 
-	// Both rungs fire again (value 300), but their thresholds are at or
-	// below the recorded one: the report stays frozen at the first
-	// event's write.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 2)
@@ -342,10 +298,7 @@ chains:
 	}
 }
 
-// TestE2EEscalationOverrideGuardSurvivesRestart: the guard is the volume
-// recorded in the report's tracker reading, and the live set is rebuilt
-// from the report table - so a restart keeps suppressing every rung at or
-// below the recorded threshold and only a strictly higher one overrides.
+// The guard is the recorded tracker volume, rebuilt from the report table at startup.
 func TestE2EEscalationOverrideGuardSurvivesRestart(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	dbPath := filepath.Join(t.TempDir(), "reports.db")
@@ -376,10 +329,6 @@ chains:
 	}
 	cancel()
 
-	// After the restart (tracker state starts over) the first event fires
-	// only the low rung and the second fires both: every Trigger is at or
-	// below the recorded threshold, so the report stays frozen at the
-	// pre-restart write.
 	clock.Advance(10 * time.Minute) // 18:10
 	d2 := startTestDaemon(t, clock, "unixgram", dbPath, rules)
 	d2.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/a", 200, 60))
@@ -398,11 +347,7 @@ chains:
 	}
 }
 
-// TestE2EEscalationHigherRungOverridesReportInPlace: a Trigger from a
-// rung strictly above the recorded threshold overrides the live report
-// in place - reason, penalty, rate, Sample, tracker reading, updated_at
-// and expires_at all take the overriding rung's values (expires_at runs
-// from its ttl); created_at alone stays frozen at first flagged.
+// created_at alone stays frozen at first flagged; every other field takes the overriding rung's values.
 func TestE2EEscalationHigherRungOverridesReportInPlace(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -422,7 +367,6 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 60 crosses only the low rung: the report takes its stance.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 60))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
@@ -438,8 +382,6 @@ chains:
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt)
 	}
 
-	// 100 more (value 160) crosses the middle rung: it overrides the
-	// live report in place - everything but created_at moves.
 	clock.Advance(30 * time.Minute) // 18:30
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big2", 200, 100))
 	d.waitProcessed(t, 2)
@@ -462,8 +404,6 @@ chains:
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt)
 	}
 
-	// 120 more (value 280) crosses the top rung: the ban moves the same
-	// fields again, expires_at from its own 24h ttl.
 	clock.Advance(30 * time.Minute) // 19:00
 	d.send(nginxLine("1734345936.123", "203.0.113.7", "GET", "/big3", 200, 120))
 	d.waitProcessed(t, 3)
@@ -487,11 +427,7 @@ chains:
 	}
 }
 
-// TestE2EEscalationLowerRungNeverDowngradesReport: a Trigger from a rung
-// at or below the recorded threshold is suppressed while the report is
-// alive - no downgrade and no rewrite, not even a refreshed Sample or
-// expiry. As leak decays the value back under the top rung, the lower
-// rung's Triggers leave the report exactly as the higher rung wrote it.
+// Suppression means no rewrite at all: not even a refreshed Sample or expiry.
 func TestE2EEscalationLowerRungNeverDowngradesReport(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -509,7 +445,6 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 200 crosses both rungs: the report stands at the ban (threshold 150).
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 200))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
@@ -517,8 +452,6 @@ chains:
 		t.Fatalf("reports = %+v, want one at the ban stance", doc.Reports)
 	}
 
-	// 60s of leak bring the value to 145: only the low rung fires, and
-	// its Trigger must not touch the live report.
 	clock.Advance(time.Minute)
 	d.send(nginxLine("1734345994.123", "203.0.113.7", "GET", "/small", 200, 5))
 	d.waitProcessed(t, 2)
@@ -536,19 +469,13 @@ chains:
 	}
 	checkFrozen("after the low rung alone fired")
 
-	// The value climbs back to 185: both rungs fire again, but 150 is
-	// exactly the recorded threshold - equal is not strictly above, so
-	// nothing is rewritten either.
+	// The ban rung refires at exactly the recorded threshold 150: equal is not strictly above.
 	clock.Advance(time.Minute)
 	d.send(nginxLine("1734346054.123", "203.0.113.7", "GET", "/big2", 200, 100))
 	d.waitProcessed(t, 3)
 	checkFrozen("after an equal-threshold re-fire")
 }
 
-// TestE2EEscalationDeathRearmsAtCurrentStance: a dead report's stance is
-// not remembered. The next matching event writes fresh at the lowest
-// crossed rung and overrides up the crossed rungs within that same
-// event, so the fresh report reflects the accumulation as it stands.
 func TestE2EEscalationDeathRearmsAtCurrentStance(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -568,8 +495,6 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 250 crosses the whole ladder: the report climbs to the ban within
-	// the event.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
@@ -580,10 +505,6 @@ chains:
 		t.Fatalf("delete count = %d, want 1", n)
 	}
 
-	// 110s of leak bring the value to 145: still above several rungs, but
-	// not the ban's. The next event writes at the lowest crossed rung and
-	// overrides up within the same event - the fresh report stands at the
-	// current stance (squeeze), not the dead report's ban.
 	clock.Advance(110 * time.Second) // 18:01:50
 	d.send(nginxLine("1734346044.123", "203.0.113.7", "GET", "/small", 200, 5))
 	d.waitProcessed(t, 2)
@@ -607,8 +528,7 @@ chains:
 	}
 }
 
-// failingStore fails one chosen Upsert at the store seam (1-based
-// sequence number; 0 never fails) to model a transient write failure.
+// failingStore fails one chosen Upsert (1-based; 0 never fails), modeling a transient write failure.
 type failingStore struct {
 	*sqlite.ReportRepository
 	writes atomic.Int64
@@ -622,10 +542,7 @@ func (f *failingStore) Upsert(ctx context.Context, rec domain.Report) error {
 	return f.ReportRepository.Upsert(ctx, rec)
 }
 
-// TestE2EEscalationFailedOverrideKeepsTheGuard: a failed override write
-// leaves the live report standing, so the guard still holds - a lower
-// rung never downgrades it - and the next matching event retries the
-// override.
+// The next matching event retries the override.
 func TestE2EEscalationFailedOverrideKeepsTheGuard(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	inner, err := sqlite.Open(":memory:")
@@ -648,8 +565,6 @@ chains:
 `
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, nil, withStore(store))
 
-	// 200 crosses both rungs: the low rung's write lands and the ban's
-	// override fails, leaving the throttle report as the live one.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 200))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
@@ -657,8 +572,6 @@ chains:
 		t.Fatalf("reports = %+v, want the landed throttle report", doc.Reports)
 	}
 
-	// The value decays to 145: only the low rung fires, and the live
-	// report keeps the failed write's old stance untouched.
 	clock.Advance(time.Minute)
 	d.send(nginxLine("1734345994.123", "203.0.113.7", "GET", "/small", 200, 5))
 	d.waitProcessed(t, 2)
@@ -671,7 +584,6 @@ chains:
 		t.Errorf("report = %+v, want the first write untouched (the failed override keeps the guard)", r)
 	}
 
-	// Back above the ban rung (185): the override is retried and lands.
 	clock.Advance(time.Minute)
 	d.send(nginxLine("1734346054.123", "203.0.113.7", "GET", "/big2", 200, 100))
 	d.waitProcessed(t, 3)
@@ -686,9 +598,7 @@ chains:
 	}
 }
 
-// TestE2EEscalationTrackerTTLFromTopRung: the tracker cache-entry TTL
-// derives from the ladder's top rung (top/leak) - state outlives gaps
-// below it and restarts from zero past it, never expiring mid-climb.
+// State must outlive gaps below the top rung's TTL and never expire mid-climb.
 func TestE2EEscalationTrackerTTLFromTopRung(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -706,10 +616,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Events share one event second (no leak decay between them) and
-	// arrive 5s apart on the wall clock - well inside the top rung's
-	// 20s TTL: the bucket keeps its state and climbs 1..5, and the rung
-	// at 1 fires while the value stands above it (events 2..5).
+	// Events share one event second (no leak decay) and sit 5s apart on the wall clock, well inside the top rung's 20s TTL.
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			clock.Advance(5 * time.Second)
@@ -721,8 +628,6 @@ chains:
 		t.Fatalf("marks = %v, want one per event above the rung (4)", got)
 	}
 
-	// Past the 20s TTL the entry expires and the bucket restarts empty:
-	// the next event contributes 1 alone and the rung holds silent.
 	clock.Advance(30 * time.Second)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/a", 200, 1))
 	d.waitProcessed(t, 6)
@@ -730,7 +635,6 @@ chains:
 		t.Errorf("marks = %v, want still 4 (state restarted past the TTL)", got)
 	}
 
-	// Within the TTL the climb resumes from the fresh state.
 	clock.Advance(5 * time.Second)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/a", 200, 1))
 	d.waitProcessed(t, 7)
