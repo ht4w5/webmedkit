@@ -49,7 +49,7 @@ func seedReports(b *testing.B, repo *sqlite.ReportRepository, rows int) {
 	ctx := context.Background()
 	svc := report.NewService(repo)
 	for i := 0; i < rows; i++ {
-		if err := svc.Trigger(ctx, benchListReport("bench-target-"+strconv.Itoa(i)+"/32")); err != nil {
+		if err := svc.Trigger(ctx, benchListReport("bench-target-"+strconv.Itoa(i)+"/32"), false); err != nil {
 			b.Fatalf("seed Trigger: %v", err)
 		}
 	}

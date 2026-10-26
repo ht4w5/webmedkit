@@ -554,6 +554,24 @@ chains:
 			wantErr: `rule "r": escalations: cannot be declared beside actions`,
 		},
 		{
+			name: "ladder beside empty actions rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        actions: []
+        escalations:
+          - at: 5
+            actions: [stop]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": escalations: cannot be declared beside actions`,
+		},
+		{
 			name: "ladder without actions accepted",
 			yaml: `
 version: 0
@@ -567,6 +585,18 @@ chains:
             actions: [stop]
           - at: 10
             actions: [stop]
+`,
+		},
+		{
+			name: "empty actions without a ladder accepted",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: []
 `,
 		},
 		{

@@ -270,8 +270,10 @@ log:
 3. **Enrich** — `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA,
    warm-up gated by `minSamples`); `replay` trackers read it.
 4. **Evaluate** — per event: traverse chains in order; a rule updates its
-   tracker (only when its filter matches), checks overflow, and on match runs
-   its actions — or the fired rungs' actions on a ladder.
+   tracker (only when its filter matches); a single-volume rule then
+   checks overflow, a ladder instead fires the rungs it crosses, and on
+   match runs its actions — the rule's action list, or the fired rungs'
+   action lists, lowest first.
 5. **Report** — the `report` action upserts through the `ReportRepository`
    (keyed by (rule, target)): insert or overwrite the record with the current
    tracker reading and sample. Report time is **wall clock**: `created_at`

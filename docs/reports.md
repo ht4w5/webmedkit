@@ -70,7 +70,9 @@ One report lives per (rule, target). A Trigger writes it when no report
 for the pair is alive. While one is alive, a Trigger at or below the
 volume recorded in the report's `tracker` reading — the threshold of
 the rung that last wrote it — writes nothing: no downgrade and no
-rewrite. A Trigger from a strictly higher rung overrides the report in
+rewrite. A rule without a ladder never overrides its live report: one
+write per report lifetime. A Trigger from a strictly higher rung
+overrides the report in
 place: `reason`, `penalty`, the `tracker` reading, `sample`, `updated_at`
 and `expires_at` all move to the overriding rung's values, and
 `expires_at` runs from its `ttl`. `created_at` alone stays frozen at

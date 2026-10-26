@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -94,6 +96,107 @@ chains:
 	}
 	if r.Sample.Path != "/big2" || r.Sample.Time != eventTime2At {
 		t.Errorf("sample = %+v, want the writing event's", r.Sample)
+	}
+}
+
+// singleVolumeMethodRules is a replay rule whose tolerated volume is the
+// step volume method's per-event estimate: volume_low 1 below the 1000-byte
+// file-size threshold, volume_high 2 from it.
+const singleVolumeMethodRules = `
+version: 0
+chains:
+  - name: abuse
+    rules:
+      - id: iso-replay
+        tracker:
+          track: replay
+          leak: 0
+          volume: {method: step, threshold: 1000, volume_low: 1, volume_high: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+
+// warmThenOverflow sends the warm-up samples that blind a path's file-size
+// estimate, then full transfers past the rung-less rule's volume: 2
+// transfers overflow volume 1 (small paths), 3 overflow volume 2 (big ones).
+func warmThenOverflow(d *testDaemon, epoch int, path string, sent int64, overflow int) {
+	for i := range 4 + overflow {
+		d.send(nginxLine(fmt.Sprintf("%d", epoch+i), "203.0.113.7", "GET", path, 200, sent))
+	}
+}
+
+// TestE2ESingleVolumeRuleNeverOverridesItsLiveReport: a rule without a
+// ladder writes at most once per report lifetime - one write, updated_at
+// frozen (US 26, "behave exactly as before"). Its reading's volume is the
+// volume method's per-event estimate, so a later event can carry a larger
+// volume than the recorded one and still never move the live report: only
+// a ladder rung may override in place (ADR 0013).
+func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", singleVolumeMethodRules)
+
+	// /small.iso (estimate 100) overflows its derived volume 1 on its
+	// second full transfer: the lifetime's one write at 18:00.
+	warmThenOverflow(d, 1734345934, "/small.iso", 100, 2)
+	d.waitProcessed(t, 6)
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	if doc.Reports[0].Tracker.Volume != 1 {
+		t.Fatalf("tracker = %+v, want the volume_low 1 estimate at the first write", doc.Reports[0].Tracker)
+	}
+
+	// /big.iso (estimate 10 000) grows the derived volume to 2 and its
+	// third transfer (value 3 > 2) Triggers again with a larger reading
+	// volume than the recorded one - the live report stands.
+	clock.Advance(10 * time.Minute) // 18:10
+	warmThenOverflow(d, 1734345944, "/big.iso", 10000, 3)
+	d.waitProcessed(t, 13)
+	doc = d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want still exactly one (one write per report lifetime)", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.CreatedAt != wallBase || r.UpdatedAt != wallBase {
+		t.Errorf("created_at/updated_at = %q/%q, want the 18:00 write frozen (no ladder, no override)",
+			r.CreatedAt, r.UpdatedAt)
+	}
+	if r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
+		t.Errorf("tracker = %+v, want the first write's reading {value 2, volume 1} frozen", r.Tracker)
+	}
+	if r.Sample.Path != "/small.iso" {
+		t.Errorf("sample = %+v, want the first write's /small.iso sample frozen", r.Sample)
+	}
+}
+
+// TestE2ESingleVolumeRuleNeverOverridesAfterRestart: the live set is
+// rebuilt from the report table at startup, so the one-write-per-lifetime
+// bound holds across a restart - a post-restart event with a larger
+// derived volume still writes nothing over the stored report.
+func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	dbPath := filepath.Join(t.TempDir(), "reports.db")
+
+	d1 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
+	warmThenOverflow(d1, 1734345934, "/small.iso", 100, 2)
+	d1.waitProcessed(t, 6)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := d1.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	cancel()
+
+	clock.Advance(10 * time.Minute) // 18:10
+	d2 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
+	warmThenOverflow(d2, 1734345944, "/big.iso", 10000, 3)
+	d2.waitProcessed(t, 7)
+	doc := d2.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want still exactly one", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.UpdatedAt != wallBase || r.Tracker.Value != 2 || r.Tracker.Volume != 1 || r.Sample.Path != "/small.iso" {
+		t.Errorf("report = %+v, want it frozen at the pre-restart write (the bound is rebuilt from the table)", r)
 	}
 }
 

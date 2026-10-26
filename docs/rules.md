@@ -25,8 +25,10 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 - One **Report** per (rule, Target) per report lifetime. While the
   report for (rule, Target) is alive, a Trigger at or below the volume
   recorded in its `tracker` reading — the threshold of the rung that
-  last wrote it — writes nothing: no downgrade and no rewrite. A
-  Trigger from a strictly higher rung overrides the report **in place**:
+  last wrote it — writes nothing: no downgrade and no rewrite. A rule
+  without a ladder never overrides its live report: one write per
+  report lifetime. A Trigger from a strictly higher rung overrides the
+  report **in place**:
   reason, penalty, rate, Sample, tracker reading, update time and
   expiry all move to the overriding rung's values, and its `ttl` runs
   from that write. Only `created_at` stays frozen at first flagged. The
@@ -192,10 +194,9 @@ How it behaves:
   load, so the fired rungs are always a prefix of the ladder — a
   transfer that flew past rungs cannot skip the lower responses, and
   actions within the event can never cancel a rung that already fired.
-- Rungs are level-triggered: they fire on every matching event while
-  the value stays above them, and stop as `leak` decays it below. A
-  handoff rung therefore feeds its downstream chain continuously, not
-  in flickers.
+- Rungs fire on every matching event while the value stays above
+  them, and stop as `leak` decays it below. A handoff rung therefore
+  feeds its downstream chain continuously, not in flickers.
 - Terminality is declared per rung's action list, and applies only to
   rungs that fired: the chain ends after the rule only when a fired rung
   carried `report`, `goto` or `stop`. A fired `jump` runs its target

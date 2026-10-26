@@ -154,6 +154,17 @@ func (e Escalation) Terminal() bool {
 	return false
 }
 
+// TopRung returns the ladder's top rung: the highest threshold the
+// accumulation can climb to. ok is false without a ladder - the
+// single-volume form has no static top rung (its volume is the
+// reading's).
+func (r Rule) TopRung() (Escalation, bool) {
+	if len(r.Escalations) == 0 {
+		return Escalation{}, false
+	}
+	return r.Escalations[len(r.Escalations)-1], true
+}
+
 // Rule is a named condition-action pairing: a filter, at most one tracker
 // and ordered actions. It matches when the filter accepts and the tracker (if any) overflows; the ID namespaces tracker state.
 type Rule struct {
@@ -171,26 +182,31 @@ type Rule struct {
 	Escalations []Escalation
 }
 
+// allRungs is the rule's whole rung set: its ladder, or the one
+// implicit rung standing at volume and carrying the rule's action list
+// (the single-volume form). volume only shapes the implicit rung's
+// threshold; callers that read action lists alone pass zero.
+func (r Rule) allRungs(volume float64) []Escalation {
+	if len(r.Escalations) > 0 {
+		return r.Escalations
+	}
+	return []Escalation{{At: volume, Actions: r.Actions}}
+}
+
 // Rungs resolves one post-accumulation reading to the rungs a match
 // fired, decided once before any action runs: every rung whose threshold
 // the reading's value stands above, lowest first. The loader's strictly
 // ascending thresholds make the fired rungs a prefix of the ladder.
-// A rule without a ladder is one implicit rung carrying the reading's
-// volume and the rule's action list, fired when the value stands above
-// the volume; a tracker-less rule always fires its implicit rung (it
-// matches on filter alone).
+// The implicit rung carries the reading's volume and fires when the
+// value stands above it; a tracker-less rule always fires its implicit
+// rung (it matches on filter alone).
 func (r Rule) Rungs(reading TrackerReading) []Escalation {
+	all := r.allRungs(reading.Volume)
 	if r.Tracker == nil {
-		return []Escalation{{Actions: r.Actions}}
-	}
-	if len(r.Escalations) == 0 {
-		if reading.Value > reading.Volume {
-			return []Escalation{{At: reading.Volume, Actions: r.Actions}}
-		}
-		return nil
+		return all
 	}
 	var fired []Escalation
-	for _, e := range r.Escalations {
+	for _, e := range all {
 		if e.At < reading.Value {
 			fired = append(fired, e)
 		}
@@ -201,11 +217,9 @@ func (r Rule) Rungs(reading TrackerReading) []Escalation {
 // ActionLists returns every ordered action list the rule can run: the
 // rule's action list for the single-volume form, else each rung's.
 func (r Rule) ActionLists() [][]Action {
-	if len(r.Escalations) == 0 {
-		return [][]Action{r.Actions}
-	}
-	lists := make([][]Action, 0, len(r.Escalations))
-	for _, e := range r.Escalations {
+	all := r.allRungs(0)
+	lists := make([][]Action, 0, len(all))
+	for _, e := range all {
 		lists = append(lists, e.Actions)
 	}
 	return lists

@@ -90,7 +90,7 @@ func TestServiceTriggerWritesThroughRepository(t *testing.T) {
 
 	t.Run("forwards the report", func(t *testing.T) {
 		repo := &stubRepository{}
-		if err := NewService(repo).Trigger(context.Background(), rec); err != nil {
+		if err := NewService(repo).Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
 		if !reflect.DeepEqual(repo.ups, []domain.Report{rec}) {
@@ -100,7 +100,7 @@ func TestServiceTriggerWritesThroughRepository(t *testing.T) {
 
 	t.Run("wraps repository failures", func(t *testing.T) {
 		repo := &stubRepository{upErr: errStub}
-		err := NewService(repo).Trigger(context.Background(), rec)
+		err := NewService(repo).Trigger(context.Background(), rec, false)
 		if !errors.Is(err, errStub) {
 			t.Errorf("Trigger error = %v, want it to identify %v", err, errStub)
 		}
@@ -218,10 +218,10 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 	t.Run("a live report suppresses the write", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), rec); err != nil {
+		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("suppressed Trigger: %v", err)
 		}
 		if len(repo.ups) != 1 {
@@ -232,13 +232,13 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 	t.Run("suppression is per (rule, target)", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), rec); err != nil {
+		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec("other", rec.Target, now, expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec("other", rec.Target, now, expiry), false); err != nil {
 			t.Fatalf("other rule: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, "203.0.113.8/32", now, expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, "203.0.113.8/32", now, expiry), false); err != nil {
 			t.Fatalf("other target: %v", err)
 		}
 		if len(repo.ups) != 3 {
@@ -249,10 +249,10 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 	t.Run("an expired report does not suppress", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), rec); err != nil {
+		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, expiry.Add(time.Minute), expiry.Add(2*time.Hour))); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, expiry.Add(time.Minute), expiry.Add(2*time.Hour)), false); err != nil {
 			t.Fatalf("Trigger past expiry: %v", err)
 		}
 		if len(repo.ups) != 2 {
@@ -271,13 +271,13 @@ func TestServiceDeleteRearmsWriting(t *testing.T) {
 	t.Run("a matching delete re-arms", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), rec); err != nil {
+		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
 		if _, err := svc.Delete(context.Background(), Query{Rule: "sticky"}); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("re-armed Trigger: %v", err)
 		}
 		if len(repo.ups) != 2 {
@@ -288,13 +288,13 @@ func TestServiceDeleteRearmsWriting(t *testing.T) {
 	t.Run("a non-matching delete keeps the suppression", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), rec); err != nil {
+		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
 		if _, err := svc.Delete(context.Background(), Query{Rule: "other"}); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
 		if len(repo.ups) != 1 {
@@ -311,7 +311,7 @@ func TestServiceDeleteExpiredRearmsWriting(t *testing.T) {
 	rec := liveRec("sticky", "203.0.113.7/32", now, expiry)
 	repo := &stubRepository{}
 	svc := NewService(repo)
-	if err := svc.Trigger(context.Background(), rec); err != nil {
+	if err := svc.Trigger(context.Background(), rec, false); err != nil {
 		t.Fatalf("first Trigger: %v", err)
 	}
 
@@ -319,7 +319,7 @@ func TestServiceDeleteExpiredRearmsWriting(t *testing.T) {
 	if _, err := svc.DeleteExpired(context.Background(), now.Add(30*time.Minute)); err != nil {
 		t.Fatalf("DeleteExpired: %v", err)
 	}
-	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(40*time.Minute), expiry)); err != nil {
+	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(40*time.Minute), expiry), false); err != nil {
 		t.Fatalf("Trigger: %v", err)
 	}
 	if len(repo.ups) != 1 {
@@ -330,7 +330,7 @@ func TestServiceDeleteExpiredRearmsWriting(t *testing.T) {
 	if _, err := svc.DeleteExpired(context.Background(), now.Add(2*time.Hour)); err != nil {
 		t.Fatalf("DeleteExpired: %v", err)
 	}
-	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(3*time.Hour), now.Add(4*time.Hour))); err != nil {
+	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(3*time.Hour), now.Add(4*time.Hour)), false); err != nil {
 		t.Fatalf("re-armed Trigger: %v", err)
 	}
 	if len(repo.ups) != 2 {
@@ -346,11 +346,11 @@ func TestServiceFailedWriteDoesNotSuppressTheRetry(t *testing.T) {
 	errStub := errors.New("stub failure")
 	repo := &stubRepository{upErr: errStub}
 	svc := NewService(repo)
-	if err := svc.Trigger(context.Background(), rec); !errors.Is(err, errStub) {
+	if err := svc.Trigger(context.Background(), rec, false); !errors.Is(err, errStub) {
 		t.Fatalf("Trigger error = %v, want %v", err, errStub)
 	}
 	repo.upErr = nil
-	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), now.Add(time.Hour))); err != nil {
+	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), now.Add(time.Hour)), false); err != nil {
 		t.Fatalf("retry Trigger: %v", err)
 	}
 	if len(repo.ups) != 2 {
@@ -374,10 +374,10 @@ func TestServiceRebuildDerivesLiveReportsFromTheTable(t *testing.T) {
 		if len(repo.lists) != 1 || !repo.lists[0].Now.Equal(now) {
 			t.Errorf("list queries = %+v, want one at %v", repo.lists, now)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(stored.Rule, stored.Target, now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(stored.Rule, stored.Target, now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec("other", "203.0.113.8/32", now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec("other", "203.0.113.8/32", now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
 		if len(repo.ups) != 1 {
@@ -388,13 +388,13 @@ func TestServiceRebuildDerivesLiveReportsFromTheTable(t *testing.T) {
 	t.Run("rebuild supplants the set", func(t *testing.T) {
 		repo := &stubRepository{}
 		svc := NewService(repo)
-		if err := svc.Trigger(context.Background(), stored); err != nil {
+		if err := svc.Trigger(context.Background(), stored, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
 		if err := svc.Rebuild(context.Background(), now); err != nil {
 			t.Fatalf("Rebuild: %v", err)
 		}
-		if err := svc.Trigger(context.Background(), liveRec(stored.Rule, stored.Target, now.Add(10*time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(stored.Rule, stored.Target, now.Add(10*time.Minute), expiry), false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
 		if len(repo.ups) != 2 {
@@ -427,7 +427,7 @@ func waitPending(t *testing.T, done <-chan error) {
 // triggerAsync runs Trigger off the test goroutine (the helpers fail inline).
 func triggerAsync(svc *Service, rec domain.Report) <-chan error {
 	done := make(chan error, 1)
-	go func() { done <- svc.Trigger(context.Background(), rec) }()
+	go func() { done <- svc.Trigger(context.Background(), rec, false) }()
 	return done
 }
 
@@ -461,7 +461,7 @@ func TestServiceConcurrentTriggerWaitsForTheWriteOutcome(t *testing.T) {
 			t.Errorf("write attempts = %d, want %d", got, wantUpserts)
 		}
 		// Whatever landed suppresses the next Trigger (one write per live report).
-		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), expiry)); err != nil {
+		if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), expiry), false); err != nil {
 			t.Fatalf("next Trigger: %v", err)
 		}
 		if got := repo.upserts(); got != wantUpserts {
@@ -486,7 +486,7 @@ func TestServiceConcurrentTriggerWaitsForTheWriteOutcome(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		go func() { done <- svc.Trigger(ctx, liveRec(rec.Rule, rec.Target, now, expiry)) }()
+		go func() { done <- svc.Trigger(ctx, liveRec(rec.Rule, rec.Target, now, expiry), false) }()
 		waitPending(t, done)
 		cancel()
 		select {
@@ -530,7 +530,7 @@ func TestServiceRebuildKeepsInFlightWrites(t *testing.T) {
 	}
 
 	// The landed write still suppresses: its entry survived the rebuild.
-	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), expiry)); err != nil {
+	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), expiry), false); err != nil {
 		t.Fatalf("Trigger after rebuild: %v", err)
 	}
 	if got := repo.upserts(); got != 1 {

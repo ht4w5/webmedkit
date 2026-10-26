@@ -46,7 +46,7 @@ type stubSink struct {
 	failures int
 }
 
-func (s *stubSink) Trigger(_ context.Context, rec domain.Report) error {
+func (s *stubSink) Trigger(_ context.Context, rec domain.Report, _ bool) error {
 	s.attempts++
 	if s.failures > 0 {
 		s.failures--

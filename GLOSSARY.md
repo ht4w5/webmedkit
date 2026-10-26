@@ -40,7 +40,7 @@ _Avoid_: statement, command
 
 **Match**:
 When a rule's filter accepts an event and its tracker (if any) stands
-above volume; the actions of the rule — or of every exceeded escalation,
+above volume; the actions of the rule — or of every crossed rung,
 lowest first — then run.
 _Avoid_: fire, hit
 
@@ -70,7 +70,10 @@ _Avoid_: exceed, breach
 
 **Escalation**:
 A rung on one tracker's ladder: a volume threshold in the tracker's
-quantity paired with its own ordered action list.
+quantity paired with its own ordered action list. The accumulation
+crosses a threshold on the climb and the rung fires while the value
+stands above it; strictly ascending thresholds make the fired rungs a
+prefix of the ladder.
 _Avoid_: tier, stage, level
 
 **Target**:

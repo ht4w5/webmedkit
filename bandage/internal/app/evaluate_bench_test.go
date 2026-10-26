@@ -230,9 +230,9 @@ type countingSink struct {
 	triggers int
 }
 
-func (s *countingSink) Trigger(ctx context.Context, rec domain.Report) error {
+func (s *countingSink) Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error {
 	s.triggers++
-	return s.reports.Trigger(ctx, rec)
+	return s.reports.Trigger(ctx, rec, allowOverride)
 }
 
 // rearmKind selects how a report lifetime ends: never, delete, or expiry.
