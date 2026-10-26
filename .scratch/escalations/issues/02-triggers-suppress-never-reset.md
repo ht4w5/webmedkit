@@ -13,20 +13,33 @@ describes unshipped behaviour.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A Trigger whose write lands leaves the tracker record intact: the
+- [x] A Trigger whose write lands leaves the tracker record intact: the
       value keeps accumulating across writes
-- [ ] A Trigger whose write is suppressed (live Report) leaves the
+- [x] A Trigger whose write is suppressed (live Report) leaves the
       tracker record intact and the Report untouched
-- [ ] While a Report is alive, exactly one report row exists per
+- [x] While a Report is alive, exactly one report row exists per
       (rule, Target) and its `updated_at` does not move
-- [ ] After expiry or deletion, the next matching event writes a fresh
+- [x] After expiry or deletion, the next matching event writes a fresh
       Report whose Sample and tracker reading come from the current
       accumulation
-- [ ] A failed report write still leaves the tracker record intact and
+- [x] A failed report write still leaves the tracker record intact and
       retries on the next matching event
-- [ ] The trigger-cadence test is rewritten from "a Target Triggers once
+- [x] The trigger-cadence test is rewritten from "a Target Triggers once
       per volume of traffic" to "one write per report lifetime"
-- [ ] The rules guide's Trigger semantics and the report contract's
+- [x] The rules guide's Trigger semantics and the report contract's
       lifecycle wording match the new behaviour in the same change
+
+Implemented on integration branch `feat/escalations` (commit `90244c0`;
+cross-ticket code-review fix pass through `129c5ea`). A Trigger now
+suppresses or writes and never empties the tracker record
+(`TrackerCache.Clear` deleted); a dead Report re-arms a fresh write at
+the accumulation's current stance and a failed write retries with the
+record intact. The trigger-cadence suite is rewritten to "one write per
+report lifetime"; the rules guide's Trigger semantics and the report
+contract's Lifecycle prose landed in the same change. The code-review
+pass closed the volume-method corner: rules without a ladder never
+override their live Report (`updated_at` frozen for the lifetime).
+
+Context: spec `../spec.md` (decision 6, amending ADR 0008); ADR 0013.

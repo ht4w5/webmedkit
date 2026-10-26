@@ -12,16 +12,32 @@ implementation cannot drift.
 
 **Blocked by:** 04, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The shipped rules config carries a worked ladder (handoff →
+- [x] The shipped rules config carries a worked ladder (handoff →
       throttle → ban) that loads and validates
-- [ ] `bandage -t` on the shipped config shows every rung with its
+- [x] `bandage -t` on the shipped config shows every rung with its
       threshold and actions
-- [ ] The rules guide's escalation section is complete with the worked
+- [x] The rules guide's escalation section is complete with the worked
       example and the handoff idiom
-- [ ] The rules format and validation reference sections describe the
+- [x] The rules format and validation reference sections describe the
       ladder, the per-kind threshold quantities and the full load-time
       validation matrix
-- [ ] No documented behaviour in the set describes anything the
+- [x] No documented behaviour in the set describes anything the
       implementation does not do, and vice versa
+
+Implemented on integration branch `feat/escalations` (commit `19ef271`;
+cross-ticket code-review fix pass through `129c5ea`). The shipped
+`configs/rules.yml` carries the `iso-egress-ladder` worked ladder
+(handoff `jump` at 50MB, throttle at 5GB, ban at 40GB) plus its
+`inspect` handoff chain, pinned through the loader and plan seams in
+`shippedrules_test.go`. The rules guide's escalation section is
+complete (worked example, per-kind threshold quantities, per-fired-rung
+terminality, the in-place override and its freeze rules, the
+jump-not-goto idiom) and the rules format and validation reference
+sections describe the ladder and the full load-time matrix; a drift
+audit across the rules guide, report contract, PLAN.md and GLOSSARY.md
+closed every divergence in both directions.
+
+Context: spec `../spec.md` (Modules touched — documentation set);
+completes the sections tickets 03-05 opened.

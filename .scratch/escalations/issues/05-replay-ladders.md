@@ -13,14 +13,27 @@ single-volume form, and load says so.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A replay tracker accepts `escalations` with plain-number thresholds
+- [x] A replay tracker accepts `escalations` with plain-number thresholds
       in download equivalents
-- [ ] Events with unknown Filesize skip the tracker entirely (no
+- [x] Events with unknown Filesize skip the tracker entirely (no
       increment, no decay, no cache touch)
-- [ ] The cache-entry TTL re-derives per event from the ladder's top rung
-- [ ] Load refuses a volume-method block on a ladder rule and a ladder on
+- [x] The cache-entry TTL re-derives per event from the ladder's top rung
+- [x] Load refuses a volume-method block on a ladder rule and a ladder on
       a single-volume rule, each error naming the rule
-- [ ] Fired rungs, per-fired-rung terminality and report override behave
+- [x] Fired rungs, per-fired-rung terminality and report override behave
       exactly as for rate and bandwidth ladders
+
+Implemented on integration branch `feat/escalations` (commit `338f766`;
+cross-ticket code-review fix pass through `129c5ea`). Replay ladders
+take plain-number thresholds in download equivalents, keep warm-up
+blindness (unknown-Filesize events touch no cache), re-derive the
+cache-entry TTL per event from the ladder's top rung, and load refuses a
+volume-method block beside a ladder and a ladder beside
+`tracker.volume`, each error naming the rule. Fired rungs, per-fired-
+rung terminality and report behaviour ride the shared rung machinery,
+identical to rate and bandwidth ladders.
+
+Context: spec `../spec.md` (decision 3, TTL paragraph); builds on
+ticket 03's rung dispatch.
