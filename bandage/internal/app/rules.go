@@ -185,7 +185,15 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	rule.FilterSource = flt
 
 	if raw.Tracker != nil {
-		cfg, err := parseTracker(id, raw.Tracker, raw.Escalations != nil)
+		var (
+			cfg *domain.TrackerConfig
+			err error
+		)
+		if raw.Escalations != nil {
+			cfg, err = parseLadderTracker(id, raw.Tracker)
+		} else {
+			cfg, err = parseTracker(id, raw.Tracker)
+		}
 		if err != nil {
 			return domain.Rule{}, err
 		}
@@ -203,8 +211,8 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		// (the zero-leak default and minimum are domain.TTL's). Replay
 		// re-derives its TTL per event from the same top rung and keeps
 		// the build TTL zero, as its single-volume form does.
-		if rule.Tracker.Kind != domain.TrackReplay {
-			rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, rungs[len(rungs)-1].At)
+		if top, ok := rule.TopRung(); ok && rule.Tracker.Kind != domain.TrackReplay {
+			rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, top.At)
 		}
 	}
 
@@ -224,12 +232,62 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	return rule, nil
 }
 
-// parseTracker builds the rule's tracker config. Rate and bandwidth
-// fix the TTL at build; replay derives it per event, so TTL stays zero.
-// A ladder rule carries no tracker.volume: its rungs stand in for it
-// (scalar thresholds, replay's in download equivalents) and the TTL is
-// derived from the top rung.
-func parseTracker(id string, raw *rawTracker, ladder bool) (*domain.TrackerConfig, error) {
+// parseTracker builds the single-volume rule's tracker config. Rate and
+// bandwidth fix the TTL at build; replay derives it per event, so TTL
+// stays zero and its volume may take a volume-method block.
+func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
+	cfg, err := parseTrackerBase(id, raw)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Kind == domain.TrackReplay {
+		volume, method, err := parseReplayVolume(id, &raw.Volume)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Volume, cfg.VolumeMethod = volume, method
+		return cfg, nil
+	}
+	if raw.Volume.Kind != 0 && raw.Volume.Kind != yaml.ScalarNode {
+		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be a quantity (volume methods are replay-only)", id)
+	}
+	volume, err := parseTrackerQuantity(id, "tracker.volume", &raw.Volume, cfg.Kind)
+	if err != nil {
+		return nil, err
+	}
+	if volume <= 0 {
+		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be positive", id)
+	}
+	cfg.Volume = volume
+	cfg.TTL = domain.TTL(cfg.Leak, volume)
+	return cfg, nil
+}
+
+// parseLadderTracker builds the ladder rule's tracker config. A ladder
+// carries no tracker.volume: its scalar rungs stand in for it (scalar
+// thresholds, replay's in download equivalents) and the TTL derives from
+// the top rung. A volume-method block beside a ladder is its own refusal
+// - methods scale with Filesize and are exclusive to the single-volume
+// form - and a scalar volume is the single-volume rule a ladder is never
+// declared on (replay's volume may take either shape, hence the split).
+func parseLadderTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
+	cfg, err := parseTrackerBase(id, raw)
+	if err != nil {
+		return nil, err
+	}
+	switch raw.Volume.Kind {
+	case 0:
+	case yaml.MappingNode:
+		return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)", id)
+	default:
+		return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
+	}
+	return cfg, nil
+}
+
+// parseTrackerBase parses the tracker fields both forms share: the
+// kind, the leak and the per-family target aggregation.
+func parseTrackerBase(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	var kind domain.TrackKind
 	switch raw.Track {
 	case "":
@@ -253,45 +311,7 @@ func parseTracker(id string, raw *rawTracker, ladder bool) (*domain.TrackerConfi
 	if err != nil {
 		return nil, err
 	}
-
-	cfg := &domain.TrackerConfig{Kind: kind, Leak: leak, TargetPrefix: prefix}
-	if ladder {
-		// A ladder replaces tracker.volume outright: its scalar rungs
-		// stand in for it. A volume-method block beside a ladder is its
-		// own refusal - methods scale with Filesize and are exclusive to
-		// the single-volume form - and a scalar volume is the
-		// single-volume rule a ladder is never declared on (replay's
-		// volume may take either shape, hence the split).
-		switch raw.Volume.Kind {
-		case 0:
-		case yaml.MappingNode:
-			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)", id)
-		default:
-			return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
-		}
-		return cfg, nil
-	}
-	if kind == domain.TrackReplay {
-		volume, method, err := parseReplayVolume(id, &raw.Volume)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Volume, cfg.VolumeMethod = volume, method
-		return cfg, nil
-	}
-	if raw.Volume.Kind != 0 && raw.Volume.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be a quantity (volume methods are replay-only)", id)
-	}
-	volume, err := parseTrackerQuantity(id, "tracker.volume", &raw.Volume, kind)
-	if err != nil {
-		return nil, err
-	}
-	if volume <= 0 {
-		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be positive", id)
-	}
-	cfg.Volume = volume
-	cfg.TTL = domain.TTL(leak, volume)
-	return cfg, nil
+	return &domain.TrackerConfig{Kind: kind, Leak: leak, TargetPrefix: prefix}, nil
 }
 
 // parseTargetPrefix builds the per-family target aggregation, default

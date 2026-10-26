@@ -226,8 +226,8 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		// already normalized by Filesize - so the TTL re-derives from the
 		// top rung and state outlives the whole climb.
 		volume = cfg.VolumeFor(size)
-		if n := len(rule.Escalations); n > 0 {
-			volume = rule.Escalations[n-1].At
+		if top, ok := rule.TopRung(); ok {
+			volume = top.At
 		}
 		ttl = domain.TTL(cfg.Leak, volume)
 	}
