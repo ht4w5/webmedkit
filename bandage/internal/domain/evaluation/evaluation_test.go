@@ -328,14 +328,11 @@ func TestReplayTTLDerivedPerEvent(t *testing.T) {
 	}
 }
 
-// A Trigger whose write lands leaves the tracker record intact: the
-// value keeps accumulating across writes (report aliveness alone bounds
-// writes; nothing resets the record).
+// Report aliveness alone bounds the writes: nothing resets the record.
 func TestTriggerLeavesTrackerRecordIntact(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 2},
 		domain.Action{Report: &domain.ReportAction{Reason: "overflow", TTL: time.Hour}})
 
-	// 1 + 1 + 1 = 3 > 2 overflows on the third event: one write, reading 3.
 	for i := 0; i < 3; i++ {
 		h.evaluate(t, event(int64(100+i), "/a", 100, 0))
 	}
@@ -346,9 +343,6 @@ func TestTriggerLeavesTrackerRecordIntact(t *testing.T) {
 		t.Errorf("trigger reading = %v, want 3 (the Trigger-time reading)", got)
 	}
 
-	// The record kept accumulating: the next event reads 4 and Triggers
-	// again (this stub records every write; the live report would suppress
-	// it at the report service).
 	h.evaluate(t, event(200, "/a", 100, 0))
 	if h.sink.attempts != 2 {
 		t.Fatalf("report writes = %d, want 2 (the record keeps accumulating across writes)", h.sink.attempts)
@@ -363,9 +357,6 @@ func TestTriggerLeavesTrackerRecordIntact(t *testing.T) {
 	}
 }
 
-// A replay Trigger leaves the (Target, path) record it keyed on intact:
-// per-path accumulation continues across writes and other paths' records
-// are untouched.
 func TestTriggerLeavesReplayTrackerRecordPerPath(t *testing.T) {
 	h := newHarness(t, &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0, Volume: 2})
 
@@ -386,8 +377,6 @@ func TestTriggerLeavesReplayTrackerRecordPerPath(t *testing.T) {
 	if h.sink.attempts != 2 {
 		t.Fatalf("report writes = %d, want 2 (/b kept its state)", h.sink.attempts)
 	}
-	// and /a kept its record across the write: its next download Triggers
-	// at 4.
 	h.evaluate(t, event(106, "/a", 100, 100))
 	if h.sink.attempts != 3 {
 		t.Fatalf("report writes = %d, want 3 (/a kept its state across the write)", h.sink.attempts)
@@ -396,7 +385,6 @@ func TestTriggerLeavesReplayTrackerRecordPerPath(t *testing.T) {
 		t.Errorf("/a trigger reading = %v, want 4 (per-path accumulation continues)", got)
 	}
 
-	// The two paths' records hold 4 and 3 - only the match's key moved.
 	want := map[string]float64{
 		"iso-replay\x00203.0.113.7/32\x00/a": 4,
 		"iso-replay\x00203.0.113.7/32\x00/b": 3,
@@ -411,8 +399,7 @@ func TestTriggerLeavesReplayTrackerRecordPerPath(t *testing.T) {
 	}
 }
 
-// A failed report write leaves the tracker record intact and the next
-// matching event retries the report at the kept accumulation.
+// The next matching event retries the report at the kept accumulation.
 func TestFailedReportWriteLeavesTrackerRecordIntact(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 2},
 		domain.Action{Report: &domain.ReportAction{Reason: "overflow", TTL: time.Hour}})
@@ -430,8 +417,6 @@ func TestFailedReportWriteLeavesTrackerRecordIntact(t *testing.T) {
 		}
 	}
 
-	// The kept record overflows again (4 > 2) and the retry lands with
-	// the accumulation as it stands.
 	h.evaluate(t, event(200, "/a", 100, 0))
 	if h.sink.attempts != 2 || len(h.sink.upserts) != 1 {
 		t.Fatalf("attempts = %d, upserts = %d, want the retry to land", h.sink.attempts, len(h.sink.upserts))
@@ -441,8 +426,6 @@ func TestFailedReportWriteLeavesTrackerRecordIntact(t *testing.T) {
 	}
 }
 
-// A match whose actions contain no report action writes nothing; the
-// tracker keeps accumulating.
 func TestMatchWithoutReportActionKeepsTracker(t *testing.T) {
 	h := newRuleHarness(t, &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 100},
 		domain.Action{Log: &domain.LogAction{Level: domain.LevelDebug, Message: "SEEN:"}})
@@ -459,8 +442,7 @@ func TestMatchWithoutReportActionKeepsTracker(t *testing.T) {
 	}
 }
 
-// Tracker-less rules have no tracker record at all: every match Triggers
-// on filter alone and the cache is never touched.
+// A tracker-less rule matches on filter alone: every event Triggers.
 func TestTrackerlessRuleTouchesNoTracker(t *testing.T) {
 	h := newRuleHarness(t, nil,
 		domain.Action{Report: &domain.ReportAction{Reason: "tripwire", TTL: time.Hour}})

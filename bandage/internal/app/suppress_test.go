@@ -110,10 +110,7 @@ chains:
 	}
 }
 
-// TestE2ESuppressedTriggersKeepTheTrackerRecord: a suppressed Trigger
-// leaves the tracker record intact and the report untouched; after the
-// report dies, the next matching event writes fresh at the accumulation's
-// current stance.
+// After the report dies the next matching event writes fresh at the current stance.
 func TestE2ESuppressedTriggersKeepTheTrackerRecord(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -127,8 +124,6 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// 150 + 150 = 300 > 200 overflows on every second event: event 2
-	// writes, events 3 and 4 are suppressed. No Trigger empties anything.
 	for range 4 {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	}
@@ -142,9 +137,6 @@ chains:
 		t.Fatalf("delete count = %d, want 1", n)
 	}
 
-	// The record kept accumulating across the writes and the delete: the
-	// next matching event writes fresh at the current stance (4x150 kept
-	// + 150 new), its Sample and tracker reading describing that event.
 	clock.Advance(10 * time.Minute) // 18:10
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big2", 200, 150))
 	d.waitProcessed(t, 5)

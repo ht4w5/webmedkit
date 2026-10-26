@@ -533,8 +533,7 @@ chains:
 `,
 		},
 
-		// The escalation-ladder matrix: a ladder replaces actions and
-		// tracker.volume, and every refusal names the rule.
+		// The escalation-ladder matrix: a ladder replaces actions and tracker.volume; every refusal names the rule.
 		{
 			name: "ladder beside actions rejected",
 			yaml: `
@@ -1736,8 +1735,6 @@ chains:
 	}
 }
 
-// ladderRules is a bandwidth rule with an escalation ladder: a handoff
-// rung and two report rungs, in the tracker's quantity (bytes).
 const ladderRules = `
 version: 0
 chains:
@@ -1760,10 +1757,7 @@ chains:
         actions: [{log: "debug,MARK:WATCH"}]
 `
 
-// TestParseRulesEscalations: a ladder parses to rungs with thresholds in
-// the tracker's quantity and their own action lists; the rule carries no
-// action list and no tracker.volume, and the cache-entry TTL derives
-// from the ladder's top rung (zero-leak default and minimum intact).
+// A ladder carries no action list and no tracker.volume; the cache-entry TTL derives from the top rung.
 func TestParseRulesEscalations(t *testing.T) {
 	chains, err := ParseRules([]byte(ladderRules))
 	if err != nil {
@@ -1809,8 +1803,7 @@ func TestParseRulesEscalations(t *testing.T) {
 	}
 }
 
-// The ladder's cache-entry TTL keeps the zero-leak default and the
-// one-second minimum of the single-volume derivation.
+// The TTL keeps the zero-leak default and the one-second minimum of the single-volume derivation.
 func TestParseRulesEscalationTTLDefaults(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1839,9 +1832,6 @@ func TestParseRulesEscalationTTLDefaults(t *testing.T) {
 	}
 }
 
-// TestShowsEscalationRungsInPlan: the --test plan prints every rung with
-// its threshold and its actions, and the tracker line's ttl derives from
-// the ladder's top rung (the rungs stand in for tracker.volume).
 func TestShowsEscalationRungsInPlan(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")
@@ -1867,7 +1857,6 @@ func TestShowsEscalationRungsInPlan(t *testing.T) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
 		}
 	}
-	// The ladder's rungs carry every threshold; the tracker line none.
 	if strings.Contains(plan, "tracker: bandwidth leak=1000000 volume=") {
 		t.Errorf("ladder tracker line still prints volume:\n%s", plan)
 	}

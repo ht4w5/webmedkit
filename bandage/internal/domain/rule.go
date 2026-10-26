@@ -131,20 +131,16 @@ type Matcher interface {
 	Match(event *Event) bool
 }
 
-// Escalation is a rung on one tracker's ladder (GLOSSARY): a volume
-// threshold in the tracker's quantity paired with its own ordered
-// action list. A rule without a ladder is exactly one implicit rung
-// carrying its volume and its action list.
+// Escalation is a rung on one tracker's ladder (GLOSSARY): a volume threshold in
+// the tracker's quantity with its own action list; a ladder-less rule is one implicit rung.
 type Escalation struct {
 	// At is the rung's volume threshold in the tracker's quantity.
-	At float64
-	// Actions is the rung's ordered action list.
+	At      float64
 	Actions []Action
 }
 
-// Terminal reports whether the rung's action list ends chain traversal
-// after it has run (report, goto or stop actions) - a static property of
-// the action list (ADR 0013).
+// Terminal reports whether the rung's action list ends chain traversal after it
+// has run (report, goto or stop) - a static property of the list (ADR 0013).
 func (e Escalation) Terminal() bool {
 	for _, a := range e.Actions {
 		if a.Report != nil || a.Goto != "" || a.Stop {
@@ -154,10 +150,8 @@ func (e Escalation) Terminal() bool {
 	return false
 }
 
-// TopRung returns the ladder's top rung: the highest threshold the
-// accumulation can climb to. ok is false without a ladder - the
-// single-volume form has no static top rung (its volume is the
-// reading's).
+// TopRung returns the ladder's top rung. ok is false without a ladder: the
+// single-volume form has no static top rung (its volume is the reading's).
 func (r Rule) TopRung() (Escalation, bool) {
 	if len(r.Escalations) == 0 {
 		return Escalation{}, false
@@ -175,17 +169,13 @@ type Rule struct {
 	Filter       Matcher
 	Tracker      *TrackerConfig
 	Actions      []Action
-	// Escalations is the rule's ladder: rungs with strictly ascending
-	// thresholds in the tracker's quantity, each with its own action
-	// list (GLOSSARY). A rule carries an action list or a ladder, never
-	// both; nil is the single-volume form.
+	// Escalations is the rule's ladder: rungs with strictly ascending thresholds,
+	// each with its own action list. A rule carries an action list or a ladder, never both.
 	Escalations []Escalation
 }
 
-// allRungs is the rule's whole rung set: its ladder, or the one
-// implicit rung standing at volume and carrying the rule's action list
-// (the single-volume form). volume only shapes the implicit rung's
-// threshold; callers that read action lists alone pass zero.
+// allRungs is the ladder, or the one implicit rung at volume carrying the rule's
+// action list (single-volume form); volume shapes only that rung, and list-only callers pass zero.
 func (r Rule) allRungs(volume float64) []Escalation {
 	if len(r.Escalations) > 0 {
 		return r.Escalations
@@ -193,13 +183,8 @@ func (r Rule) allRungs(volume float64) []Escalation {
 	return []Escalation{{At: volume, Actions: r.Actions}}
 }
 
-// Rungs resolves one post-accumulation reading to the rungs a match
-// fired, decided once before any action runs: every rung whose threshold
-// the reading's value stands above, lowest first. The loader's strictly
-// ascending thresholds make the fired rungs a prefix of the ladder.
-// The implicit rung carries the reading's volume and fires when the
-// value stands above it; a tracker-less rule always fires its implicit
-// rung (it matches on filter alone).
+// Rungs resolves one post-accumulation reading to the rungs a match fired, lowest
+// first; the loader's strictly ascending thresholds make the fired rungs a ladder prefix.
 func (r Rule) Rungs(reading TrackerReading) []Escalation {
 	all := r.allRungs(reading.Volume)
 	if r.Tracker == nil {
@@ -214,8 +199,6 @@ func (r Rule) Rungs(reading TrackerReading) []Escalation {
 	return fired
 }
 
-// ActionLists returns every ordered action list the rule can run: the
-// rule's action list for the single-volume form, else each rung's.
 func (r Rule) ActionLists() [][]Action {
 	all := r.allRungs(0)
 	lists := make([][]Action, 0, len(all))

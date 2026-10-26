@@ -41,13 +41,11 @@ type rawRule struct {
 	// Actions is the rule's action list (nil key absent, empty list a
 	// declared empty list).
 	Actions *[]yaml.Node `yaml:"actions"`
-	// Escalations is the rule's ladder (nil key absent, empty list a
-	// declared empty ladder).
+	// Escalations is the rule's ladder (nil key absent, empty list a declared empty ladder).
 	Escalations *[]rawEscalation `yaml:"escalations"`
 }
 
-// rawEscalation is one ladder rung: a threshold in the tracker's
-// quantity plus its own ordered action list.
+// rawEscalation is one ladder rung: a threshold in the tracker's quantity plus its action list.
 type rawEscalation struct {
 	At      yaml.Node   `yaml:"at"`
 	Actions []yaml.Node `yaml:"actions"`
@@ -163,9 +161,6 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 
 	rule := domain.Rule{ID: id}
 
-	// A ladder replaces the rule's action list and its tracker.volume:
-	// never both, and never without a tracker to accumulate. An empty
-	// list still counts as declared.
 	if raw.Escalations != nil && raw.Actions != nil {
 		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside actions", id)
 	}
@@ -206,11 +201,8 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 			return domain.Rule{}, err
 		}
 		rule.Escalations = rungs
-		// The ladder's rungs stand in for tracker.volume: the cache-entry
-		// TTL derives from the top rung so state outlives the whole climb
-		// (the zero-leak default and minimum are domain.TTL's). Replay
-		// re-derives its TTL per event from the same top rung and keeps
-		// the build TTL zero, as its single-volume form does.
+		// The rungs stand in for tracker.volume: the cache-entry TTL derives
+		// from the top rung so state outlives the whole climb; replay re-derives per event and keeps the build TTL zero.
 		if top, ok := rule.TopRung(); ok && rule.Tracker.Kind != domain.TrackReplay {
 			rule.Tracker.TTL = domain.TTL(rule.Tracker.Leak, top.At)
 		}
@@ -232,9 +224,8 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	return rule, nil
 }
 
-// parseTracker builds the single-volume rule's tracker config. Rate and
-// bandwidth fix the TTL at build; replay derives it per event, so TTL
-// stays zero and its volume may take a volume-method block.
+// parseTracker builds the single-volume rule's tracker config: rate and bandwidth
+// fix the TTL at build, replay derives it per event so TTL stays zero.
 func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	cfg, err := parseTrackerBase(id, raw)
 	if err != nil {
@@ -263,13 +254,8 @@ func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	return cfg, nil
 }
 
-// parseLadderTracker builds the ladder rule's tracker config. A ladder
-// carries no tracker.volume: its scalar rungs stand in for it (scalar
-// thresholds, replay's in download equivalents) and the TTL derives from
-// the top rung. A volume-method block beside a ladder is its own refusal
-// - methods scale with Filesize and are exclusive to the single-volume
-// form - and a scalar volume is the single-volume rule a ladder is never
-// declared on (replay's volume may take either shape, hence the split).
+// parseLadderTracker builds the ladder rule's tracker config: a ladder carries
+// no tracker.volume (its rungs stand in for it), so any volume beside it is refused.
 func parseLadderTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	cfg, err := parseTrackerBase(id, raw)
 	if err != nil {
@@ -285,8 +271,6 @@ func parseLadderTracker(id string, raw *rawTracker) (*domain.TrackerConfig, erro
 	return cfg, nil
 }
 
-// parseTrackerBase parses the tracker fields both forms share: the
-// kind, the leak and the per-family target aggregation.
 func parseTrackerBase(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	var kind domain.TrackKind
 	switch raw.Track {
@@ -357,10 +341,8 @@ func parseTrackerQuantity(id, field string, node *yaml.Node, kind domain.TrackKi
 	return v, nil
 }
 
-// parseEscalations builds the rule's ladder: at least two rungs with
-// strictly ascending thresholds in the tracker's quantity, each rung's
-// actions through the shared action parser. Strict ascent keeps the
-// rungs a value stands above a prefix of the ladder.
+// parseEscalations builds the rule's ladder: at least two rungs with strictly
+// ascending thresholds, so the rungs a value stands above stay a ladder prefix.
 func parseEscalations(id string, raw []rawEscalation, kind domain.TrackKind) ([]domain.Escalation, error) {
 	if len(raw) < 2 {
 		return nil, fmt.Errorf("rules: rule %q: escalations: at least two rungs required", id)

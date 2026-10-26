@@ -42,7 +42,8 @@ type Repository interface {
 	DeleteExpired(ctx context.Context, now time.Time) (int, error)
 }
 
-// Service is the one report lifecycle module: Trigger upserts one report per (rule, target) whose stance escalates in place. While a report is alive, a Trigger without a ladder rung writes nothing (one write per report lifetime) and a ladder rung's Trigger whose threshold (the tracker volume it records) is at or below the recorded one writes nothing (ADR 0013).
+// Service is the one report lifecycle module: Trigger upserts one report per (rule, target)
+// and escalates it in place - only a strictly higher ladder rung overrides a live report; every other Trigger writes nothing (ADR 0013).
 type Service struct {
 	repo Repository
 
@@ -57,15 +58,12 @@ type reportKey struct {
 }
 
 // liveEntry is one (rule, target)'s suppression state: settled expiry decides
-// aliveness at Trigger time; volume is the threshold recorded in the live
-// report's tracker reading (the writing rung's threshold), deciding what may
-// override it; a non-nil inflight marks a pending write.
+// aliveness at Trigger time; volume is the recorded threshold an override must stand strictly above.
 type liveEntry struct {
 	expiresAt time.Time
 	volume    float64
 	// inflight is non-nil only while this key's write is in flight; closed under
-	// s.mu once settled (the entry is kept on success and rolled back to what
-	// stood before the write on failure).
+	// s.mu once settled (kept on success, rolled back to the prior entry on failure).
 	inflight chan struct{}
 }
 
@@ -73,14 +71,8 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, live: make(map[reportKey]*liveEntry)}
 }
 
-// Trigger records the report for (rule, target): allowOverride marks the
-// write as a ladder rung's Trigger, and only such a Trigger from a strictly
-// higher rung than the live report's recorded threshold overrides the row in
-// place; every other Trigger while the report is alive is suppressed - a rule
-// without a ladder never overrides its live report (one write per report
-// lifetime). Concurrent Triggers for one key never interleave writes
-// (ADR 0013). A failed write is not a Trigger outcome: whatever stood before
-// it stands still, and the next matching event retries the report.
+// Trigger records the report for (rule, target). A failed write is not a Trigger
+// outcome: the record stands and the next matching event retries (ADR 0013).
 func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error {
 	key := reportKey{rule: rec.Rule, target: rec.Target}
 	var e, prev *liveEntry
@@ -99,11 +91,6 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 				return fmt.Errorf("trigger report: %w", ctx.Err())
 			}
 		}
-		// A live report suppresses every Trigger that is not a strictly
-		// higher ladder rung's: one without a ladder rung never overrides
-		// (its reading's volume is a per-event estimate, not a rung's
-		// static threshold), and a rung at or below the recorded volume
-		// never downgrades it.
 		if ok && cur.expiresAt.After(rec.UpdatedAt) && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
 			s.mu.Unlock()
 			return nil
@@ -118,8 +105,7 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 		s.mu.Lock()
 		if s.live[key] == e {
 			if prev != nil {
-				// The failed write left the old row standing: its entry
-				// keeps suppressing against the recorded threshold.
+				// The failed write leaves the old row standing: its entry keeps suppressing.
 				s.live[key] = prev
 			} else {
 				delete(s.live, key)
@@ -152,8 +138,6 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 	}
 	live := make(map[reportKey]*liveEntry, len(rows))
 	for _, rec := range rows {
-		// The recorded threshold (the writing rung's tracker volume)
-		// survives the restart with the row it is stored in.
 		live[reportKey{rule: rec.Rule, target: rec.Target}] = &liveEntry{expiresAt: rec.ExpiresAt, volume: rec.Tracker.Volume}
 	}
 	for key, e := range s.live {
