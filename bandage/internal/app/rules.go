@@ -38,7 +38,9 @@ type rawRule struct {
 	ID      string      `yaml:"id"`
 	Filter  string      `yaml:"filter"`
 	Tracker *rawTracker `yaml:"tracker"`
-	Actions []yaml.Node `yaml:"actions"`
+	// Actions is the rule's action list (nil key absent, empty list a
+	// declared empty list).
+	Actions *[]yaml.Node `yaml:"actions"`
 	// Escalations is the rule's ladder (nil key absent, empty list a
 	// declared empty ladder).
 	Escalations *[]rawEscalation `yaml:"escalations"`
@@ -162,8 +164,9 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	rule := domain.Rule{ID: id}
 
 	// A ladder replaces the rule's action list and its tracker.volume:
-	// never both, and never without a tracker to accumulate.
-	if raw.Escalations != nil && len(raw.Actions) > 0 {
+	// never both, and never without a tracker to accumulate. An empty
+	// list still counts as declared.
+	if raw.Escalations != nil && raw.Actions != nil {
 		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside actions", id)
 	}
 	if raw.Escalations != nil && raw.Tracker == nil {
@@ -205,8 +208,12 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		}
 	}
 
-	for i := range raw.Actions {
-		action, err := parseAction(id, &raw.Actions[i])
+	var actions []yaml.Node
+	if raw.Actions != nil {
+		actions = *raw.Actions
+	}
+	for i := range actions {
+		action, err := parseAction(id, &actions[i])
 		if err != nil {
 			return domain.Rule{}, err
 		}
