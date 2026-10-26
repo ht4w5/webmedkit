@@ -13,8 +13,9 @@ import (
 // equivalents (already normalized by Filesize), warm-up blindness, the
 // per-event cache-entry TTL from the ladder's top rung, and the same
 // firing, terminality and report behaviour as rate and bandwidth
-// ladders. Report rungs write with today's suppression semantics; the
-// in-place override is a later change and rewrites these expectations.
+// ladders. Report rungs write one Report per (rule, Target) whose
+// stance escalates in place; the override fields themselves are pinned
+// at the escalation suites.
 
 // TestE2EReplayLadderRungsAreDownloadEquivalents: a replay ladder's
 // thresholds mean full downloads of that path whether the file is a
@@ -334,9 +335,9 @@ chains:
 // TestE2EReplayLadderReportRungsKeepOneReportPerRuleTarget: report rungs
 // keep exactly one Report per (rule, Target) as the climb fires them,
 // and `created_at` stays frozen at first flagged. (Which fired rung's
-// reason, reading and timestamps the row carries follows the in-place
-// override semantics landing with a later change; only the identity and
-// the frozen creation time are shared by both, so only those pin here.)
+// reason, reading and timestamps the row carries is pinned at the
+// in-place override suites; only the identity and the frozen creation
+// time are pinned here.)
 func TestE2EReplayLadderReportRungsKeepOneReportPerRuleTarget(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `

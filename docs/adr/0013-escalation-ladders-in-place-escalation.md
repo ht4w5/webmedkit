@@ -7,7 +7,7 @@ traversal before later rules see the event, and one live report per
 (rule, Target) swallows the stronger write. A rule therefore trades its
 volume for an **escalation ladder** (GLOSSARY): rungs with strictly
 ascending thresholds in the tracker's quantity, each with its own action
-list, every exceeded rung firing lowest-first on each matching event.
+list, every crossed rung firing lowest-first on each matching event.
 Two runtime decisions follow, and both amend ADR 0008.
 
 A Trigger **never empties the tracker record** (reversing ADR 0008's
