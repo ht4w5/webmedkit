@@ -15,17 +15,18 @@ import (
 )
 
 // Escalation ladders at the daemon seam: fired-rung dispatch,
-// level-triggered handoff rungs, per-fired-rung terminality, the
+// handoff rungs that fire on every Event while the value stays above
+// their threshold, per-fired-rung terminality, the
 // ladder-derived tracker TTL and the report rungs' in-place escalation
 // (ADR 0013): one Report per (rule, Target) whose stance follows the
 // top rung the accumulation stands above.
 
-// TestE2EEscalationFiresEveryExceededRungLowestFirst: on each matching
+// TestE2EEscalationFiresEveryCrossedRungLowestFirst: on each matching
 // event every rung the accumulated value stands above fires, lowest
 // first — a transfer that flew past rungs cannot skip the lower
 // responses. The fired rungs are decided once from the post-accumulation
 // value, before any action runs.
-func TestE2EEscalationFiresEveryExceededRungLowestFirst(t *testing.T) {
+func TestE2EEscalationFiresEveryCrossedRungLowestFirst(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -48,7 +49,7 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 1)
 	if got, want := marks(d), []string{"MARK:LOW", "MARK:MID"}; !slices.Equal(got, want) {
-		t.Fatalf("marks = %v, want %v (every exceeded rung, lowest first)", got, want)
+		t.Fatalf("marks = %v, want %v (every crossed rung, lowest first)", got, want)
 	}
 
 	// The second transfer takes the value to 500: all three fire.
@@ -85,10 +86,9 @@ chains:
 	}
 }
 
-// TestE2EEscalationHandoffRungFiresEveryEvent: a handoff rung is
-// level-triggered - it fires on every matching event while the value
-// stays above its threshold, feeding the target chain continuously
-// rather than in flickers, and stops once leak has decayed the value
+// TestE2EEscalationHandoffRungFiresEveryEvent: a handoff rung fires
+// on every matching event while the value stays above its threshold,
+// feeding the target chain continuously rather than in flickers, and stops once leak has decayed the value
 // below (no report rungs here: nothing resets the bucket mid-climb).
 func TestE2EEscalationHandoffRungFiresEveryEvent(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -522,16 +522,16 @@ chains:
 	clock.Advance(time.Minute)
 	d.send(nginxLine("1734345994.123", "203.0.113.7", "GET", "/small", 200, 5))
 	d.waitProcessed(t, 2)
-	checkFrozen := func(stage string) {
+	checkFrozen := func(when string) {
 		t.Helper()
 		doc := d.getReports(t, nil)
 		if len(doc.Reports) != 1 {
-			t.Fatalf("%s: reports = %+v, want 1", stage, doc.Reports)
+			t.Fatalf("%s: reports = %+v, want 1", when, doc.Reports)
 		}
 		r := doc.Reports[0]
 		if r.Reason != "ban" || r.UpdatedAt != wallBase || r.ExpiresAt != "2025-10-17T19:00:00Z" ||
 			r.Tracker.Value != 200 || r.Tracker.Volume != 150 || r.Sample.Time != eventTime1At {
-			t.Errorf("%s: report = %+v, want the first write untouched (at-or-below Triggers are suppressed)", stage, r)
+			t.Errorf("%s: report = %+v, want the first write untouched (at-or-below Triggers are suppressed)", when, r)
 		}
 	}
 	checkFrozen("after the low rung alone fired")

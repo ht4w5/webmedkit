@@ -19,7 +19,7 @@ import (
 // TestE2EReplayLadderRungsAreDownloadEquivalents: a replay ladder's
 // thresholds mean full downloads of that path whether the file is a
 // kilobyte or a hundred kilobytes - the Filesize enrichment normalizes
-// the accumulation. Every exceeded rung fires lowest first with the
+// the accumulation. Every crossed rung fires lowest first with the
 // rung's threshold as its reading volume.
 func TestE2EReplayLadderRungsAreDownloadEquivalents(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
