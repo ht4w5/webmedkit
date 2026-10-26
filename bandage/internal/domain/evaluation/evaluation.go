@@ -19,7 +19,13 @@ type TrackerCache interface {
 
 // ReportSink is the report write path: a Trigger upserts one report per (rule, target).
 type ReportSink interface {
-	Trigger(ctx context.Context, rec domain.Report) error
+	// Trigger writes rec for (rule, target). allowOverride marks the
+	// write as a ladder rung's Trigger: only such a Trigger may override
+	// a live report in place, and only from strictly above the volume it
+	// records (the rung's static threshold). A rule without a ladder
+	// never overrides its live report - one write per report lifetime
+	// (ADR 0013) - so its Trigger passes false.
+	Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error
 }
 
 // Logger is the log action's logging port (ADR 0005); it carries only the domain's four levels, so a rule can never exit the process.
@@ -249,7 +255,7 @@ func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 	return domain.TrackerKey(target)
 }
 
-// trigger runs the rule's report action: a Trigger suppresses or writes, and never empties the matched rule's tracker record (ADR 0013) - report aliveness alone bounds the writes. A failed write is not a Trigger outcome (ADR 0008): the record stays intact and the next matching event retries.
+// trigger runs the rule's report action: a Trigger suppresses or writes, and never empties the matched rule's tracker record (ADR 0013) - report aliveness alone bounds the writes. Only a ladder rung's Trigger may override the live report in place (its static threshold rides the reading's volume); a rule without a ladder writes at most once per report lifetime. A failed write is not a Trigger outcome (ADR 0008): the record stays intact and the next matching event retries.
 func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.ReportAction) error {
 	now := s.now()
 	penalty := action.Penalty // the stance of the rules loaded at write time
@@ -272,5 +278,5 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		},
 		Penalty: &penalty,
 	}
-	return s.reports.Trigger(ctx, rec)
+	return s.reports.Trigger(ctx, rec, len(m.rule.Escalations) > 0)
 }

@@ -32,7 +32,7 @@ func (c *benchCache) Update(_ context.Context, ns, key string, _ time.Duration, 
 // benchSink is a counting ReportSink double.
 type benchSink struct{ triggers int }
 
-func (s *benchSink) Trigger(context.Context, domain.Report) error {
+func (s *benchSink) Trigger(context.Context, domain.Report, bool) error {
 	s.triggers++
 	return nil
 }
