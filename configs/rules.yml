@@ -9,6 +9,20 @@
 version: 0
 
 chains:
+  # The entry chain: the front door, one filter-less jump rule per
+  # topical chain in file order (a jump is non-terminal: it runs the
+  # target chain and resumes, so the dispatch sequences exactly like
+  # the chains' own file order). The handoff target (inspect) is left
+  # to the ladder's jump rung.
+  - name: main
+    rules:
+      - id: dispatch-download-abuse
+        actions: [{jump: download-abuse}]
+      - id: dispatch-api
+        actions: [{jump: api}]
+      - id: dispatch-iso-egress
+        actions: [{jump: iso-egress}]
+
   - name: download-abuse
     rules:
       - id: sustained-iso-egress
