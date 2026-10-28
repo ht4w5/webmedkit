@@ -1388,10 +1388,14 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-one
+        actions: [{jump: one}]
       - id: route-three
         actions: [{jump: three}]
       - id: route-two
         actions: [{jump: two}]
+  - name: one
+    rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
