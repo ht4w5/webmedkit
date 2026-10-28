@@ -103,6 +103,15 @@ func TestShippedRulesCarryTheGuideLadder(t *testing.T) {
 	}
 }
 
+// The rules guide's dispatcher excerpt is the shipped example's main
+// chain verbatim.
+func TestShippedRulesCarryTheGuideDispatcher(t *testing.T) {
+	excerpt := sectionFence(t, readShipped(t, rulesGuidePath), "## Entry chains and dispatch", "dispatch-download-abuse")
+	if !strings.Contains(readShipped(t, shippedRulesPath), excerpt) {
+		t.Errorf("configs/rules.yml does not carry the guide's dispatcher excerpt verbatim:\n%s", excerpt)
+	}
+}
+
 // The shipped example's front door: a main dispatcher chain carrying one
 // filter-less jump rule per topical chain, in file order (a jump is
 // non-terminal, so the dispatcher sequences exactly like the chains' own
