@@ -115,6 +115,19 @@ _Avoid_: sanction, remedy, enforcement action
 The event that justified the report's current stance.
 _Avoid_: example, evidence
 
+### Operations
+
+**Statistic**:
+The human-facing cumulative-since-start snapshot of the daemon's
+counters and identity, served for operator eyes with no format contract.
+_Avoid_: stats, metrics
+
+**Metric**:
+A named, typed series in the daemon's machine contract for scrapers,
+cumulative or instantaneous; series may be added, never silently renamed
+or removed.
+_Avoid_: statistic, stat
+
 ### Enforcement
 
 **Ban rule**:
