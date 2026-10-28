@@ -208,7 +208,13 @@ func (r Rule) ActionLists() [][]Action {
 	return lists
 }
 
-// Chain is an ordered group of rules traversed for each event.
+// EntryChain is the reserved name of the entry chain in the rules
+// format: the chain entered for every event.
+const EntryChain = "main"
+
+// Chain is an ordered group of rules acting as one subroutine: the entry
+// chain (EntryChain) is entered for every event; every other chain runs
+// only when a goto/jump action dispatches to it.
 type Chain struct {
 	Name  string
 	Rules []Rule

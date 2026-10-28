@@ -249,14 +249,15 @@ chains:
 		d.waitProcessed(t, int64(i+1))
 	}
 
-	// Each event closes with the inspect chain's own file-order traversal (MARK:WATCH).
+	// The inspect chain runs only when a rung dispatches to it: once per
+	// handoff event, and not at all while the ladder is quiet.
 	var want []string
 	for i := 0; i < 5; i++ {
-		want = append(want, "MARK:AFTER", "MARK:WATCH")
+		want = append(want, "MARK:AFTER")
 	}
 	want = append(want,
-		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER", "MARK:WATCH",
-		"MARK:WATCH", "MARK:HANDOFF", "MARK:WATCH",
+		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
+		"MARK:WATCH", "MARK:HANDOFF",
 	)
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (terminality follows the fired rungs)", got, want)

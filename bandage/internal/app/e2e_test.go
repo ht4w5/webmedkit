@@ -722,6 +722,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-two
+        actions: [{jump: abuse-two}]
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -1251,6 +1253,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-two
+        actions: [{jump: abuse-two}]
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -1384,6 +1388,10 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-three
+        actions: [{jump: three}]
+      - id: route-two
+        actions: [{jump: two}]
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -1556,8 +1564,37 @@ chains:
 	}
 }
 
+// TestE2EOnlyTheEntryChainRunsPerEvent: only the entry chain runs per
+// event; a chain nothing dispatches to is legal and inert.
+func TestE2EOnlyTheEntryChainRunsPerEvent(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: entry-match
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: entry, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+  - name: helper
+    rules:
+      - id: helper-match
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: helper, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+	d.waitProcessed(t, 1)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "entry-match" {
+		t.Fatalf("reports = %+v, want only entry-match (a chain nothing dispatches to never runs)", doc.Reports)
+	}
+}
+
 // TestE2EGotoRunsTargetAndEndsCurrentChain: goto runs the target chain and
-// then ends the current chain (its later rules skipped).
+// then ends the current chain (its later rules skipped); the target chain
+// takes the triggering event exactly once.
 func TestE2EGotoRunsTargetAndEndsCurrentChain(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -1573,8 +1610,8 @@ chains:
   - name: topic
     rules:
       - id: topic-match
-        tracker: {track: rate, leak: 0, volume: 1}
-        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
+        tracker: {track: rate, leak: 0, volume: 0.5}
+        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:TOPIC"}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
@@ -1588,10 +1625,13 @@ chains:
 	if r.Rule != "topic-match" || r.Reason != "topic-match" {
 		t.Errorf("report = %q/%q, want topic-match/topic-match", r.Rule, r.Reason)
 	}
-	if r.Tracker.Value != 2 {
-		// One increment from the goto-entered traversal and one from
-		// the chain's own top-level traversal.
-		t.Errorf("tracker value = %v, want 2 (goto runs the target chain)", r.Tracker.Value)
+	if r.Tracker.Value != 1 {
+		// One increment: the goto-entered traversal is the chain's only
+		// traversal for the event (volume 0.5 fires on any request).
+		t.Errorf("tracker value = %v, want 1 (the goto'd chain takes the triggering event exactly once)", r.Tracker.Value)
+	}
+	if got := marks(d); !slices.Equal(got, []string{"MARK:TOPIC"}) {
+		t.Errorf("marks = %v, want one MARK:TOPIC (the goto'd chain runs exactly once for the event)", got)
 	}
 }
 
@@ -1612,25 +1652,35 @@ chains:
   - name: topic
     rules:
       - id: topic-match
-        tracker: {track: rate, leak: 0, volume: 1}
-        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
+        tracker: {track: rate, leak: 0, volume: 0.5}
+        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:TOPIC"}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
 	doc := d.getReports(t, nil)
-	got := make(map[string]bool, len(doc.Reports))
+	got := make(map[string]reportEntry, len(doc.Reports))
 	for _, r := range doc.Reports {
-		got[r.Rule] = true
+		got[r.Rule] = r
 	}
-	if len(doc.Reports) != 2 || !got["after-jump"] || !got["topic-match"] {
+	if len(doc.Reports) != 2 || got["after-jump"].Rule == "" || got["topic-match"].Rule == "" {
 		t.Fatalf("reports = %+v, want after-jump (resumed) and topic-match (jumped)", doc.Reports)
+	}
+	if v := got["topic-match"].Tracker.Value; v != 1 {
+		// One increment: the jumped-to chain takes the triggering event
+		// exactly once before the caller resumes (volume 0.5 fires on
+		// any request).
+		t.Errorf("topic-match tracker value = %v, want 1 (jump runs the target chain once)", v)
+	}
+	if got := marks(d); !slices.Equal(got, []string{"MARK:TOPIC"}) {
+		t.Errorf("marks = %v, want one MARK:TOPIC (the jumped-to chain runs exactly once for the event)", got)
 	}
 }
 
 // TestE2EFirstMatchPerChainEndsTraversal: a terminal rule's first match ends
-// the chain; a non-terminal match lets traversal continue.
+// the chain; a non-terminal match lets traversal continue. The entry chain
+// dispatches to the continue chain first, so both halves run per event.
 func TestE2EFirstMatchPerChainEndsTraversal(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -1638,6 +1688,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route
+        actions: [{jump: continue}]
       - id: first-match
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: first-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -1666,33 +1718,43 @@ chains:
 	}
 }
 
-// TestE2EStopEndsChainWithoutStoppingOtherChains: stop ends traversal of its
-// chain only.
-func TestE2EStopEndsChainWithoutStoppingOtherChains(t *testing.T) {
+// TestE2EStopInTheEntryChainGatesEverythingBelow: stop ends processing for
+// the event — later rules and later dispatch alike. A chain dispatched
+// before the stop has already run.
+func TestE2EStopInTheEntryChainGatesEverythingBelow(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
 chains:
   - name: main
     rules:
+      - id: route-early
+        actions: [{jump: early}]
       - id: stop-here
         actions: [stop]
+      - id: route-late
+        actions: [{jump: late}]
       - id: after-stop
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: after-stop, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-  - name: topic
+  - name: early
     rules:
-      - id: topic-match
+      - id: early-match
         tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+        actions: [{report: {reason: early, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+  - name: late
+    rules:
+      - id: late-match
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: late, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "topic-match" {
-		t.Fatalf("reports = %+v, want only topic-match (stop ends its chain, not the others)", doc.Reports)
+	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "early-match" {
+		t.Fatalf("reports = %+v, want only early-match (dispatched before the stop; everything below the stop is gated)", doc.Reports)
 	}
 }
 
@@ -1829,72 +1891,56 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// TestE2EChainFileOrderAndFirstMatchSemantics: chains run in file order;
-// goto runs its target chain at dispatch and ends the current chain.
-func TestE2EChainFileOrderAndFirstMatchSemantics(t *testing.T) {
+// TestE2EDiamondDispatchRunsTheTargetChainTwice: a chain reached twice by
+// different dispatch paths runs twice for one event (plain subroutine
+// semantics: calling a chain twice runs it twice, feeding its tracker
+// twice).
+func TestE2EDiamondDispatchRunsTheTargetChainTwice(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
 chains:
   - name: main
     rules:
-      - id: a1
-        actions: [{log: "debug,MARK:A1"}]
-      - id: a2
-        actions: [{log: "debug,MARK:A2"}, {goto: gamma}]
-      - id: a3
-        tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: a3, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-  - name: beta
+      - id: via-mid
+        actions: [{jump: mid}]
+      - id: via-direct
+        actions: [{jump: shared}]
+  - name: mid
     rules:
-      - id: b1
-        tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{log: "debug,MARK:B1"}, {report: {reason: b1, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-  - name: gamma
+      - id: mid-hop
+        actions: [{jump: shared}]
+  - name: shared
     rules:
-      - id: g1
-        tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{log: "debug,MARK:G1"}, {report: {reason: g1, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+      - id: shared-seen
+        actions: [{log: "debug,MARK:SHARED"}]
+      - id: shared-match
+        tracker: {track: rate, leak: 0, volume: 1}
+        actions: [{report: {reason: shared, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
-	// a3 is absent (goto ended alpha), b1 reports (later chains still
-	// ran), and the doubled MARK:G1 shows gamma ran twice.
-	doc := d.getReports(t, nil)
-	byRule := make(map[string]reportEntry, len(doc.Reports))
-	for _, r := range doc.Reports {
-		byRule[r.Rule] = r
-	}
-	if len(doc.Reports) != 2 {
-		t.Fatalf("reports = %+v, want exactly b1 and g1", doc.Reports)
-	}
-	if _, ok := byRule["a3"]; ok {
-		t.Errorf("reports = %+v, want no a3 (goto ends its chain)", doc.Reports)
-	}
-	if _, ok := byRule["b1"]; !ok {
-		t.Errorf("reports = %+v, want b1 (later chains still evaluated)", doc.Reports)
-	}
-	g1, ok := byRule["g1"]
-	if !ok {
-		t.Fatalf("reports = %+v, want g1 (goto runs the target chain)", doc.Reports)
-	}
-	if g1.Tracker.Value != 150 {
-		t.Errorf("g1 tracker value = %v, want 150 (each Trigger empties the bucket)", g1.Tracker.Value)
+	// main -> mid -> shared and main -> shared: the shared chain runs
+	// twice for the one event.
+	if got := marks(d); !slices.Equal(got, []string{"MARK:SHARED", "MARK:SHARED"}) {
+		t.Errorf("marks = %v, want two (each dispatch path runs the target chain)", got)
 	}
 
-	// The emission order is only observable as log content, which is the
-	// contract for the log action.
-	var got []string
-	for _, msg := range d.logs.messages() {
-		if strings.HasPrefix(msg, "MARK:") {
-			got = append(got, msg)
-		}
+	// The double run feeds the shared chain's tracker twice (the
+	// documented double-dispatch pitfall); one report stands at the
+	// second feed's reading.
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "shared-match" {
+		t.Fatalf("reports = %+v, want exactly shared-match (first feed is below its volume)", doc.Reports)
 	}
-	want := []string{"MARK:A1", "MARK:A2", "MARK:G1", "MARK:B1", "MARK:G1"}
-	if !slices.Equal(got, want) {
-		t.Errorf("log order = %v, want %v (file order, rule order, dispatch, termination)", got, want)
+	r := doc.Reports[0]
+	if r.Chain != "shared" {
+		t.Errorf("report chain = %q, want %q (the chain the fired rule lives in)", r.Chain, "shared")
+	}
+	if r.Tracker.Value != 2 {
+		t.Errorf("tracker value = %v, want 2 (the diamond fed the shared tracker twice)", r.Tracker.Value)
 	}
 }
 
@@ -1918,7 +1964,7 @@ chains:
   - name: topic
     rules:
       - id: topic-match
-        tracker: {track: bandwidth, leak: 0, volume: 250}
+        tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
@@ -1943,10 +1989,10 @@ chains:
 	if !ok {
 		t.Fatalf("reports = %+v, want topic-match (goto runs the target chain)", doc.Reports)
 	}
-	// The topic chain ran twice (goto dispatch plus its own file-order
-	// traversal), so its tracker accumulated 2x150 bytes.
-	if topic.Tracker.Value != 300 {
-		t.Errorf("topic-match tracker value = %v, want 300 (dispatch plus file-order traversal)", topic.Tracker.Value)
+	// The topic chain runs once per event (the goto dispatch is its only
+	// entry), so its tracker accumulated one 150-byte event.
+	if topic.Tracker.Value != 150 {
+		t.Errorf("topic-match tracker value = %v, want 150 (one feed per event)", topic.Tracker.Value)
 	}
 }
 

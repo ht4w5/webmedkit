@@ -199,6 +199,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-two
+        actions: [{jump: abuse-two}]
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -474,6 +476,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route
+        actions: [{jump: replay}]
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: egress-overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}, {log: "debug,MARK:FLAG"}]

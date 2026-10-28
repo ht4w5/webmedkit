@@ -6,8 +6,9 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
-// validateChainGraph checks the goto/jump graph: chain names unique,
-// targets existing, acyclic. Shared target chains are allowed.
+// validateChainGraph checks the goto/jump graph: an entry chain named
+// main present, no dispatch targeting main, chain names unique, targets
+// existing, acyclic. Shared target chains are allowed.
 func validateChainGraph(chains []domain.Chain) error {
 	index := make(map[string]int, len(chains))
 	for i, chain := range chains {
@@ -15,6 +16,9 @@ func validateChainGraph(chains []domain.Chain) error {
 			return fmt.Errorf("rules: duplicate chain name %q", chain.Name)
 		}
 		index[chain.Name] = i
+	}
+	if _, ok := index[domain.EntryChain]; !ok {
+		return fmt.Errorf("rules: no chain named %q", domain.EntryChain)
 	}
 
 	// edges[i] are the chain indices chain i's goto/jump actions target.
@@ -29,6 +33,9 @@ func validateChainGraph(chains []domain.Chain) error {
 					}
 					if target == "" {
 						continue
+					}
+					if target == domain.EntryChain {
+						return fmt.Errorf("rules: rule %q: %s targets the entry chain %q", rule.ID, name, target)
 					}
 					j, ok := index[target]
 					if !ok {

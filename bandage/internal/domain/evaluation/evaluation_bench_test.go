@@ -69,6 +69,8 @@ func benchEvent(events []domain.Event, i int) domain.Event {
 
 // benchChains mirrors configs/rules.yml tracker rules with report actions, one
 // per chain: trigger-every (volume 0.5, every event Triggers) and match-never.
+// A main dispatcher jumps to the topical chains so each event's measured
+// work (three tracker rules) is unchanged under entry-chain evaluation.
 func benchChains(triggerEvery bool) []domain.Chain {
 	leak, volume := 10.0, 200.0
 	if triggerEvery {
@@ -88,8 +90,16 @@ func benchChains(triggerEvery bool) []domain.Chain {
 			Actions: []domain.Action{{Report: &domain.ReportAction{Reason: id + "-overflow", TTL: time.Hour}}},
 		}
 	}
+	dispatch := func(target string) domain.Rule {
+		return domain.Rule{
+			ID:      "dispatch-" + target,
+			Filter:  benchMatcher{prefix: "/"},
+			Actions: []domain.Action{{Jump: target}},
+		}
+	}
 	return []domain.Chain{
-		{Name: "main", Rules: []domain.Rule{rate("sustained-egress")}},
+		{Name: "main", Rules: []domain.Rule{dispatch("download-abuse"), dispatch("flood"), dispatch("scanning")}},
+		{Name: "download-abuse", Rules: []domain.Rule{rate("sustained-egress")}},
 		{Name: "flood", Rules: []domain.Rule{rate("rapid-requests")}},
 		{Name: "scanning", Rules: []domain.Rule{rate("probe-paths")}},
 	}
