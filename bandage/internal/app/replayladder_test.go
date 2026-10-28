@@ -17,7 +17,7 @@ func TestE2EReplayLadderRungsAreDownloadEquivalents(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
@@ -120,7 +120,7 @@ func TestE2EReplayLadderWarmUpSkipsTheTrackerEntirely(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
@@ -176,7 +176,7 @@ func TestE2EReplayLadderTrackerTTLFromTopRung(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: replay, leak: 1}
@@ -226,7 +226,7 @@ func TestE2EReplayLadderRungTerminalityAndReportBehaviour(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
@@ -291,7 +291,7 @@ func TestE2EReplayLadderReportRungsKeepOneReportPerRuleTarget(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: replay, leak: 0}

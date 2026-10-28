@@ -101,7 +101,7 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 	sink := &stubSink{}
 	cache := &stubCache{}
 	chains := []domain.Chain{{
-		Name: "replay",
+		Name: "main",
 		Rules: []domain.Rule{{
 			ID:      "iso-replay",
 			Filter:  matchAll{},
@@ -142,7 +142,7 @@ func newRuleHarness(t *testing.T, cfg *domain.TrackerConfig, actions ...domain.A
 	sink := &stubSink{}
 	cache := &stubCache{}
 	chains := []domain.Chain{{
-		Name: "abuse",
+		Name: "main",
 		Rules: []domain.Rule{{
 			ID:      "rate-overflow",
 			Filter:  matchAll{},
@@ -464,7 +464,7 @@ func TestActionsSeeTriggerTimeReading(t *testing.T) {
 	log := &captureLogger{}
 	sink, cache := &stubSink{}, &stubCache{}
 	cfg := &domain.TrackerConfig{Kind: domain.TrackRate, Leak: 0, Volume: 2, TargetPrefix: domain.DefaultTargetPrefix}
-	chains := []domain.Chain{{Name: "abuse", Rules: []domain.Rule{{
+	chains := []domain.Chain{{Name: "main", Rules: []domain.Rule{{
 		ID: "rate-overflow", Filter: matchAll{}, Tracker: cfg,
 		Actions: []domain.Action{
 			{Report: &domain.ReportAction{Reason: "overflow", TTL: time.Hour}},

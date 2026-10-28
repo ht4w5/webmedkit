@@ -39,7 +39,7 @@ func marks(d *testDaemon) []string {
 const stickyRules = `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: sticky
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -51,7 +51,7 @@ chains:
 const tripwireRules = `
 version: 0
 chains:
-  - name: trip
+  - name: main
     rules:
       - id: ua-trip
         filter: 'agent keyword "curl"'
@@ -65,7 +65,7 @@ func TestE2ESuppressedTriggersFreezeReportButRunActions(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: flood
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -116,7 +116,7 @@ func TestE2ESuppressedTriggersKeepTheTrackerRecord(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: sticky
         tracker: {track: bandwidth, leak: 0, volume: 200}
@@ -197,7 +197,7 @@ func TestE2ESuppressionIsPerRuleAndTarget(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse-one
+  - name: main
     rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -472,7 +472,7 @@ func TestE2EFlaggedTargetEventsKeepFeedingAnalysis(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: flag
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -532,7 +532,7 @@ func TestE2EReplaySuppressionGrainIsRuleAndTarget(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 1}

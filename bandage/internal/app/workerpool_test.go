@@ -24,7 +24,7 @@ import (
 const poolRules = `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 1000}
@@ -129,7 +129,7 @@ func TestWorkersOneProcessesInArrivalOrder(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 1, volume: 1500}

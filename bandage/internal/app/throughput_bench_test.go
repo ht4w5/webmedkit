@@ -47,7 +47,7 @@ func benchNow() time.Time { return benchWall }
 const benchEpisodeRules = `
 version: 0
 chains:
-  - name: throughput
+  - name: main
     rules:
       - id: bench-episode
         tracker: {track: rate, leak: 0, volume: 3}
@@ -59,7 +59,7 @@ chains:
 const benchMatchNeverRules = `
 version: 0
 chains:
-  - name: throughput
+  - name: main
     rules:
       - id: bench-never
         tracker: {track: rate, leak: 0, volume: 1000000000000}

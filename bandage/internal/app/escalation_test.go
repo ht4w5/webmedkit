@@ -22,7 +22,7 @@ func TestE2EEscalationFiresEveryCrossedRungLowestFirst(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -80,7 +80,7 @@ func TestE2EEscalationHandoffRungFiresEveryEvent(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: routing
+  - name: main
     rules:
       - id: gate
         tracker: {track: bandwidth, leak: 100}
@@ -127,7 +127,7 @@ func TestE2EEscalationJumpRungNeverEndsTheChain(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -162,7 +162,7 @@ func TestE2EEscalationGotoRungEndsChainAfterRemainingRungs(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -194,7 +194,7 @@ func TestE2EEscalationReportRungEndsTheChain(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -222,7 +222,7 @@ func TestE2EEscalationTerminalityFollowsFiredRungs(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -255,7 +255,7 @@ func TestE2EEscalationReportRungsEscalateOneReportPerRuleTarget(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -305,7 +305,7 @@ func TestE2EEscalationOverrideGuardSurvivesRestart(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -353,7 +353,7 @@ func TestE2EEscalationHigherRungOverridesReportInPlace(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 0}
@@ -433,7 +433,7 @@ func TestE2EEscalationLowerRungNeverDowngradesReport(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 1}
@@ -481,7 +481,7 @@ func TestE2EEscalationDeathRearmsAtCurrentStance(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 1}
@@ -553,7 +553,7 @@ func TestE2EEscalationFailedOverrideKeepsTheGuard(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: bandwidth, leak: 1}
@@ -604,7 +604,7 @@ func TestE2EEscalationTrackerTTLFromTopRung(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: ladder
         tracker: {track: rate, leak: 1}

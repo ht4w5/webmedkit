@@ -36,7 +36,7 @@ const (
 const benchEpisodeChains = `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: egress-flood
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'
@@ -67,7 +67,7 @@ chains:
 const benchMatchNeverChains = `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: sustained-egress
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'

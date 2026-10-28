@@ -18,7 +18,7 @@ const validRules = `
 version: 0
 
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: sustained-iso-egress
         filter: any
@@ -119,7 +119,7 @@ func TestParseRulesTargetPrefixDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml := "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker:\n          track: rate\n          leak: 1\n          volume: 2\n          " + tt.extra
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: rate\n          leak: 1\n          volume: 2\n          " + tt.extra
 			chains, err := ParseRules([]byte(yaml))
 			if err != nil {
 				t.Fatalf("ParseRules error: %v", err)
@@ -143,7 +143,7 @@ func TestParseRulesValidation(t *testing.T) {
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: dupe
         tracker: {track: rate, leak: 1, volume: 2}
@@ -161,7 +161,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: one
         tracker: {track: rate, leak: 1, volume: 2}
@@ -176,7 +176,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]
@@ -187,7 +187,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -199,7 +199,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -212,7 +212,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -225,7 +225,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -237,7 +237,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -250,7 +250,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -263,7 +263,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -276,7 +276,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -289,7 +289,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -303,52 +303,52 @@ chains:
 		{name: "missing chains", yaml: "version: 0\n", wantErr: "chain"},
 		{name: "empty chains", yaml: "version: 0\nchains: []\n", wantErr: "chain"},
 		{name: "chain without name", yaml: "version: 0\nchains:\n  - rules: [{id: r}]\n", wantErr: "name"},
-		{name: "chain without rules", yaml: "version: 0\nchains:\n  - name: a\n", wantErr: "rule"},
-		{name: "rule without id", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - filter: any\n", wantErr: "id"},
+		{name: "chain without rules", yaml: "version: 0\nchains:\n  - name: main\n", wantErr: "rule"},
+		{name: "rule without id", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - filter: any\n", wantErr: "id"},
 		{name: "unknown key at top level", yaml: "version: 0\nchainz: []\n", wantErr: "chainz"},
-		{name: "unknown key in rule", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        buckets: []\n", wantErr: "buckets"},
-		{name: "unknown key in tracker", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, ttl: 5}\n", wantErr: "ttl"},
+		{name: "unknown key in rule", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        buckets: []\n", wantErr: "buckets"},
+		{name: "unknown key in tracker", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, ttl: 5}\n", wantErr: "ttl"},
 
 		// Filter.
-		{name: "omitted filter defaults to any", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
-		{name: "explicit any filter", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        filter: any\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
+		{name: "omitted filter defaults to any", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
+		{name: "explicit any filter", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        filter: any\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
 		{
 			name: "filter expression accepted",
-			yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        filter: 'src 10.0.0.0/8'\n        tracker: {track: rate, leak: 1, volume: 2}\n",
+			yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        filter: 'src 10.0.0.0/8'\n        tracker: {track: rate, leak: 1, volume: 2}\n",
 		},
 
 		// Tracker parsing and validation.
-		{name: "missing track", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {leak: 1, volume: 2}\n", wantErr: "track"},
-		{name: "unknown tracker kind", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: freq, leak: 1, volume: 2}\n", wantErr: "unknown tracker kind"},
-		{name: "missing leak", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, volume: 2}\n", wantErr: "tracker.leak"},
-		{name: "missing volume", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1}\n", wantErr: "tracker.volume"},
-		{name: "zero volume", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 0}\n", wantErr: "tracker.volume"},
-		{name: "negative leak", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: -1, volume: 2}\n", wantErr: "tracker.leak"},
-		{name: "rate leak with byte unit", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1MB, volume: 2}\n", wantErr: "tracker.leak"},
-		{name: "rate volume with byte unit", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 1MB}\n", wantErr: "tracker.volume"},
-		{name: "bandwidth quantities accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: bandwidth, leak: 1MB/s, volume: 100GB}\n        actions: [{report: {reason: x, ttl: 7d, penalty: limit-bandwidth, rate: 1MB}}]\n"},
-		{name: "bandwidth zero leak accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: bandwidth, leak: 0, volume: 1KB}\n"},
-		{name: "bad quantity names rule and field", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: my-rule\n        tracker: {track: bandwidth, leak: 1, volume: 1q}\n", wantErr: `rule "my-rule": tracker.volume`},
-		{name: "volume method on bandwidth rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker:\n          track: bandwidth\n          leak: 1\n          volume: {method: constant, value: 5}\n", wantErr: "volume methods are replay-only"},
+		{name: "missing track", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {leak: 1, volume: 2}\n", wantErr: "track"},
+		{name: "unknown tracker kind", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: freq, leak: 1, volume: 2}\n", wantErr: "unknown tracker kind"},
+		{name: "missing leak", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, volume: 2}\n", wantErr: "tracker.leak"},
+		{name: "missing volume", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1}\n", wantErr: "tracker.volume"},
+		{name: "zero volume", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 0}\n", wantErr: "tracker.volume"},
+		{name: "negative leak", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: -1, volume: 2}\n", wantErr: "tracker.leak"},
+		{name: "rate leak with byte unit", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1MB, volume: 2}\n", wantErr: "tracker.leak"},
+		{name: "rate volume with byte unit", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 1MB}\n", wantErr: "tracker.volume"},
+		{name: "bandwidth quantities accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: bandwidth, leak: 1MB/s, volume: 100GB}\n        actions: [{report: {reason: x, ttl: 7d, penalty: limit-bandwidth, rate: 1MB}}]\n"},
+		{name: "bandwidth zero leak accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: bandwidth, leak: 0, volume: 1KB}\n"},
+		{name: "bad quantity names rule and field", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        tracker: {track: bandwidth, leak: 1, volume: 1q}\n", wantErr: `rule "my-rule": tracker.volume`},
+		{name: "volume method on bandwidth rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: bandwidth\n          leak: 1\n          volume: {method: constant, value: 5}\n", wantErr: "volume methods are replay-only"},
 
 		// Target aggregation (target_prefix).
-		{name: "target prefix boundary values accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 32, ipv6: 64}}\n"},
-		{name: "zero target prefix accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 0, ipv6: 0}}\n"},
-		{name: "target prefix ipv4 above 32 rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 33, ipv6: 64}}\n", wantErr: "target_prefix.ipv4"},
-		{name: "target prefix ipv4 negative rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: -1}}\n", wantErr: "target_prefix.ipv4"},
-		{name: "target prefix ipv6 finer than 64 rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: 65}}\n", wantErr: "target_prefix.ipv6"},
-		{name: "target prefix ipv6 negative rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: -2}}\n", wantErr: "target_prefix.ipv6"},
-		{name: "bad target prefix names rule and field", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: my-rule\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: 65}}\n", wantErr: `rule "my-rule": tracker.target_prefix.ipv6`},
+		{name: "target prefix boundary values accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 32, ipv6: 64}}\n"},
+		{name: "zero target prefix accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 0, ipv6: 0}}\n"},
+		{name: "target prefix ipv4 above 32 rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: 33, ipv6: 64}}\n", wantErr: "target_prefix.ipv4"},
+		{name: "target prefix ipv4 negative rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv4: -1}}\n", wantErr: "target_prefix.ipv4"},
+		{name: "target prefix ipv6 finer than 64 rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: 65}}\n", wantErr: "target_prefix.ipv6"},
+		{name: "target prefix ipv6 negative rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: -2}}\n", wantErr: "target_prefix.ipv6"},
+		{name: "bad target prefix names rule and field", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        tracker: {track: rate, leak: 1, volume: 2, target_prefix: {ipv6: 65}}\n", wantErr: `rule "my-rule": tracker.target_prefix.ipv6`},
 
 		// Actions (report, log, goto, jump, stop) and their YAML shapes.
-		{name: "unknown action rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{ban: 15m}]\n", wantErr: "unknown action"},
-		{name: "stop accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [stop]\n"},
+		{name: "unknown action rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{ban: 15m}]\n", wantErr: "unknown action"},
+		{name: "stop accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [stop]\n"},
 		{
 			name: "goto accepted and resolves target",
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{goto: b}]
@@ -363,7 +363,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{jump: later}]
@@ -373,16 +373,16 @@ chains:
         actions: [stop]
 `,
 		},
-		{name: "log accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{log: \"debug,ROUTE:\"}]\n"},
-		{name: "routing and logging actions without tracker accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{log: \"info,seen\"}, {goto: b}]\n  - name: b\n    rules:\n      - id: s\n        actions: [stop]\n"},
-		{name: "stop with options rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{stop: true}]\n", wantErr: "stop"},
-		{name: "goto as scalar without options rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [goto]\n", wantErr: "goto"},
-		{name: "goto without target rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{goto: \"\"}]\n", wantErr: "goto"},
-		{name: "goto mapping target rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{goto: {chain: b}}]\n", wantErr: "goto"},
-		{name: "jump without target rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{jump: null}]\n", wantErr: "jump"},
-		{name: "log non-string rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{log: [debug, x]}]\n", wantErr: "level,message"},
-		{name: "log wrong arg count rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{log: debug}]\n", wantErr: "level,message"},
-		{name: "log bad level rejected", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{log: \"verbose,x\"}]\n", wantErr: "level"},
+		{name: "log accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"debug,ROUTE:\"}]\n"},
+		{name: "routing and logging actions without tracker accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"info,seen\"}, {goto: b}]\n  - name: b\n    rules:\n      - id: s\n        actions: [stop]\n"},
+		{name: "stop with options rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{stop: true}]\n", wantErr: "stop"},
+		{name: "goto as scalar without options rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [goto]\n", wantErr: "goto"},
+		{name: "goto without target rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{goto: \"\"}]\n", wantErr: "goto"},
+		{name: "goto mapping target rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{goto: {chain: b}}]\n", wantErr: "goto"},
+		{name: "jump without target rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{jump: null}]\n", wantErr: "jump"},
+		{name: "log non-string rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: [debug, x]}]\n", wantErr: "level,message"},
+		{name: "log wrong arg count rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: debug}]\n", wantErr: "level,message"},
+		{name: "log bad level rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"verbose,x\"}]\n", wantErr: "level"},
 
 		// The goto/jump chain graph: unique chain names, resolvable
 		// targets, acyclic (a DAG; shared target chains are allowed).
@@ -391,11 +391,11 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: dup
+  - name: main
     rules:
       - id: r
         actions: [stop]
-  - name: dup
+  - name: main
     rules:
       - id: s
         actions: [stop]
@@ -407,7 +407,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{goto: nowhere}]
@@ -419,7 +419,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{jump: nowhere}]
@@ -431,10 +431,10 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
-        actions: [{goto: a}]
+        actions: [{goto: main}]
 `,
 			wantErr: "cycle",
 		},
@@ -443,14 +443,14 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{jump: b}]
   - name: b
     rules:
       - id: s
-        actions: [{goto: a}]
+        actions: [{goto: main}]
 `,
 			wantErr: "cycle",
 		},
@@ -459,10 +459,10 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
-        actions: [{jump: a}]
+        actions: [{jump: main}]
 `,
 			wantErr: "cycle",
 		},
@@ -471,7 +471,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: one
+  - name: main
     rules:
       - id: r
         actions: [{goto: shared}]
@@ -490,40 +490,40 @@ chains:
 `,
 		},
 
-		{name: "report without reason", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n", wantErr: "reason"},
-		{name: "report with unknown key", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {reason: x, ttl: 1h, ban: 15m, penalty: limit-req-rate, rate: 200}}]\n", wantErr: "ban"},
+		{name: "report without reason", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n", wantErr: "reason"},
+		{name: "report with unknown key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {reason: x, ttl: 1h, ban: 15m, penalty: limit-req-rate, rate: 200}}]\n", wantErr: "ban"},
 
 		// Penalty (required, closed vocabulary): failing and passing
 		// cases; the per-value passing cases are generated below from
 		// the domain's single vocabulary source.
-		{name: "report without penalty", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h}}]\n", wantErr: "penalty"},
-		{name: "unknown penalty", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: ban}}]\n", wantErr: "unknown penalty"},
+		{name: "report without penalty", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h}}]\n", wantErr: "penalty"},
+		{name: "unknown penalty", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: ban}}]\n", wantErr: "unknown penalty"},
 
 		// Rate on a penalty: limits only (failing and passing cases).
-		{name: "rate with drop", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop, rate: 200}}]\n", wantErr: "not allowed"},
-		{name: "rate with reject", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: reject, rate: 200}}]\n", wantErr: "not allowed"},
-		{name: "limit-pkt-rate without rate", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-pkt-rate}}]\n", wantErr: "rate: required"},
-		{name: "limit-bandwidth without rate", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth}}]\n", wantErr: "rate: required"},
-		{name: "limit-req-rate without rate", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate}}]\n", wantErr: "rate: required"},
-		{name: "zero rate", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 0}}]\n", wantErr: "must be positive"},
-		{name: "fractional rate", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 1.5}}]\n", wantErr: "whole number"},
-		{name: "rate with bad unit", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1q}}]\n", wantErr: "invalid quantity"},
-		{name: "rate out of int64 range", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 9999P}}]\n", wantErr: "out of range"},
-		{name: "plain count rate accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n"},
-		{name: "decimal human size rate accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]\n"},
-		{name: "fractional human size rate accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1.5MB}}]\n"},
-		{name: "per-second rate suffix accepted", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB/s}}]\n"},
+		{name: "rate with drop", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop, rate: 200}}]\n", wantErr: "not allowed"},
+		{name: "rate with reject", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: reject, rate: 200}}]\n", wantErr: "not allowed"},
+		{name: "limit-pkt-rate without rate", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-pkt-rate}}]\n", wantErr: "rate: required"},
+		{name: "limit-bandwidth without rate", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth}}]\n", wantErr: "rate: required"},
+		{name: "limit-req-rate without rate", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate}}]\n", wantErr: "rate: required"},
+		{name: "zero rate", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 0}}]\n", wantErr: "must be positive"},
+		{name: "fractional rate", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 1.5}}]\n", wantErr: "whole number"},
+		{name: "rate with bad unit", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1q}}]\n", wantErr: "invalid quantity"},
+		{name: "rate out of int64 range", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 9999P}}]\n", wantErr: "out of range"},
+		{name: "plain count rate accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n"},
+		{name: "decimal human size rate accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]\n"},
+		{name: "fractional human size rate accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1.5MB}}]\n"},
+		{name: "per-second rate suffix accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB/s}}]\n"},
 
 		// Well-formedness only (ADR 0010): no tracker/penalty or
 		// reason/penalty coherence checks.
-		{name: "penalty not checked against tracker kind", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]\n"},
-		{name: "penalty not checked against tracker presence", yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n"},
+		{name: "penalty not checked against tracker kind", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]\n"},
+		{name: "penalty not checked against tracker presence", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]\n"},
 		{
 			name: "shared reason with different penalties accepted",
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: tripwire
         actions: [{report: {reason: shared, ttl: 1h, penalty: drop}}]
@@ -539,7 +539,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -557,7 +557,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -575,7 +575,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -591,7 +591,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -603,7 +603,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: 2}
@@ -620,7 +620,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         escalations:
@@ -636,7 +636,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -651,7 +651,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -664,7 +664,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -681,7 +681,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -698,7 +698,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -715,7 +715,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -731,7 +731,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: bandwidth, leak: 1MB}
@@ -747,7 +747,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: bandwidth, leak: 1MB}
@@ -764,7 +764,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -780,7 +780,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -797,7 +797,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: replay, leak: 1}
@@ -813,7 +813,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: replay, leak: 1}
@@ -830,7 +830,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: replay, leak: 1, volume: {method: constant, value: 5}}
@@ -847,7 +847,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1, volume: {method: constant, value: 5}}
@@ -864,7 +864,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: replay, leak: 1, volume: 5}
@@ -881,7 +881,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -898,7 +898,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -915,7 +915,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -932,7 +932,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -949,7 +949,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -966,7 +966,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: bandwidth, leak: 1MB}
@@ -982,7 +982,7 @@ chains:
 			yaml: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -1011,7 +1011,7 @@ chains:
 			wantErr string
 		}{
 			name: "penalty " + string(action) + " accepted",
-			yaml: "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: " + string(action) + rate + "}}]\n",
+			yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: " + string(action) + rate + "}}]\n",
 		})
 	}
 	for _, tt := range tests {
@@ -1083,7 +1083,7 @@ func TestPrintsValidatedPlan(t *testing.T) {
 		"db sqlite /var/lib/bandage/reports.db",
 		"api 127.0.0.1:8080",
 		"cache max_entries 65536",
-		"chain download-abuse",
+		"chain main",
 		"rule sustained-iso-egress",
 		"filter: any",
 		"tracker: bandwidth leak=1000000 volume=100000000000 ttl=27h46m40s",
@@ -1131,7 +1131,7 @@ func TestShowsActionsInPlan(t *testing.T) {
 		t.Fatalf("Test error: %v", err)
 	}
 	for _, want := range []string{
-		"chain routing",
+		"chain main",
 		"rule route-downloads",
 		"action log level=debug message=\"ROUTE:\"",
 		"action jump target=download-abuse",
@@ -1162,14 +1162,14 @@ func TestValidatesChainGraph(t *testing.T) {
 			rules: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{jump: b}]
   - name: b
     rules:
       - id: s
-        actions: [{goto: a}]
+        actions: [{goto: main}]
 `,
 			wantErr: "cycle",
 		},
@@ -1178,7 +1178,7 @@ chains:
 			rules: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         actions: [{goto: nowhere}]
@@ -1190,7 +1190,7 @@ chains:
 			rules: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -1207,7 +1207,7 @@ chains:
 			rules: `
 version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         tracker: {track: rate, leak: 1}
@@ -1219,7 +1219,7 @@ chains:
   - name: b
     rules:
       - id: s
-        actions: [{goto: a}]
+        actions: [{goto: main}]
 `,
 			wantErr: "cycle",
 		},
@@ -1228,11 +1228,11 @@ chains:
 			rules: `
 version: 0
 chains:
-  - name: dup
+  - name: main
     rules:
       - id: r
         actions: [stop]
-  - name: dup
+  - name: main
     rules:
       - id: s
         actions: [stop]
@@ -1277,7 +1277,7 @@ chains:
 const routingRules = `
 version: 0
 chains:
-  - name: routing
+  - name: main
     rules:
       - id: route-downloads
         actions:
@@ -1319,7 +1319,7 @@ func TestLoadRulesFromFile(t *testing.T) {
 func TestParseRulesFilterErrors(t *testing.T) {
 	const doc = `version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         filter: %s
@@ -1352,7 +1352,7 @@ chains:
 func TestParseRulesFilterSelectsEvents(t *testing.T) {
 	chains, err := ParseRules([]byte(`version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: r
         filter: 'path prefix "/releases" and method GET'
@@ -1383,7 +1383,7 @@ func TestPrintsFilterSource(t *testing.T) {
 	}
 	if err := os.WriteFile(rulesPath, []byte(`version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: selected
         filter: 'src 10.0.0.0/8 and path prefix "/api"'
@@ -1419,7 +1419,7 @@ func TestReportsFilterErrorPosition(t *testing.T) {
 	}
 	if err := os.WriteFile(rulesPath, []byte(`version: 0
 chains:
-  - name: a
+  - name: main
     rules:
       - id: typo
         filter: 'status class 9'
@@ -1485,7 +1485,7 @@ func TestParseRulesReplayVolumeMethods(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml := "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker:\n          track: replay\n          leak: 0.1\n          " + tt.volume
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: replay\n          leak: 0.1\n          " + tt.volume
 			chains, err := ParseRules([]byte(yaml))
 			if err != nil {
 				t.Fatalf("ParseRules error: %v", err)
@@ -1668,7 +1668,7 @@ func TestParseRulesVolumeValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml := "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker:\n          " + tt.tracker + "\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]"
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          " + tt.tracker + "\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]"
 			_, err := ParseRules([]byte(yaml))
 			if tt.wantErr == "" {
 				if err != nil {
@@ -1701,7 +1701,7 @@ func TestShowsReplayVolumeMethod(t *testing.T) {
 	if err := os.WriteFile(rulesPath, []byte(`
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: iso-replay
         tracker:
@@ -1738,7 +1738,7 @@ chains:
 const ladderRules = `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: iso-ladder
         tracker: {track: bandwidth, leak: 1MB}
@@ -1819,7 +1819,7 @@ func TestParseRulesEscalationTTLDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml := "version: 0\nchains:\n  - name: a\n    rules:\n      - id: r\n        tracker: {track: " + tt.kind + ", leak: " + tt.leak + "}\n" +
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: " + tt.kind + ", leak: " + tt.leak + "}\n" +
 				"        escalations:\n          - at: " + tt.at + "\n            actions: [stop]\n          - at: " + tt.at2 + "\n            actions: [stop]"
 			chains, err := ParseRules([]byte(yaml))
 			if err != nil {

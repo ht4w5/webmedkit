@@ -89,7 +89,7 @@ func benchChains(triggerEvery bool) []domain.Chain {
 		}
 	}
 	return []domain.Chain{
-		{Name: "download-abuse", Rules: []domain.Rule{rate("sustained-egress")}},
+		{Name: "main", Rules: []domain.Rule{rate("sustained-egress")}},
 		{Name: "flood", Rules: []domain.Rule{rate("rapid-requests")}},
 		{Name: "scanning", Rules: []domain.Rule{rate("probe-paths")}},
 	}
