@@ -26,6 +26,11 @@ type benchStats struct{}
 
 func (benchStats) Stats() Stats { return Stats{} }
 
+// benchRuntime is a RuntimeSource the /reports read path never calls.
+type benchRuntime struct{}
+
+func (benchRuntime) Runtime() Runtime { return Runtime{} }
+
 // benchListReport is one seeded report; target disambiguates rows.
 func benchListReport(target string) domain.Report {
 	now := benchNow()
@@ -74,7 +79,7 @@ func BenchmarkReportsList(b *testing.B) {
 			}
 			b.Cleanup(func() { repo.Close() })
 			seedReports(b, repo, tt.rows)
-			srv := New(report.NewService(repo), benchStats{}, benchNow)
+			srv := New(report.NewService(repo), benchStats{}, benchRuntime{}, benchNow)
 			req := httptest.NewRequest(http.MethodGet, "/reports", nil)
 			w := httptest.NewRecorder()
 			for b.Loop() {

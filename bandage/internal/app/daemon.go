@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -167,7 +169,7 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 		processed: newProgress(),
 		stopSweep: make(chan struct{}),
 	}
-	d.apiSrv = &http.Server{Handler: httpapi.New(reports, d, o.now)}
+	d.apiSrv = &http.Server{Handler: httpapi.New(reports, d, goRuntime{}, o.now)}
 	return d, nil
 }
 
@@ -368,6 +370,32 @@ func (d *Daemon) Stats() httpapi.Stats {
 			EntryCap:  cs.EntryCap,
 		},
 	}
+}
+
+// goRuntime samples the Go runtime through the standard library — the
+// httpapi.RuntimeSource adapter for the /metrics runtime block (ADR 0014).
+// Every field is read fresh per call: scrape time only, no background
+// sampler and no values cached between scrapes.
+type goRuntime struct{}
+
+func (goRuntime) Runtime() httpapi.Runtime {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return httpapi.Runtime{
+		Version:        runtime.Version(),
+		Goroutines:     runtime.NumGoroutine(),
+		Threads:        threadCount(),
+		AllocBytes:     m.Alloc,
+		HeapInuseBytes: m.HeapInuse,
+		SysBytes:       m.Sys,
+		GCCPUFraction:  m.GCCPUFraction,
+	}
+}
+
+// threadCount returns the number of OS threads created, from the
+// thread-create profile's record count.
+func threadCount() int {
+	return pprof.Lookup("threadcreate").Count()
 }
 
 // progress counts processed lines and wakes waiters without polling.

@@ -9,9 +9,9 @@ import (
 
 // This file is the /metrics surface (ADR 0006's promised endpoint, ADR 0014):
 // Prometheus text exposition 0.0.4 rendered by hand from the same snapshot
-// GET /stats serves — no client library, no registry, no live reads inside the
-// renderer. The machine contract (names, types, help) is single-sourced in
-// metricFamilies below.
+// GET /stats serves plus a scrape-time Go runtime sample — no client library,
+// no registry, no live reads inside the renderer. The machine contract (names,
+// types, help) is single-sourced in metricFamilies below.
 
 // metricsContentType declares Prometheus text exposition 0.0.4: the response
 // states its format version rather than negotiating one (ADR 0014).
@@ -19,10 +19,11 @@ const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // metricsSnapshot is one point-in-time sample of everything /metrics renders.
 // It carries the same Stats snapshot /stats serves, so the two surfaces agree
-// by construction; scrape-time additions (the runtime block) belong beside it,
-// never read live inside the renderer.
+// by construction, plus the runtime block's Runtime sample; both are read at
+// scrape time by the handler and never live inside the renderer.
 type metricsSnapshot struct {
-	stats Stats
+	stats   Stats
+	runtime Runtime
 }
 
 // metricLabel is one label pair on a series.
@@ -48,6 +49,9 @@ type metricFamily struct {
 // name, type, help and snapshot source for every family /metrics serves, in
 // exposition order. Series may be added freely; renaming or removing a row is
 // breaking and needs a new ADR plus a deprecation note in the metrics doc.
+// The go_ rows mirror the conventional Go collector names and help so generic
+// Go dashboards work unchanged (user story 14); the runtime block stays a
+// curated subset — the full memstats surface is deliberately not exposed.
 var metricFamilies = []metricFamily{
 	{
 		name: "bandage_start_time_seconds",
@@ -135,14 +139,61 @@ var metricFamilies = []metricFamily{
 		help:  "Configured tracker cache entry capacity.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.EntryCap) },
 	},
+	{
+		name: "go_info",
+		kind: "gauge",
+		help: "Information about the Go environment.",
+		labels: func(s metricsSnapshot) []metricLabel {
+			return []metricLabel{{"version", s.runtime.Version}}
+		},
+		value: func(metricsSnapshot) float64 { return 1 },
+	},
+	{
+		name:  "go_goroutines",
+		kind:  "gauge",
+		help:  "Number of goroutines that currently exist.",
+		value: func(s metricsSnapshot) float64 { return float64(s.runtime.Goroutines) },
+	},
+	{
+		name:  "go_threads",
+		kind:  "gauge",
+		help:  "Number of OS threads created.",
+		value: func(s metricsSnapshot) float64 { return float64(s.runtime.Threads) },
+	},
+	{
+		name:  "go_memstats_alloc_bytes",
+		kind:  "gauge",
+		help:  "Number of bytes allocated and still in use.",
+		value: func(s metricsSnapshot) float64 { return float64(s.runtime.AllocBytes) },
+	},
+	{
+		name:  "go_memstats_heap_inuse_bytes",
+		kind:  "gauge",
+		help:  "Number of heap bytes that are in use.",
+		value: func(s metricsSnapshot) float64 { return float64(s.runtime.HeapInuseBytes) },
+	},
+	{
+		name:  "go_memstats_sys_bytes",
+		kind:  "gauge",
+		help:  "Number of bytes obtained from system.",
+		value: func(s metricsSnapshot) float64 { return float64(s.runtime.SysBytes) },
+	},
+	{
+		name:  "go_memstats_gc_cpu_fraction",
+		kind:  "gauge",
+		help:  "The fraction of this program's available CPU time used by the GC since the program started.",
+		value: func(s metricsSnapshot) float64 { return s.runtime.GCCPUFraction },
+	},
 }
 
 // handleMetrics serves the machine-contract Metrics: the /stats snapshot
-// rendered as text exposition 0.0.4, one point-in-time sample per scrape
-// (ADR 0006, ADR 0014). GET only, always registered.
+// plus the runtime block rendered as text exposition 0.0.4 (ADR 0006, ADR
+// 0014). Both inputs are read here, at scrape time — no background sampler,
+// no cached values between scrapes — so each response is one point-in-time
+// snapshot. GET only, always registered.
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", metricsContentType)
-	w.Write(renderMetrics(metricsSnapshot{stats: s.stats.Stats()}))
+	w.Write(renderMetrics(metricsSnapshot{stats: s.stats.Stats(), runtime: s.runtime.Runtime()}))
 }
 
 // renderMetrics is the pure snapshot-to-text mapping (ADR 0014): exposition

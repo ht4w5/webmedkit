@@ -64,16 +64,37 @@ type StatsSource interface {
 	Stats() Stats
 }
 
+// Runtime is one point-in-time Go runtime sample for the /metrics runtime
+// block (ADR 0014): the curated subset only, read at scrape time by the
+// RuntimeSource adapter and never inside the renderer.
+type Runtime struct {
+	Version        string  // Go version of the running binary (go_info label).
+	Goroutines     int     // Goroutines that currently exist (go_goroutines).
+	Threads        int     // OS threads created so far (go_threads).
+	AllocBytes     uint64  // Bytes allocated and still in use (go_memstats_alloc_bytes).
+	HeapInuseBytes uint64  // Heap bytes in use (go_memstats_heap_inuse_bytes).
+	SysBytes       uint64  // Bytes obtained from the system (go_memstats_sys_bytes).
+	GCCPUFraction  float64 // Fraction of CPU time used by the GC since start (go_memstats_gc_cpu_fraction).
+}
+
+// RuntimeSource is the narrow runtime port beside its consumer: one
+// point-in-time Go runtime sample in. A standard-library-backed adapter
+// satisfies it; tests inject fixed values.
+type RuntimeSource interface {
+	Runtime() Runtime
+}
+
 // Server is the HTTP API handler.
 type Server struct {
 	reports ReportStore
 	stats   StatsSource
+	runtime RuntimeSource
 	now     func() time.Time
 	mux     *http.ServeMux
 }
 
-func New(reports ReportStore, stats StatsSource, now func() time.Time) *Server {
-	s := &Server{reports: reports, stats: stats, now: now, mux: http.NewServeMux()}
+func New(reports ReportStore, stats StatsSource, runtime RuntimeSource, now func() time.Time) *Server {
+	s := &Server{reports: reports, stats: stats, runtime: runtime, now: now, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /reports", s.handleReports)
 	s.mux.HandleFunc("DELETE /reports", s.handleDeleteReports)
 	s.mux.HandleFunc("GET /stats", s.handleStats)
