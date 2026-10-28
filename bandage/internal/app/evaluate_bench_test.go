@@ -31,12 +31,23 @@ const (
 	benchRearmStep = 45 * time.Minute
 )
 
-// benchEpisodeChains is the episode fixture: four single-rule chains with
-// benchEpisodeLen events per Target per episode.
+// benchEpisodeChains is the episode fixture: a main dispatcher jumping to
+// four single-rule chains, with benchEpisodeLen events per Target per
+// episode.
 const benchEpisodeChains = `
 version: 0
 chains:
   - name: main
+    rules:
+      - id: dispatch-download-abuse
+        actions: [{jump: download-abuse}]
+      - id: dispatch-request-flood
+        actions: [{jump: request-flood}]
+      - id: dispatch-scanning
+        actions: [{jump: scanning}]
+      - id: dispatch-error-scanning
+        actions: [{jump: error-scanning}]
+  - name: download-abuse
     rules:
       - id: egress-flood
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'
@@ -68,6 +79,16 @@ const benchMatchNeverChains = `
 version: 0
 chains:
   - name: main
+    rules:
+      - id: dispatch-download-abuse
+        actions: [{jump: download-abuse}]
+      - id: dispatch-request-flood
+        actions: [{jump: request-flood}]
+      - id: dispatch-scanning
+        actions: [{jump: scanning}]
+      - id: dispatch-error-scanning
+        actions: [{jump: error-scanning}]
+  - name: download-abuse
     rules:
       - id: sustained-egress
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'
@@ -352,11 +373,16 @@ func newEpisodeOracle(chains []domain.Chain) *episodeOracle {
 	}
 }
 
-// event feeds one fixture event at the given wall time to every rule.
+// event feeds one fixture event at the given wall time to every tracker
+// rule the main dispatcher reaches (the filter-less dispatch rules carry
+// no tracker and are not simulated).
 func (o *episodeOracle) event(ev domain.Event, wall time.Time) {
 	for ci := range o.chains {
 		for ri := range o.chains[ci].Rules {
 			rule := &o.chains[ci].Rules[ri]
+			if rule.Tracker == nil {
+				continue
+			}
 			key := oracleKey{rule: rule.ID, target: rule.Tracker.TargetString(ev.RemoteAddr)}
 			st := o.states[key]
 			if st == nil {

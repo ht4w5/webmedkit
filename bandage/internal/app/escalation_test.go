@@ -96,7 +96,8 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The inspect chain runs twice per event: the jump dispatch plus its own file-order traversal.
+	// The inspect chain runs once per handoff: the jump dispatch is its
+	// only entry, and it is silent on events the rung does not fire for.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/a", 200, 100))
 	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/a", 200, 100))
 	d.send(nginxLine("1734345936.123", "203.0.113.7", "GET", "/a", 200, 100))
@@ -112,13 +113,12 @@ chains:
 		seq = append(seq, ev.Time.UTC().Format(time.RFC3339))
 	}
 	want := []string{
-		eventTime1At, eventTime1At,
-		eventTime2At, eventTime2At,
-		"2024-12-16T10:45:36Z", "2024-12-16T10:45:36Z",
-		"2024-12-16T10:45:46Z",
+		eventTime1At,
+		eventTime2At,
+		"2024-12-16T10:45:36Z",
 	}
 	if !slices.Equal(seq, want) {
-		t.Errorf("inspect runs per event = %v, want %v (twice while the rung holds, once after the decay)", seq, want)
+		t.Errorf("inspect runs per event = %v, want %v (once per handoff while the rung holds, silent after the decay)", seq, want)
 	}
 }
 
@@ -182,8 +182,9 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
-	// The trailing MARK:TOPIC is the topic chain's own file-order traversal, not a second dispatch.
-	want := []string{"MARK:TOPIC", "MARK:R1-TAIL", "MARK:HIGH", "MARK:TOPIC"}
+	// The topic chain runs at the dispatch only: the goto rung's first
+	// action, before the remaining fired rungs run and the chain ends.
+	want := []string{"MARK:TOPIC", "MARK:R1-TAIL", "MARK:HIGH"}
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (goto dispatch, remaining fired rungs, then chain end)", got, want)
 	}
@@ -242,8 +243,9 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
-	// The lone MARK:TOPIC is the topic chain's own file-order traversal, not a goto dispatch.
-	want := []string{"MARK:LOW", "MARK:AFTER", "MARK:TOPIC"}
+	// The goto rung never fired, so the topic chain is never dispatched:
+	// nothing else enters it for the event.
+	want := []string{"MARK:LOW", "MARK:AFTER"}
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (terminality follows the fired rungs)", got, want)
 	}

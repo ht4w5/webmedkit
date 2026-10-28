@@ -54,14 +54,14 @@ func NewService(chains []domain.Chain, cache TrackerCache, reports ReportSink, n
 	return &Service{chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
 }
 
-// Evaluate runs every chain over the event: chains in file order, rules within a chain in order.
+// Evaluate enters the entry chain for the event; every other chain runs
+// only when a goto/jump action dispatches to it.
 func (s *Service) Evaluate(ctx context.Context, event *domain.Event) error {
-	for i := range s.chains {
-		if err := s.runChain(ctx, i, event); err != nil {
-			return err
-		}
+	ci, ok := s.byName[domain.EntryChain]
+	if !ok {
+		return fmt.Errorf("evaluate: entry chain %q not found", domain.EntryChain)
 	}
-	return nil
+	return s.runChain(ctx, ci, event)
 }
 
 // matchContext is one fired rung in progress: rule, chain, event and the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -484,5 +485,28 @@ func TestActionsSeeTriggerTimeReading(t *testing.T) {
 	want := domain.TrackerReading{Track: "rate", Value: 3, Volume: 2}
 	if got := log.records[0]["tracker"]; got != want {
 		t.Errorf("logged tracker reading = %+v, want %+v (the Trigger-time reading, pre-reset)", got, want)
+	}
+}
+
+// Evaluate errors when the entry chain is absent at evaluation time (the
+// loader normally guarantees it; only this seam can build such a
+// service): evaluation never silently does nothing.
+func TestEvaluateWithoutTheEntryChainErrors(t *testing.T) {
+	sink, cache := &stubSink{}, &stubCache{}
+	chains := []domain.Chain{{Name: "helper", Rules: []domain.Rule{{
+		ID: "helper-match", Filter: matchAll{},
+		Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "helper", TTL: time.Hour}}},
+	}}}}
+	svc := NewService(chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil)
+
+	err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0))
+	if err == nil {
+		t.Fatal("Evaluate error = nil, want the missing entry chain to error")
+	}
+	if !strings.Contains(err.Error(), "main") {
+		t.Errorf("error %q does not name the entry chain", err)
+	}
+	if sink.attempts != 0 || len(cache.updates) != 0 {
+		t.Errorf("report writes = %d, cache updates = %d, want none (nothing ran)", sink.attempts, len(cache.updates))
 	}
 }

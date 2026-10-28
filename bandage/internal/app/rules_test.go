@@ -384,8 +384,10 @@ chains:
 		{name: "log wrong arg count rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: debug}]\n", wantErr: "level,message"},
 		{name: "log bad level rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"verbose,x\"}]\n", wantErr: "level"},
 
-		// The goto/jump chain graph: unique chain names, resolvable
-		// targets, acyclic (a DAG; shared target chains are allowed).
+		// The goto/jump chain graph: a chain named main (the entry
+		// chain), no dispatch targeting main, unique chain names,
+		// resolvable targets, acyclic (a DAG; shared target chains are
+		// allowed).
 		{
 			name: "duplicate chain names rejected",
 			yaml: `
@@ -434,7 +436,11 @@ chains:
   - name: main
     rules:
       - id: r
-        actions: [{goto: main}]
+        actions: [stop]
+  - name: a
+    rules:
+      - id: s
+        actions: [{goto: a}]
 `,
 			wantErr: "cycle",
 		},
@@ -450,7 +456,11 @@ chains:
   - name: b
     rules:
       - id: s
-        actions: [{goto: main}]
+        actions: [{goto: c}]
+  - name: c
+    rules:
+      - id: t
+        actions: [{goto: b}]
 `,
 			wantErr: "cycle",
 		},
@@ -462,9 +472,73 @@ chains:
   - name: main
     rules:
       - id: r
-        actions: [{jump: main}]
+        actions: [stop]
+  - name: a
+    rules:
+      - id: s
+        actions: [{jump: a}]
 `,
 			wantErr: "cycle",
+		},
+		{
+			name: "document without a main chain rejected",
+			yaml: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        actions: [stop]
+`,
+			wantErr: `no chain named "main"`,
+		},
+		{
+			name: "goto targeting the entry chain rejected",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [stop]
+  - name: b
+    rules:
+      - id: s
+        actions: [{goto: main}]
+`,
+			wantErr: "targets the entry chain",
+		},
+		{
+			name: "jump targeting the entry chain rejected",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [stop]
+  - name: b
+    rules:
+      - id: s
+        actions: [{jump: main}]
+`,
+			wantErr: "targets the entry chain",
+		},
+		{
+			name: "unreachable chain accepted",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [stop]
+  - name: draft
+    rules:
+      - id: s
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: draft, ttl: 1h, penalty: drop}}]
+`,
 		},
 		{
 			name: "shared target chain accepted as a DAG",
@@ -1169,7 +1243,11 @@ chains:
   - name: b
     rules:
       - id: s
-        actions: [{goto: main}]
+        actions: [{goto: c}]
+  - name: c
+    rules:
+      - id: t
+        actions: [{goto: b}]
 `,
 			wantErr: "cycle",
 		},
@@ -1219,9 +1297,46 @@ chains:
   - name: b
     rules:
       - id: s
-        actions: [{goto: main}]
+        actions: [{goto: c}]
+  - name: c
+    rules:
+      - id: t
+        actions: [{goto: b}]
 `,
 			wantErr: "cycle",
+		},
+		{
+			name: "document without a main chain rejected",
+			rules: `
+version: 0
+chains:
+  - name: a
+    rules:
+      - id: r
+        actions: [stop]
+`,
+			wantErr: `no chain named "main"`,
+		},
+		{
+			name: "rung goto targeting the entry chain rejected",
+			rules: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [stop]
+  - name: b
+    rules:
+      - id: s
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{goto: main}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: "targets the entry chain",
 		},
 		{
 			name: "duplicate chain names rejected",
