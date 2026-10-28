@@ -58,7 +58,11 @@ var metricFamilies = []metricFamily{
 		kind: "gauge",
 		help: "Seconds since the Unix epoch at which the daemon started.",
 		value: func(s metricsSnapshot) float64 {
-			return float64(s.stats.StartedAt.Unix())
+			// Fractional seconds per the contract: whole-second Unix()
+			// plus the nanosecond fraction, which stays exact where
+			// UnixNano()/1e9 rounds at this magnitude.
+			t := s.stats.StartedAt
+			return float64(t.Unix()) + float64(t.Nanosecond())/1e9
 		},
 	},
 	{
