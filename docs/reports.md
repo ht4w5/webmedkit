@@ -175,7 +175,7 @@ client that downloaded two 6000-byte files within one leak second:
   "reports": [
     {
       "rule": "sustained-egress",
-      "chain": "download-abuse",
+      "chain": "main",
       "reason": "egress-overflow",
       "target": "203.0.113.7/32",
       "created_at": "2025-10-17T18:00:00Z",

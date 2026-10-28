@@ -21,7 +21,7 @@ var errWriteFailed = errors.New("stub report write failure")
 const contendRules = `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 1000}

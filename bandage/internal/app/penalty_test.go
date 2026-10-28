@@ -19,7 +19,7 @@ func floodRules(penalty string) string {
 	return `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: flood
         tracker: {track: bandwidth, leak: 0, volume: 100}

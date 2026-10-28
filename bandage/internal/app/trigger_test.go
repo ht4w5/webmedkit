@@ -18,7 +18,7 @@ func TestE2EOneWritePerReportLifetime(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 10000}
@@ -91,7 +91,7 @@ chains:
 const singleVolumeMethodRules = `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: iso-replay
         tracker:
@@ -174,7 +174,7 @@ func TestE2EConcurrentTriggersLeaveTheRecordIntact(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: egress
         tracker: {track: bandwidth, leak: 0, volume: 1000}

@@ -480,7 +480,7 @@ func statsBool(t *testing.T, doc statsDoc, block, field string) bool {
 const bandwidthRules = `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: sustained-egress
         tracker:
@@ -517,7 +517,7 @@ func TestE2EOverflowWritesReport(t *testing.T) {
 		t.Fatalf("reports = %d, want 1: %+v", len(doc.Reports), doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "sustained-egress" || r.Chain != "download-abuse" || r.Reason != "egress-overflow" {
+	if r.Rule != "sustained-egress" || r.Chain != "main" || r.Reason != "egress-overflow" {
 		t.Errorf("provenance = %q/%q/%q", r.Rule, r.Chain, r.Reason)
 	}
 	if r.Target != "203.0.113.7/32" {
@@ -545,7 +545,7 @@ func TestE2ERateOverflowStrictlyAboveVolume(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: api
+  - name: main
     rules:
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
@@ -578,7 +578,7 @@ func TestE2EDecayUsesEventTime(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: api
+  - name: main
     rules:
       - id: bursty-api
         tracker: {track: rate, leak: 1, volume: 4}
@@ -640,7 +640,7 @@ func TestE2EReportUpsertIdentity(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: byte-flood
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -720,7 +720,7 @@ func TestE2EReportFiltersAndExpiry(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse-one
+  - name: main
     rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -942,7 +942,7 @@ func TestE2EStatsCountsEvictions(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: api
+  - name: main
     rules:
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
@@ -1123,7 +1123,7 @@ func TestE2ESyslogTransports(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: one-shot
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1149,7 +1149,7 @@ func TestE2EEvictedBucketAccumulatesFresh(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: api
+  - name: main
     rules:
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
@@ -1228,7 +1228,7 @@ func TestE2ESyslogFramedMessage(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: one-shot
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1249,7 +1249,7 @@ func TestE2EDeleteByFilterCounts(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse-one
+  - name: main
     rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1331,7 +1331,7 @@ func TestE2EDeleteDoesNotTouchTrackerState(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: sticky
         tracker: {track: bandwidth, leak: 0, volume: 200}
@@ -1382,7 +1382,7 @@ func TestE2ESweeperDeletesExpiredRows(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: one
+  - name: main
     rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1435,7 +1435,7 @@ func TestE2EExpiresAtRecomputedOnWrite(t *testing.T) {
 		return fmt.Sprintf(`
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: sticky
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1498,7 +1498,7 @@ func TestE2EFilterGatesTracker(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: gated
+  - name: main
     rules:
       - id: gated-egress
         filter: 'path prefix "/releases" and method GET'
@@ -1563,7 +1563,7 @@ func TestE2EGotoRunsTargetAndEndsCurrentChain(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: routing
+  - name: main
     rules:
       - id: route-to-topic
         actions: [{goto: topic}]
@@ -1602,7 +1602,7 @@ func TestE2EJumpRunsTargetAndResumesCurrentChain(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: routing
+  - name: main
     rules:
       - id: route-to-topic
         actions: [{jump: topic}]
@@ -1636,7 +1636,7 @@ func TestE2EFirstMatchPerChainEndsTraversal(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: order
+  - name: main
     rules:
       - id: first-match
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1673,7 +1673,7 @@ func TestE2EStopEndsChainWithoutStoppingOtherChains(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: halt
+  - name: main
     rules:
       - id: stop-here
         actions: [stop]
@@ -1703,7 +1703,7 @@ func TestE2ELogActionLogsEventAndTrackerReading(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: debugging
+  - name: main
     rules:
       - id: seen
         actions: [{log: "debug,SEEN:"}]
@@ -1770,7 +1770,7 @@ func TestE2ELevelFilteringDropsRecordsBelowConfiguredLevel(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: levels
+  - name: main
     rules:
       - id: debug-log
         actions: [{log: "debug,DEBUG-MARK:"}]
@@ -1836,7 +1836,7 @@ func TestE2EChainFileOrderAndFirstMatchSemantics(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: alpha
+  - name: main
     rules:
       - id: a1
         actions: [{log: "debug,MARK:A1"}]
@@ -1905,7 +1905,7 @@ func TestE2EFullActionListRunsBeforeTerminality(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: dispatch
+  - name: main
     rules:
       - id: route
         tracker: {track: bandwidth, leak: 0, volume: 100}
@@ -1966,7 +1966,7 @@ func TestE2ETargetAggregationSharesStatePerPrefix(t *testing.T) {
 			rules: `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: burst
         tracker: {track: rate, leak: 0, volume: 2, target_prefix: {ipv4: 24, ipv6: 64}}
@@ -1982,7 +1982,7 @@ chains:
 			rules: `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: burst
         tracker: {track: rate, leak: 0, volume: 2}
@@ -2044,7 +2044,7 @@ func TestE2ETargetAggregationSeparatesPrefixes(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: abuse
+  - name: main
     rules:
       - id: burst
         tracker: {track: rate, leak: 0, volume: 2, target_prefix: {ipv4: 24, ipv6: 64}}
@@ -2098,7 +2098,7 @@ func TestE2EReplayWarmUpBlindThenReports(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
@@ -2142,7 +2142,7 @@ func TestE2EReplayVolumeMethodScalesTolerance(t *testing.T) {
 	rules := `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: iso-replay
         tracker:

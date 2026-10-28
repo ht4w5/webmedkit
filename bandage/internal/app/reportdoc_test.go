@@ -14,7 +14,7 @@ import (
 const canonicalRules = `
 version: 0
 chains:
-  - name: download-abuse
+  - name: main
     rules:
       - id: sustained-egress
         tracker:
