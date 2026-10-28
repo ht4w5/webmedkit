@@ -2,9 +2,11 @@ package app
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
@@ -98,5 +100,48 @@ func TestShippedRulesCarryTheGuideLadder(t *testing.T) {
 	excerpt := sectionFence(t, readShipped(t, rulesGuidePath), "## Escalation ladders", "escalations:")
 	if !strings.Contains(readShipped(t, shippedRulesPath), excerpt) {
 		t.Errorf("configs/rules.yml does not carry the guide's worked example verbatim:\n%s", excerpt)
+	}
+}
+
+// The shipped example's front door: a main dispatcher chain carrying one
+// filter-less jump rule per topical chain, in file order (a jump is
+// non-terminal, so the dispatcher sequences exactly like the chains' own
+// file order). inspect is the ladder's handoff target, entered by its jump
+// rung; dispatching it from main as well would double-feed its tracker on
+// handoff events.
+func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
+	chains, err := LoadRules(shippedRulesPath)
+	if err != nil {
+		t.Fatalf("LoadRules(%s) error: %v", shippedRulesPath, err)
+	}
+	// The topical chains, in file order; the handoff target (inspect) is
+	// not one of them.
+	want := []string{"download-abuse", "api", "iso-egress"}
+	var main domain.Chain
+	found := false
+	for _, chain := range chains {
+		if chain.Name == "main" {
+			main, found = chain, true
+		}
+	}
+	if !found {
+		t.Fatalf("shipped rules have no chain named %q", "main")
+	}
+	var got []string
+	for _, rule := range main.Rules {
+		if rule.FilterSource != "any" {
+			t.Errorf("dispatcher rule %q: filter = %q, want none (filter-less)", rule.ID, rule.FilterSource)
+		}
+		if rule.Tracker != nil {
+			t.Errorf("dispatcher rule %q: has a tracker, want none", rule.ID)
+		}
+		if len(rule.Actions) != 1 || rule.Actions[0].Jump == "" {
+			t.Errorf("dispatcher rule %q: actions = %v, want one jump", rule.ID, rule.Actions)
+			continue
+		}
+		got = append(got, rule.Actions[0].Jump)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("main dispatches %v, want one jump per topical chain %v in file order", got, want)
 	}
 }
