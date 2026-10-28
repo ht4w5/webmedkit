@@ -201,13 +201,18 @@ func TestMetricsContentTypeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMetricsRejectsNonGET: the endpoint is read-only; ServeMux's method
-// pattern answers anything else with 405 (pinned here).
+// TestMetricsRejectsNonGET: the endpoint is read-only and GET only — HEAD
+// included, since ServeMux would otherwise match HEAD against a GET pattern
+// and answer it like a GET. Anything but GET is rejected with 405 and
+// Allow: GET.
 func TestMetricsRejectsNonGET(t *testing.T) {
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+	for _, method := range []string{http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		w := metricsRequest(t, metricsFixture, method)
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s /metrics = %d, want 405", method, w.Code)
+		}
+		if got := w.Header().Get("Allow"); got != "GET" {
+			t.Errorf("%s /metrics Allow = %q, want %q", method, got, "GET")
 		}
 	}
 }

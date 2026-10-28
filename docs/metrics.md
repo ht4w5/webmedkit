@@ -105,8 +105,10 @@ and alert rules that name families from this contract survive upgrades.
 listener as `/ping`, `/stats` and the report API: no authentication, no
 TLS, no configuration knob, always registered. This is the exposure
 stance [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
-already accepted, carried over unchanged. The daemon serves the
-endpoint; deciding who may reach it is the operator's network-layer
+already accepted, carried over unchanged. The endpoint is GET only:
+HEAD — which some scrapers and proxies send in place of GET — and
+every other method are rejected with `405 Method Not Allowed` and an
+`Allow: GET` header. The daemon serves the endpoint; deciding who may reach it is the operator's network-layer
 job — firewall the listener so only the monitoring network can scrape
 it, as with the rest of the ops surface.
 

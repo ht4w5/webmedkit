@@ -190,8 +190,15 @@ var metricFamilies = []metricFamily{
 // plus the runtime block rendered as text exposition 0.0.4 (ADR 0006, ADR
 // 0014). Both inputs are read here, at scrape time — no background sampler,
 // no cached values between scrapes — so each response is one point-in-time
-// snapshot. GET only, always registered.
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+// snapshot. GET only, always registered: anything else — HEAD included,
+// which ServeMux would otherwise match against a GET pattern — is rejected
+// with 405 and Allow: GET.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", metricsContentType)
 	w.Write(renderMetrics(metricsSnapshot{stats: s.stats.Stats(), runtime: s.runtime.Runtime()}))
 }
