@@ -1,5 +1,6 @@
 // Package httpapi serves the daemon's read-only HTTP surface: GET /reports,
-// DELETE /reports, GET /ping and GET /stats (no URL version, no report writes).
+// DELETE /reports, GET /ping, GET /stats and GET /metrics (no URL version, no
+// report writes).
 package httpapi
 
 import (
@@ -76,6 +77,7 @@ func New(reports ReportStore, stats StatsSource, now func() time.Time) *Server {
 	s.mux.HandleFunc("GET /reports", s.handleReports)
 	s.mux.HandleFunc("DELETE /reports", s.handleDeleteReports)
 	s.mux.HandleFunc("GET /stats", s.handleStats)
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ping", s.handlePing)
 	return s
 }
