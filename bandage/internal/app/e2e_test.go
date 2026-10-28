@@ -974,7 +974,8 @@ chains:
 	}
 }
 
-// TestE2EAPIPingAndUnknownPaths: GET /ping is liveness; nothing else is
+// TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
+// the scrapeable machine contract (text exposition 0.0.4); nothing else is
 // exposed beyond the report API and the /stats snapshot.
 func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -990,7 +991,24 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 		t.Errorf("GET /ping = %d %q, want 200 %q", resp.StatusCode, body, "pong")
 	}
 
-	for _, path := range []string{"/", "/metrics", "/debug", "/reports/1"} {
+	resp, err = apiClient.Get("http://" + d.apiAddr() + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /metrics = %d, want 200", resp.StatusCode)
+	}
+	const wantCT = "text/plain; version=0.0.4; charset=utf-8"
+	if got := resp.Header.Get("Content-Type"); got != wantCT {
+		t.Errorf("GET /metrics Content-Type = %q, want %q", got, wantCT)
+	}
+	if !strings.Contains(string(body), "# TYPE bandage_pipeline_events_received_total counter\n") {
+		t.Errorf("GET /metrics body lacks the pipeline counter family, body:\n%s", body)
+	}
+
+	for _, path := range []string{"/", "/debug", "/reports/1"} {
 		resp, err := apiClient.Get("http://" + d.apiAddr() + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
