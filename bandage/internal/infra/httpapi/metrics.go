@@ -18,7 +18,7 @@ import (
 const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // metricsSnapshot is one point-in-time sample of everything /metrics renders.
-// It carries the same Stats snapshot /stats serves, so the two surfaces agree
+// It carries the same snapshot /stats serves, so the two surfaces agree
 // by construction, plus the runtime block's Runtime sample; both are read at
 // scrape time by the handler and never live inside the renderer.
 type metricsSnapshot struct {
@@ -32,6 +32,17 @@ type metricLabel struct {
 	value string
 }
 
+// metricKind is a family's TYPE token: the two-value exposition vocabulary
+// of counter and gauge, named so the family table reads as the machine
+// contract rather than free text (ADR 0014).
+type metricKind string
+
+// The TYPE tokens a family may carry in exposition 0.0.4.
+const (
+	metricCounter metricKind = "counter"
+	metricGauge   metricKind = "gauge"
+)
+
 // metricFamily is one row of the metrics family table: the stable machine
 // contract's name, type and help (ADR 0014) plus the source of the family's
 // single series from the snapshot. Families render in table order — the fixed
@@ -39,7 +50,7 @@ type metricLabel struct {
 // new row.
 type metricFamily struct {
 	name   string
-	kind   string // the TYPE token: "counter" or "gauge"
+	kind   metricKind
 	help   string
 	labels func(s metricsSnapshot) []metricLabel // nil for unlabeled series
 	value  func(s metricsSnapshot) float64
@@ -55,15 +66,19 @@ type metricFamily struct {
 var metricFamilies = []metricFamily{
 	{
 		name: "bandage_start_time_seconds",
-		kind: "gauge",
+		kind: metricGauge,
 		help: "Seconds since the Unix epoch at which the daemon started.",
 		value: func(s metricsSnapshot) float64 {
-			return float64(s.stats.StartedAt.Unix())
+			// Fractional seconds per the contract: whole-second Unix()
+			// plus the nanosecond fraction, which stays exact where
+			// UnixNano()/1e9 rounds at this magnitude.
+			t := s.stats.StartedAt
+			return float64(t.Unix()) + float64(t.Nanosecond())/1e9
 		},
 	},
 	{
 		name: "bandage_build_info",
-		kind: "gauge",
+		kind: metricGauge,
 		help: "Build identity of the running binary; the labels carry the identity and the value is always 1.",
 		labels: func(s metricsSnapshot) []metricLabel {
 			b := s.stats.Build
@@ -81,67 +96,67 @@ var metricFamilies = []metricFamily{
 	},
 	{
 		name:  "bandage_pipeline_events_received_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Log lines received from the wire since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Received) },
 	},
 	{
 		name:  "bandage_pipeline_events_parsed_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Log lines parsed into events since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Parsed) },
 	},
 	{
 		name:  "bandage_pipeline_events_dropped_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Malformed or invalid log lines dropped since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Dropped) },
 	},
 	{
 		name:  "bandage_pipeline_workers",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Pipeline workers processing log lines.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Workers) },
 	},
 	{
 		name:  "bandage_tracker_cache_gets_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Tracker cache lookups since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Gets) },
 	},
 	{
 		name:  "bandage_tracker_cache_sets_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Tracker cache writes since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Sets) },
 	},
 	{
 		name:  "bandage_tracker_cache_misses_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Tracker cache lookups that found no entry since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Misses) },
 	},
 	{
 		name:  "bandage_tracker_cache_evictions_total",
-		kind:  "counter",
+		kind:  metricCounter,
 		help:  "Tracker cache evictions since daemon start.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Evictions) },
 	},
 	{
 		name:  "bandage_tracker_cache_entries",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Tracker cache entries currently held.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Size) },
 	},
 	{
 		name:  "bandage_tracker_cache_entry_cap",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Configured tracker cache entry capacity.",
 		value: func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.EntryCap) },
 	},
 	{
 		name: "go_info",
-		kind: "gauge",
+		kind: metricGauge,
 		help: "Information about the Go environment.",
 		labels: func(s metricsSnapshot) []metricLabel {
 			return []metricLabel{{"version", s.runtime.Version}}
@@ -150,37 +165,37 @@ var metricFamilies = []metricFamily{
 	},
 	{
 		name:  "go_goroutines",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Number of goroutines that currently exist.",
 		value: func(s metricsSnapshot) float64 { return float64(s.runtime.Goroutines) },
 	},
 	{
 		name:  "go_threads",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Number of OS threads created.",
 		value: func(s metricsSnapshot) float64 { return float64(s.runtime.Threads) },
 	},
 	{
 		name:  "go_memstats_alloc_bytes",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Number of bytes allocated and still in use.",
 		value: func(s metricsSnapshot) float64 { return float64(s.runtime.AllocBytes) },
 	},
 	{
 		name:  "go_memstats_heap_inuse_bytes",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Number of heap bytes that are in use.",
 		value: func(s metricsSnapshot) float64 { return float64(s.runtime.HeapInuseBytes) },
 	},
 	{
 		name:  "go_memstats_sys_bytes",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "Number of bytes obtained from system.",
 		value: func(s metricsSnapshot) float64 { return float64(s.runtime.SysBytes) },
 	},
 	{
 		name:  "go_memstats_gc_cpu_fraction",
-		kind:  "gauge",
+		kind:  metricGauge,
 		help:  "The fraction of this program's available CPU time used by the GC since the program started.",
 		value: func(s metricsSnapshot) float64 { return s.runtime.GCCPUFraction },
 	},
@@ -190,8 +205,15 @@ var metricFamilies = []metricFamily{
 // plus the runtime block rendered as text exposition 0.0.4 (ADR 0006, ADR
 // 0014). Both inputs are read here, at scrape time — no background sampler,
 // no cached values between scrapes — so each response is one point-in-time
-// snapshot. GET only, always registered.
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+// snapshot. GET only, always registered: anything else — HEAD included,
+// which ServeMux would otherwise match against a GET pattern — is rejected
+// with 405 and Allow: GET.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", metricsContentType)
 	w.Write(renderMetrics(metricsSnapshot{stats: s.stats.Stats(), runtime: s.runtime.Runtime()}))
 }
@@ -210,7 +232,7 @@ func renderMetrics(s metricsSnapshot) []byte {
 		b.WriteString("# TYPE ")
 		b.WriteString(f.name)
 		b.WriteByte(' ')
-		b.WriteString(f.kind)
+		b.WriteString(string(f.kind))
 		b.WriteByte('\n')
 		b.WriteString(f.name)
 		if f.labels != nil {

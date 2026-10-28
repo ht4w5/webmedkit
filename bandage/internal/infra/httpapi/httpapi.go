@@ -98,7 +98,7 @@ func New(reports ReportStore, stats StatsSource, runtime RuntimeSource, now func
 	s.mux.HandleFunc("GET /reports", s.handleReports)
 	s.mux.HandleFunc("DELETE /reports", s.handleDeleteReports)
 	s.mux.HandleFunc("GET /stats", s.handleStats)
-	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
+	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ping", s.handlePing)
 	return s
 }

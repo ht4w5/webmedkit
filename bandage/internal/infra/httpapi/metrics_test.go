@@ -20,7 +20,7 @@ import (
 // are reproducible from this one value: renderMetrics(metricsFixture).
 var metricsFixture = metricsSnapshot{
 	stats: Stats{
-		StartedAt: time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC), // Unix 1704164645
+		StartedAt: time.Date(2024, 1, 2, 3, 4, 5, 250000000, time.UTC), // Unix 1704164645.25
 		Build: Build{
 			Name:      "bandage",
 			Version:   "1.2.3",
@@ -68,7 +68,7 @@ func metricsRequest(t *testing.T, snap metricsSnapshot, method string) *httptest
 // metricsFixture: family order and every byte, newline-terminated lines.
 const metricsGoldenResponse = `# HELP bandage_start_time_seconds Seconds since the Unix epoch at which the daemon started.
 # TYPE bandage_start_time_seconds gauge
-bandage_start_time_seconds 1704164645
+bandage_start_time_seconds 1.70416464525e+09
 # HELP bandage_build_info Build identity of the running binary; the labels carry the identity and the value is always 1.
 # TYPE bandage_build_info gauge
 bandage_build_info{name="bandage",version="1.2.3",commit="abc123",build_date="2024-01-02T03:04:05Z",dirty="false",go_version="go1.27.0",platform="linux/amd64"} 1
@@ -201,13 +201,18 @@ func TestMetricsContentTypeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMetricsRejectsNonGET: the endpoint is read-only; ServeMux's method
-// pattern answers anything else with 405 (pinned here).
+// TestMetricsRejectsNonGET: the endpoint is read-only and GET only — HEAD
+// included, since ServeMux would otherwise match HEAD against a GET pattern
+// and answer it like a GET. Anything but GET is rejected with 405 and
+// Allow: GET.
 func TestMetricsRejectsNonGET(t *testing.T) {
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+	for _, method := range []string{http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		w := metricsRequest(t, metricsFixture, method)
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s /metrics = %d, want 405", method, w.Code)
+		}
+		if got := w.Header().Get("Allow"); got != "GET" {
+			t.Errorf("%s /metrics Allow = %q, want %q", method, got, "GET")
 		}
 	}
 }

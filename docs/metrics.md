@@ -35,7 +35,7 @@ newline); every line is newline-terminated; families appear in a fixed
 deterministic order. The exposition is rendered by hand from a plain
 snapshot — no Prometheus client library
 ([ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)).
-Each response is one point-in-time snapshot: the statistics block and
+Each response is one point-in-time snapshot: the `/stats` snapshot block and
 the runtime block are alike read at scrape time, so families within a
 single response never mix sampling times.
 
@@ -105,8 +105,10 @@ and alert rules that name families from this contract survive upgrades.
 listener as `/ping`, `/stats` and the report API: no authentication, no
 TLS, no configuration knob, always registered. This is the exposure
 stance [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
-already accepted, carried over unchanged. The daemon serves the
-endpoint; deciding who may reach it is the operator's network-layer
+already accepted, carried over unchanged. The endpoint is GET only:
+HEAD — which some scrapers and proxies send in place of GET — and
+every other method are rejected with `405 Method Not Allowed` and an
+`Allow: GET` header. The daemon serves the endpoint; deciding who may reach it is the operator's network-layer
 job — firewall the listener so only the monitoring network can scrape
 it, as with the rest of the ops surface.
 
@@ -170,7 +172,7 @@ family order and every byte:
 ```text
 # HELP bandage_start_time_seconds Seconds since the Unix epoch at which the daemon started.
 # TYPE bandage_start_time_seconds gauge
-bandage_start_time_seconds 1704164645
+bandage_start_time_seconds 1.70416464525e+09
 # HELP bandage_build_info Build identity of the running binary; the labels carry the identity and the value is always 1.
 # TYPE bandage_build_info gauge
 bandage_build_info{name="bandage",version="1.2.3",commit="abc123",build_date="2024-01-02T03:04:05Z",dirty="false",go_version="go1.27.0",platform="linux/amd64"} 1
