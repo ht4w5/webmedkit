@@ -31,29 +31,33 @@ const (
 	benchRearmStep = 45 * time.Minute
 )
 
+// benchDispatcherChain is the episode fixtures' shared main chain: one
+// filter-less jump rule per topical chain.
+const benchDispatcherChain = `  - name: main
+    rules:
+      - id: dispatch-download-abuse
+        actions: [{jump: download-abuse}]
+      - id: dispatch-event-flood
+        actions: [{jump: event-flood}]
+      - id: dispatch-scanning
+        actions: [{jump: scanning}]
+      - id: dispatch-error-scanning
+        actions: [{jump: error-scanning}]
+`
+
 // benchEpisodeChains is the episode fixture: a main dispatcher jumping to
 // four single-rule chains, with benchEpisodeLen events per Target per
 // episode.
 const benchEpisodeChains = `
 version: 0
 chains:
-  - name: main
-    rules:
-      - id: dispatch-download-abuse
-        actions: [{jump: download-abuse}]
-      - id: dispatch-request-flood
-        actions: [{jump: request-flood}]
-      - id: dispatch-scanning
-        actions: [{jump: scanning}]
-      - id: dispatch-error-scanning
-        actions: [{jump: error-scanning}]
-  - name: download-abuse
+` + benchDispatcherChain + `  - name: download-abuse
     rules:
       - id: egress-flood
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'
         tracker: {track: rate, leak: 0, volume: 3}
         actions: [{report: {reason: egress-overflow, ttl: 30m, penalty: limit-req-rate, rate: 200}}]
-  - name: request-flood
+  - name: event-flood
     rules:
       - id: request-flood
         filter: 'method GET or method HEAD or method POST'
@@ -78,23 +82,13 @@ chains:
 const benchMatchNeverChains = `
 version: 0
 chains:
-  - name: main
-    rules:
-      - id: dispatch-download-abuse
-        actions: [{jump: download-abuse}]
-      - id: dispatch-request-flood
-        actions: [{jump: request-flood}]
-      - id: dispatch-scanning
-        actions: [{jump: scanning}]
-      - id: dispatch-error-scanning
-        actions: [{jump: error-scanning}]
-  - name: download-abuse
+` + benchDispatcherChain + `  - name: download-abuse
     rules:
       - id: sustained-egress
         filter: 'src 198.51.100.0/24 or src 203.0.113.0/24'
         tracker: {track: bandwidth, leak: 1GB, volume: 100GB}
         actions: [{report: {reason: egress-overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-  - name: request-flood
+  - name: event-flood
     rules:
       - id: rapid-requests
         filter: 'method GET or method HEAD or method POST'

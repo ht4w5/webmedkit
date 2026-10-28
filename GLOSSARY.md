@@ -34,6 +34,11 @@ The chain entered for every event; in the rules format it is the chain
 named main.
 _Avoid_: base chain, subroutine, hook, regular chain
 
+**Dispatch**:
+A named entry into another chain by a goto or jump action; the target
+chain runs as a subroutine of the dispatching chain, once per dispatch.
+_Avoid_: call, invoke
+
 **Rule**:
 A named condition-action pairing: a filter, at most one tracker, and one
 ordered action list — or an escalation ladder of them.

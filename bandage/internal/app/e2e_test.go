@@ -517,7 +517,7 @@ func TestE2EOverflowWritesReport(t *testing.T) {
 		t.Fatalf("reports = %d, want 1: %+v", len(doc.Reports), doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "sustained-egress" || r.Chain != "main" || r.Reason != "egress-overflow" {
+	if r.Rule != "sustained-egress" || r.Chain != domain.EntryChain || r.Reason != "egress-overflow" {
 		t.Errorf("provenance = %q/%q/%q", r.Rule, r.Chain, r.Reason)
 	}
 	if r.Target != "203.0.113.7/32" {
@@ -1388,10 +1388,14 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: route-one
+        actions: [{jump: one}]
       - id: route-three
         actions: [{jump: three}]
       - id: route-two
         actions: [{jump: two}]
+  - name: one
+    rules:
       - id: rule-one
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: one, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -1592,28 +1596,49 @@ chains:
 	}
 }
 
-// TestE2EGotoRunsTargetAndEndsCurrentChain: goto runs the target chain and
-// then ends the current chain (its later rules skipped); the target chain
-// takes the triggering event exactly once.
-func TestE2EGotoRunsTargetAndEndsCurrentChain(t *testing.T) {
-	clock := newTestClock(mustTime(t, wallBase))
-	rules := `
+// topicDispatchRules is the goto and jump tests' shared fixture: a main
+// chain dispatching to the topic chain by <action>, then an after-<action>
+// rule whose fate the dispatch's terminality decides. The topic chain's
+// topic-match rule marks each run and feeds its tracker on every traversal.
+func topicDispatchRules(action string) string {
+	return fmt.Sprintf(`
 version: 0
 chains:
   - name: main
     rules:
       - id: route-to-topic
-        actions: [{goto: topic}]
-      - id: after-goto
+        actions: [{%s: topic}]
+      - id: after-%s
         tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: after-goto, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+        actions: [{report: {reason: after-%s, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
   - name: topic
     rules:
       - id: topic-match
         tracker: {track: rate, leak: 0, volume: 0.5}
         actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:TOPIC"}]
-`
-	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+`, action, action, action)
+}
+
+// assertTopicRanOnce asserts the topic chain took the event exactly once:
+// one tracker feed and one MARK:TOPIC mark (one increment — volume 0.5
+// matches on any event). ran names the expected run for the failure
+// messages.
+func assertTopicRanOnce(t *testing.T, d *testDaemon, value float64, ran string) {
+	t.Helper()
+	if value != 1 {
+		t.Errorf("topic-match tracker value = %v, want 1 (%s)", value, ran)
+	}
+	if got := marks(d); !slices.Equal(got, []string{"MARK:TOPIC"}) {
+		t.Errorf("marks = %v, want one MARK:TOPIC (%s)", got, ran)
+	}
+}
+
+// TestE2EGotoRunsTargetAndEndsCurrentChain: goto runs the target chain and
+// then ends the current chain (its later rules skipped); the target chain
+// takes the triggering event exactly once.
+func TestE2EGotoRunsTargetAndEndsCurrentChain(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", topicDispatchRules("goto"))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
@@ -1625,37 +1650,14 @@ chains:
 	if r.Rule != "topic-match" || r.Reason != "topic-match" {
 		t.Errorf("report = %q/%q, want topic-match/topic-match", r.Rule, r.Reason)
 	}
-	if r.Tracker.Value != 1 {
-		// One increment: the goto-entered traversal is the chain's only
-		// traversal for the event (volume 0.5 fires on any request).
-		t.Errorf("tracker value = %v, want 1 (the goto'd chain takes the triggering event exactly once)", r.Tracker.Value)
-	}
-	if got := marks(d); !slices.Equal(got, []string{"MARK:TOPIC"}) {
-		t.Errorf("marks = %v, want one MARK:TOPIC (the goto'd chain runs exactly once for the event)", got)
-	}
+	assertTopicRanOnce(t, d, r.Tracker.Value, "the goto'd chain takes the triggering event exactly once")
 }
 
 // TestE2EJumpRunsTargetAndResumesCurrentChain: jump runs the target chain
 // and then resumes the current chain.
 func TestE2EJumpRunsTargetAndResumesCurrentChain(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
-	rules := `
-version: 0
-chains:
-  - name: main
-    rules:
-      - id: route-to-topic
-        actions: [{jump: topic}]
-      - id: after-jump
-        tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: after-jump, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-  - name: topic
-    rules:
-      - id: topic-match
-        tracker: {track: rate, leak: 0, volume: 0.5}
-        actions: [{report: {reason: topic-match, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:TOPIC"}]
-`
-	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", topicDispatchRules("jump"))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
@@ -1667,15 +1669,7 @@ chains:
 	if len(doc.Reports) != 2 || got["after-jump"].Rule == "" || got["topic-match"].Rule == "" {
 		t.Fatalf("reports = %+v, want after-jump (resumed) and topic-match (jumped)", doc.Reports)
 	}
-	if v := got["topic-match"].Tracker.Value; v != 1 {
-		// One increment: the jumped-to chain takes the triggering event
-		// exactly once before the caller resumes (volume 0.5 fires on
-		// any request).
-		t.Errorf("topic-match tracker value = %v, want 1 (jump runs the target chain once)", v)
-	}
-	if got := marks(d); !slices.Equal(got, []string{"MARK:TOPIC"}) {
-		t.Errorf("marks = %v, want one MARK:TOPIC (the jumped-to chain runs exactly once for the event)", got)
-	}
+	assertTopicRanOnce(t, d, got["topic-match"].Tracker.Value, "jump runs the target chain once")
 }
 
 // TestE2EFirstMatchPerChainEndsTraversal: a terminal rule's first match ends
@@ -1937,7 +1931,7 @@ chains:
 	}
 	r := doc.Reports[0]
 	if r.Chain != "shared" {
-		t.Errorf("report chain = %q, want %q (the chain the fired rule lives in)", r.Chain, "shared")
+		t.Errorf("report chain = %q, want %q (the chain the matched rule lives in)", r.Chain, "shared")
 	}
 	if r.Tracker.Value != 2 {
 		t.Errorf("tracker value = %v, want 2 (the diamond fed the shared tracker twice)", r.Tracker.Value)

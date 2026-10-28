@@ -112,12 +112,10 @@ func TestShippedRulesCarryTheGuideDispatcher(t *testing.T) {
 	}
 }
 
-// The shipped example's front door: a main dispatcher chain carrying one
-// filter-less jump rule per topical chain, in file order (a jump is
-// non-terminal, so the dispatcher sequences exactly like the chains' own
-// file order). inspect is the ladder's handoff target, entered by its jump
-// rung; dispatching it from main as well would double-feed its tracker on
-// handoff events.
+// The shipped example's front door: the main dispatcher chain, pinned to
+// the pattern the rules guide and the shipped comment document ("Entry
+// chains and dispatch" in docs/rules.md — the rationale lives there, not
+// here).
 func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
 	chains, err := LoadRules(shippedRulesPath)
 	if err != nil {
@@ -129,12 +127,12 @@ func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
 	var main domain.Chain
 	found := false
 	for _, chain := range chains {
-		if chain.Name == "main" {
+		if chain.Name == domain.EntryChain {
 			main, found = chain, true
 		}
 	}
 	if !found {
-		t.Fatalf("shipped rules have no chain named %q", "main")
+		t.Fatalf("shipped rules have no chain named %q", domain.EntryChain)
 	}
 	var got []string
 	for _, rule := range main.Rules {
