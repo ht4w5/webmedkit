@@ -14,9 +14,9 @@ over fixed injected snapshots.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `GET /metrics` on the existing listener serves the families:
+- [x] `GET /metrics` on the existing listener serves the families:
   `bandage_start_time_seconds`; `bandage_build_info` (gauge, value 1,
   labels carrying the full build identity: name, version, commit, build
   date, dirty, Go version, platform);
@@ -27,16 +27,40 @@ over fixed injected snapshots.
   `bandage_tracker_cache_gets_total`, `_sets_total`, `_misses_total`,
   `_evictions_total`;
   `bandage_tracker_cache_entries`, `bandage_tracker_cache_entry_cap`
-- [ ] Every family is preceded by `# HELP` and `# TYPE`; families appear
+- [x] Every family is preceded by `# HELP` and `# TYPE`; families appear
   in a fixed deterministic order; label values are escaped per the
   exposition spec (quotes, backslashes, newlines)
-- [ ] The response content type declares the exposition format version
+- [x] The response content type declares the exposition format version
   (`text/plain; version=0.0.4; charset=utf-8`); non-GET methods are
   rejected
-- [ ] Metric values agree with the `/stats` snapshot by construction —
+- [x] Metric values agree with the `/stats` snapshot by construction —
   one snapshot feeds both surfaces
-- [ ] Counters are cumulative since start; the renderer depends only on
+- [x] Counters are cumulative since start; the renderer depends only on
   the standard library (no new dependencies)
-- [ ] Tests at the wire seam: a golden byte-exact full response over
+- [x] Tests at the wire seam: a golden byte-exact full response over
   fixed injected snapshots (family order included), a nasty-label
   escaping case, and an endpoint round-trip asserting the content type
+
+## Answer
+
+Implemented on integration branch `feat/prometheus-metrics` (merge
+commit `4eed1dd`; cross-ticket code-review fixes through `7fa5a22`).
+`GET /metrics` on the existing listener serves the twelve `bandage_`
+families in exposition 0.0.4 from `httpapi.metricFamilies` — one table
+single-sourcing name, kind, help and snapshot source — rendered by the
+pure `renderMetrics` from the same `httpapi.Stats` snapshot `/stats`
+serves (existing `StatsSource` port reused), so the two surfaces agree
+by construction. Golden byte-exact response pinned at the wire seam
+(`metricsGoldenResponse` over `metricsFixture`); label escaping, HELP/
+TYPE on every family, content type and method rejection pinned beside
+it. Non-GET *including HEAD* answers 405 with `Allow: GET` (the
+code-review pass caught HEAD slipping through ServeMux's GET pattern).
+
+Context: spec `../spec.md`, `docs/adr/0014-metrics-are-a-hand-rendered-machine-contract.md`.
+
+Notes:
+- `StartedAt` renders as fractional seconds (`1.70416464525e+09` form
+  for fractional values; plain digits for whole seconds) after the
+  code-review precision fix.
+- Label keys mirror the `/stats` JSON field names (`build_date`,
+  `go_version`, …); `dirty` renders `"true"`/`"false"`.
