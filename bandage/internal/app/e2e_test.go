@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1018,6 +1019,70 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 			t.Errorf("GET %s = %d, want 404", path, resp.StatusCode)
 		}
 	}
+}
+
+// TestE2EAPIRuntimeMetricsByShape: the live daemon's /metrics carries the
+// curated Go runtime block in the same response as the bandage families,
+// asserted by shape only — HELP/TYPE present and a plausible value per family
+// — since real values are non-deterministic point-in-time samples (ADR 0014).
+func TestE2EAPIRuntimeMetricsByShape(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	resp, err := apiClient.Get("http://" + d.apiAddr() + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /metrics = %d, want 200", resp.StatusCode)
+	}
+	for _, name := range []string{
+		"go_info", "go_goroutines", "go_threads",
+		"go_memstats_alloc_bytes", "go_memstats_heap_inuse_bytes",
+		"go_memstats_sys_bytes", "go_memstats_gc_cpu_fraction",
+	} {
+		if !strings.Contains(string(body), "# HELP "+name+" ") {
+			t.Errorf("GET /metrics body lacks # HELP for %s", name)
+		}
+		if want := "# TYPE " + name + " gauge\n"; !strings.Contains(string(body), want) {
+			t.Errorf("GET /metrics body lacks %q", want)
+		}
+	}
+	if line, v := metricsSample(t, string(body), "go_info"); !strings.Contains(line, `go_info{version="`) || strings.Contains(line, `version=""`) || v != 1 {
+		t.Errorf("go_info line %q = %v, want a non-empty version label and value 1", line, v)
+	}
+	for _, name := range []string{
+		"go_goroutines", "go_threads",
+		"go_memstats_alloc_bytes", "go_memstats_heap_inuse_bytes", "go_memstats_sys_bytes",
+	} {
+		if _, v := metricsSample(t, string(body), name); v < 1 {
+			t.Errorf("%s = %v, want >= 1", name, v)
+		}
+	}
+	if _, v := metricsSample(t, string(body), "go_memstats_gc_cpu_fraction"); v < 0 || v > 1 {
+		t.Errorf("go_memstats_gc_cpu_fraction = %v, want within [0, 1]", v)
+	}
+}
+
+// metricsSample returns one family's sample line and parsed value from
+// exposition text — the "name value" or "name{...} value" line.
+func metricsSample(t *testing.T, body, name string) (string, float64) {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		rest, ok := strings.CutPrefix(line, name)
+		if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '{') {
+			continue
+		}
+		v, err := strconv.ParseFloat(line[strings.LastIndexByte(line, ' ')+1:], 64)
+		if err != nil {
+			t.Fatalf("GET /metrics %s sample line %q: %v", name, line, err)
+		}
+		return line, v
+	}
+	t.Fatalf("GET /metrics body lacks a %s sample line, body:\n%s", name, body)
+	return "", 0
 }
 
 // TestE2ERestartPersistsReportsNotTrackers: reports survive restarts (sqlite);

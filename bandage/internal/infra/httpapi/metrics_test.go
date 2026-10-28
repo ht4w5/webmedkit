@@ -15,20 +15,33 @@ import (
 // is observable as response bytes.
 
 // metricsFixture is the fixed injected snapshot the golden response is pinned
-// against; every value is chosen so each family's rendering is unambiguous.
-var metricsFixture = Stats{
-	StartedAt: time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC), // Unix 1704164645
-	Build: Build{
-		Name:      "bandage",
-		Version:   "1.2.3",
-		Commit:    "abc123",
-		BuildDate: "2024-01-02T03:04:05Z",
-		Dirty:     false,
-		GoVersion: "go1.27.0",
-		Platform:  "linux/amd64",
+// against; every value is chosen so each family's rendering is unambiguous. It
+// is the whole renderer input — stats and runtime alike — so the golden bytes
+// are reproducible from this one value: renderMetrics(metricsFixture).
+var metricsFixture = metricsSnapshot{
+	stats: Stats{
+		StartedAt: time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC), // Unix 1704164645
+		Build: Build{
+			Name:      "bandage",
+			Version:   "1.2.3",
+			Commit:    "abc123",
+			BuildDate: "2024-01-02T03:04:05Z",
+			Dirty:     false,
+			GoVersion: "go1.27.0",
+			Platform:  "linux/amd64",
+		},
+		Pipeline:     Pipeline{Workers: 4, Received: 1000, Parsed: 990, Dropped: 10},
+		TrackerCache: TrackerCache{Gets: 800, Sets: 400, Misses: 200, Evictions: 5, Size: 350, EntryCap: 1024},
 	},
-	Pipeline:     Pipeline{Workers: 4, Received: 1000, Parsed: 990, Dropped: 10},
-	TrackerCache: TrackerCache{Gets: 800, Sets: 400, Misses: 200, Evictions: 5, Size: 350, EntryCap: 1024},
+	runtime: Runtime{
+		Version:        "go1.27.0",
+		Goroutines:     7,
+		Threads:        5,
+		AllocBytes:     1234567,
+		HeapInuseBytes: 2345678,
+		SysBytes:       3456789,
+		GCCPUFraction:  0.0125,
+	},
 }
 
 // fixedStats serves a fixed snapshot: the metrics tests' StatsSource.
@@ -36,11 +49,16 @@ type fixedStats struct{ st Stats }
 
 func (f fixedStats) Stats() Stats { return f.st }
 
+// fixedRuntime serves a fixed runtime sample: the metrics tests' RuntimeSource.
+type fixedRuntime struct{ rt Runtime }
+
+func (f fixedRuntime) Runtime() Runtime { return f.rt }
+
 // metricsRequest drives one request through New and returns the recorded
 // response. The ReportStore is nil: GET /metrics never touches the report API.
-func metricsRequest(t *testing.T, st Stats, method string) *httptest.ResponseRecorder {
+func metricsRequest(t *testing.T, snap metricsSnapshot, method string) *httptest.ResponseRecorder {
 	t.Helper()
-	srv := New(nil, fixedStats{st}, func() time.Time { return time.Unix(0, 0) })
+	srv := New(nil, fixedStats{snap.stats}, fixedRuntime{snap.runtime}, func() time.Time { return time.Unix(0, 0) })
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, httptest.NewRequest(method, "/metrics", nil))
 	return w
@@ -84,6 +102,27 @@ bandage_tracker_cache_entries 350
 # HELP bandage_tracker_cache_entry_cap Configured tracker cache entry capacity.
 # TYPE bandage_tracker_cache_entry_cap gauge
 bandage_tracker_cache_entry_cap 1024
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.27.0"} 1
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 7
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 5
+# HELP go_memstats_alloc_bytes Number of bytes allocated and still in use.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 1234567
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use.
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 2345678
+# HELP go_memstats_sys_bytes Number of bytes obtained from system.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 3456789
+# HELP go_memstats_gc_cpu_fraction The fraction of this program's available CPU time used by the GC since the program started.
+# TYPE go_memstats_gc_cpu_fraction gauge
+go_memstats_gc_cpu_fraction 0.0125
 `
 
 // TestMetricsGoldenResponse pins the full response byte-exact over the fixed
@@ -102,15 +141,15 @@ func TestMetricsGoldenResponse(t *testing.T) {
 // TestMetricsEscapesLabelValues: a nasty commit (quote, backslash, newline)
 // is escaped per the exposition spec and cannot corrupt the line framing.
 func TestMetricsEscapesLabelValues(t *testing.T) {
-	st := metricsFixture
-	st.Build.Commit = "a\"b\\c\nd"
-	w := metricsRequest(t, st, http.MethodGet)
+	snap := metricsFixture
+	snap.stats.Build.Commit = "a\"b\\c\nd"
+	w := metricsRequest(t, snap, http.MethodGet)
 	want := `bandage_build_info{name="bandage",version="1.2.3",commit="a\"b\\c\nd",build_date="2024-01-02T03:04:05Z",dirty="false",go_version="go1.27.0",platform="linux/amd64"} 1` + "\n"
 	if !strings.Contains(w.Body.String(), want) {
 		t.Errorf("GET /metrics body lacks escaped line %q, body:\n%s", want, w.Body.String())
 	}
-	if strings.Contains(w.Body.String(), st.Build.Commit) {
-		t.Errorf("GET /metrics body contains the raw nasty commit %q", st.Build.Commit)
+	if strings.Contains(w.Body.String(), snap.stats.Build.Commit) {
+		t.Errorf("GET /metrics body contains the raw nasty commit %q", snap.stats.Build.Commit)
 	}
 }
 
@@ -132,6 +171,13 @@ func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 		{"bandage_tracker_cache_evictions_total", "counter"},
 		{"bandage_tracker_cache_entries", "gauge"},
 		{"bandage_tracker_cache_entry_cap", "gauge"},
+		{"go_info", "gauge"},
+		{"go_goroutines", "gauge"},
+		{"go_threads", "gauge"},
+		{"go_memstats_alloc_bytes", "gauge"},
+		{"go_memstats_heap_inuse_bytes", "gauge"},
+		{"go_memstats_sys_bytes", "gauge"},
+		{"go_memstats_gc_cpu_fraction", "gauge"},
 	} {
 		if !strings.Contains(body, "# HELP "+f.name+" ") {
 			t.Errorf("body lacks # HELP for %s", f.name)
