@@ -372,10 +372,8 @@ func (d *Daemon) Stats() httpapi.Stats {
 	}
 }
 
-// goRuntime samples the Go runtime through the standard library — the
-// httpapi.RuntimeSource adapter for the /metrics runtime block (ADR 0014).
-// Every field is read fresh per call: scrape time only, no background
-// sampler and no values cached between scrapes.
+// goRuntime is the standard-library httpapi.RuntimeSource adapter; every
+// field is read fresh per call — scrape time only, nothing cached.
 type goRuntime struct{}
 
 func (goRuntime) Runtime() httpapi.Runtime {

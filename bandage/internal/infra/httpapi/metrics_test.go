@@ -8,16 +8,11 @@ import (
 	"time"
 )
 
-// These tests pin the /metrics wire contract (ADR 0014): exposition 0.0.4
-// bytes on the wire and nothing else. The seam is the handler constructor
-// (New) with a fixed injected snapshot — the same httptest + fake StatsSource
-// pattern the bench test uses — so no daemon is needed and the whole surface
-// is observable as response bytes.
+// Wire-contract tests (ADR 0014): response bytes from New with a fixed
+// injected snapshot — no daemon, no renderer-internals assertions.
 
-// metricsFixture is the fixed injected snapshot the golden response is pinned
-// against; every value is chosen so each family's rendering is unambiguous. It
-// is the whole renderer input — stats and runtime alike — so the golden bytes
-// are reproducible from this one value: renderMetrics(metricsFixture).
+// The whole renderer input in one value, so the golden bytes are exactly
+// renderMetrics(metricsFixture); values chosen for unambiguous rendering.
 var metricsFixture = metricsSnapshot{
 	stats: Stats{
 		StartedAt: time.Date(2024, 1, 2, 3, 4, 5, 250000000, time.UTC), // Unix 1704164645.25
@@ -44,18 +39,15 @@ var metricsFixture = metricsSnapshot{
 	},
 }
 
-// fixedStats serves a fixed snapshot: the metrics tests' StatsSource.
 type fixedStats struct{ st Stats }
 
 func (f fixedStats) Stats() Stats { return f.st }
 
-// fixedRuntime serves a fixed runtime sample: the metrics tests' RuntimeSource.
 type fixedRuntime struct{ rt Runtime }
 
 func (f fixedRuntime) Runtime() Runtime { return f.rt }
 
-// metricsRequest drives one request through New and returns the recorded
-// response. The ReportStore is nil: GET /metrics never touches the report API.
+// The ReportStore is nil: GET /metrics never touches the report API.
 func metricsRequest(t *testing.T, snap metricsSnapshot, method string) *httptest.ResponseRecorder {
 	t.Helper()
 	srv := New(nil, fixedStats{snap.stats}, fixedRuntime{snap.runtime}, func() time.Time { return time.Unix(0, 0) })
@@ -64,8 +56,7 @@ func metricsRequest(t *testing.T, snap metricsSnapshot, method string) *httptest
 	return w
 }
 
-// metricsGoldenResponse is the canonical GET /metrics body over
-// metricsFixture: family order and every byte, newline-terminated lines.
+// Canonical response over metricsFixture; also pinned into docs/metrics.md.
 const metricsGoldenResponse = `# HELP bandage_start_time_seconds Seconds since the Unix epoch at which the daemon started.
 # TYPE bandage_start_time_seconds gauge
 bandage_start_time_seconds 1.70416464525e+09
@@ -125,9 +116,6 @@ go_memstats_sys_bytes 3456789
 go_memstats_gc_cpu_fraction 0.0125
 `
 
-// TestMetricsGoldenResponse pins the full response byte-exact over the fixed
-// injected snapshot — family order, HELP/TYPE text and all — so any change to
-// the machine contract is a deliberate act against a golden.
 func TestMetricsGoldenResponse(t *testing.T) {
 	w := metricsRequest(t, metricsFixture, http.MethodGet)
 	if w.Code != http.StatusOK {
@@ -138,8 +126,7 @@ func TestMetricsGoldenResponse(t *testing.T) {
 	}
 }
 
-// TestMetricsEscapesLabelValues: a nasty commit (quote, backslash, newline)
-// is escaped per the exposition spec and cannot corrupt the line framing.
+// A nasty commit (quote, backslash, newline) must not corrupt the framing.
 func TestMetricsEscapesLabelValues(t *testing.T) {
 	snap := metricsFixture
 	snap.stats.Build.Commit = "a\"b\\c\nd"
@@ -153,8 +140,6 @@ func TestMetricsEscapesLabelValues(t *testing.T) {
 	}
 }
 
-// TestMetricsHelpAndTypeOnEveryFamily: every family carries its # HELP and
-// # TYPE lines with the contracted type, so a scraper needs no special cases.
 func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 	w := metricsRequest(t, metricsFixture, http.MethodGet)
 	body := w.Body.String()
@@ -188,8 +173,6 @@ func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 	}
 }
 
-// TestMetricsContentTypeRoundTrip: the response declares the exposition
-// format version so a scraper recognizes the format without guessing.
 func TestMetricsContentTypeRoundTrip(t *testing.T) {
 	w := metricsRequest(t, metricsFixture, http.MethodGet)
 	if w.Code != http.StatusOK {
@@ -201,10 +184,7 @@ func TestMetricsContentTypeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMetricsRejectsNonGET: the endpoint is read-only and GET only — HEAD
-// included, since ServeMux would otherwise match HEAD against a GET pattern
-// and answer it like a GET. Anything but GET is rejected with 405 and
-// Allow: GET.
+// HEAD is in the list because ServeMux matches HEAD against GET patterns.
 func TestMetricsRejectsNonGET(t *testing.T) {
 	for _, method := range []string{http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		w := metricsRequest(t, metricsFixture, method)

@@ -7,47 +7,33 @@ import (
 	"strings"
 )
 
-// This file is the /metrics surface (ADR 0006's promised endpoint, ADR 0014):
-// Prometheus text exposition 0.0.4 rendered by hand from the same snapshot
-// GET /stats serves plus a scrape-time Go runtime sample — no client library,
-// no registry, no live reads inside the renderer. The machine contract (names,
-// types, help) is single-sourced in metricFamilies below.
+// /metrics (ADR 0006's promised endpoint, ADR 0014): Prometheus text
+// exposition 0.0.4 hand-rendered — no client library, no live renderer reads.
 
-// metricsContentType declares Prometheus text exposition 0.0.4: the response
-// states its format version rather than negotiating one (ADR 0014).
+// The response states its format version rather than negotiating one.
 const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 
-// metricsSnapshot is one point-in-time sample of everything /metrics renders.
-// It carries the same snapshot /stats serves, so the two surfaces agree
-// by construction, plus the runtime block's Runtime sample; both are read at
-// scrape time by the handler and never live inside the renderer.
+// One point-in-time sample: the snapshot /stats serves plus a Runtime sample,
+// both read at scrape time by the handler and never by the renderer.
 type metricsSnapshot struct {
 	stats   Stats
 	runtime Runtime
 }
 
-// metricLabel is one label pair on a series.
 type metricLabel struct {
 	name  string
 	value string
 }
 
-// metricKind is a family's TYPE token: the two-value exposition vocabulary
-// of counter and gauge, named so the family table reads as the machine
-// contract rather than free text (ADR 0014).
 type metricKind string
 
-// The TYPE tokens a family may carry in exposition 0.0.4.
 const (
 	metricCounter metricKind = "counter"
 	metricGauge   metricKind = "gauge"
 )
 
-// metricFamily is one row of the metrics family table: the stable machine
-// contract's name, type and help (ADR 0014) plus the source of the family's
-// single series from the snapshot. Families render in table order — the fixed
-// deterministic order of the exposition — and adding a series is exactly one
-// new row.
+// One row of the machine-contract family table (ADR 0014). Rows render in
+// table order — the fixed exposition order — so a new series is one new row.
 type metricFamily struct {
 	name   string
 	kind   metricKind
@@ -56,22 +42,16 @@ type metricFamily struct {
 	value  func(s metricsSnapshot) float64
 }
 
-// metricFamilies is the single source of the metric contract (ADR 0014):
-// name, type, help and snapshot source for every family /metrics serves, in
-// exposition order. Series may be added freely; renaming or removing a row is
-// breaking and needs a new ADR plus a deprecation note in the metrics doc.
-// The go_ rows mirror the conventional Go collector names and help so generic
-// Go dashboards work unchanged (user story 14); the runtime block stays a
-// curated subset — the full memstats surface is deliberately not exposed.
+// The metric contract single-sourced (ADR 0014): name, type, help and
+// source per family, in exposition order; go_ rows mirror the Go collector.
 var metricFamilies = []metricFamily{
 	{
 		name: "bandage_start_time_seconds",
 		kind: metricGauge,
 		help: "Seconds since the Unix epoch at which the daemon started.",
 		value: func(s metricsSnapshot) float64 {
-			// Fractional seconds per the contract: whole-second Unix()
-			// plus the nanosecond fraction, which stays exact where
-			// UnixNano()/1e9 rounds at this magnitude.
+			// Whole-second Unix() plus the nanosecond fraction: exact
+			// where UnixNano()/1e9 rounds at this magnitude.
 			t := s.stats.StartedAt
 			return float64(t.Unix()) + float64(t.Nanosecond())/1e9
 		},
@@ -201,13 +181,8 @@ var metricFamilies = []metricFamily{
 	},
 }
 
-// handleMetrics serves the machine-contract Metrics: the /stats snapshot
-// plus the runtime block rendered as text exposition 0.0.4 (ADR 0006, ADR
-// 0014). Both inputs are read here, at scrape time — no background sampler,
-// no cached values between scrapes — so each response is one point-in-time
-// snapshot. GET only, always registered: anything else — HEAD included,
-// which ServeMux would otherwise match against a GET pattern — is rejected
-// with 405 and Allow: GET.
+// Both sources read at scrape time: one response, one point-in-time snapshot.
+// Explicit method check — ServeMux matches HEAD against GET patterns.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -218,9 +193,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Write(renderMetrics(metricsSnapshot{stats: s.stats.Stats(), runtime: s.runtime.Runtime()}))
 }
 
-// renderMetrics is the pure snapshot-to-text mapping (ADR 0014): exposition
-// 0.0.4 bytes for one snapshot, every line newline-terminated, families in
-// table order. Nothing is read here but the snapshot.
+// Pure snapshot-to-text mapping (ADR 0014): exposition 0.0.4 bytes for one
+// snapshot, families in table order. Nothing is read here but the snapshot.
 func renderMetrics(s metricsSnapshot) []byte {
 	var b strings.Builder
 	for _, f := range metricFamilies {
@@ -255,20 +229,16 @@ func renderMetrics(s metricsSnapshot) []byte {
 	return []byte(b.String())
 }
 
-// escapeLabelValue escapes a label value per exposition 0.0.4 — backslash,
-// double quote and newline — so an unusual value cannot corrupt the framing.
 func escapeLabelValue(v string) string {
 	return escapeText(v, true)
 }
 
-// escapeHelp escapes HELP text per exposition 0.0.4 — backslash and newline
-// (quote is legal unescaped there).
 func escapeHelp(v string) string {
 	return escapeText(v, false)
 }
 
-// escapeText is the shared exposition escaping pass for label values (quote
-// escaped) and HELP text (quote left alone).
+// Shared exposition escaping (0.0.4): backslash and newline everywhere;
+// quote only in label values — it is legal unescaped in HELP text.
 func escapeText(v string, escapeQuote bool) string {
 	var b strings.Builder
 	b.Grow(len(v))
@@ -287,9 +257,8 @@ func escapeText(v string, escapeQuote bool) string {
 	return b.String()
 }
 
-// formatValue renders a sample value: plain digits for whole values, so
-// integer counters and Unix seconds stay readable on the wire; shortest
-// round-trip form otherwise. Either way the text parses as an exposition float.
+// Plain digits for whole values, so counters stay readable on the wire;
+// shortest round-trip form otherwise. Both parse as exposition floats.
 func formatValue(v float64) string {
 	if v == math.Trunc(v) && math.Abs(v) < 1e15 {
 		return strconv.FormatInt(int64(v), 10)
