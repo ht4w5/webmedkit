@@ -25,9 +25,14 @@ _Avoid_: size index, file length
 ### Rules
 
 **Chain**:
-An ordered group of rules traversed for each event, entered by name from
-other chains.
+An ordered group of rules entered by name from another chain's goto or
+jump action, or as the entry chain.
 _Avoid_: stage, pipeline
+
+**Entry chain**:
+The chain entered for every event; in the rules format it is the chain
+named main.
+_Avoid_: base chain, subroutine, hook, regular chain
 
 **Rule**:
 A named condition-action pairing: a filter, at most one tracker, and one
