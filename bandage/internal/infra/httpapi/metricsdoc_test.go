@@ -7,18 +7,13 @@ import (
 	"testing"
 )
 
-// These tests pin docs/metrics.md — the published metrics contract — to the
-// implementation, following the report contract's doc-pinning precedent
-// (app/reportdoc_test.go): the doc's canonical example must be the golden
-// response byte for byte, and its family table must quote the metricFamilies
-// contract exactly. Document and implementation cannot drift.
+// Pins docs/metrics.md — the published metrics contract — to the
+// implementation, following the report doc's precedent (app/reportdoc_test.go).
 
-// metricsDocPath is the published metrics contract, relative to this package.
+// Resolved relative to this package's directory.
 const metricsDocPath = "../../../../docs/metrics.md"
 
-// metricsDocExample extracts the canonical example from the metrics contract:
-// the first fenced ```text block of docs/metrics.md is the example response,
-// so the doc stays the single source of truth for operators.
+// The doc's first fenced ```text block is the canonical example response.
 func metricsDocExample(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -41,12 +36,8 @@ func metricsDocExample(t *testing.T, path string) string {
 	return string(rest[:j])
 }
 
-// TestMetricsDocumentMatchesDocsExample: the example fenced in docs/metrics.md
-// is the golden GET /metrics body over the golden fixture byte for byte, so
-// the published contract and the implementation cannot drift. Every
-// exposition line is newline-terminated; the fenced example's last line does
-// not carry that trailing newline — one trailing byte, cut before comparison
-// (the report doc's pin does the same).
+// The fenced example is the golden body byte for byte, minus the trailing
+// newline the fence cannot carry (cut before comparison).
 func TestMetricsDocumentMatchesDocsExample(t *testing.T) {
 	got, found := bytes.CutSuffix([]byte(metricsGoldenResponse), []byte("\n"))
 	if !found {
@@ -58,10 +49,8 @@ func TestMetricsDocumentMatchesDocsExample(t *testing.T) {
 	}
 }
 
-// TestMetricsDocumentTableMatchesMetricFamilies: the doc's family table lists
-// every family of the metricFamilies contract with its exact type and help
-// text (the meaning column is the pinned HELP string), so a rename, a type
-// change or a help edit cannot land without the published contract following.
+// The table's meaning column is the pinned HELP string; rows must match
+// metricFamilies exactly.
 func TestMetricsDocumentTableMatchesMetricFamilies(t *testing.T) {
 	data, err := os.ReadFile(metricsDocPath)
 	if err != nil {

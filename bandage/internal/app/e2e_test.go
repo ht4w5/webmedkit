@@ -1021,10 +1021,8 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	}
 }
 
-// TestE2EAPIRuntimeMetricsByShape: the live daemon's /metrics carries the
-// curated Go runtime block in the same response as the bandage families,
-// asserted by shape only — HELP/TYPE present and a plausible value per family
-// — since real values are non-deterministic point-in-time samples (ADR 0014).
+// Shape only — real values are non-deterministic point-in-time samples:
+// HELP/TYPE present and a plausible value per runtime family.
 func TestE2EAPIRuntimeMetricsByShape(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
@@ -1066,8 +1064,8 @@ func TestE2EAPIRuntimeMetricsByShape(t *testing.T) {
 	}
 }
 
-// metricsSample returns one family's sample line and parsed value from
-// exposition text — the "name value" or "name{...} value" line.
+// One family's sample line ("name value" or "name{...} value") and its
+// parsed value.
 func metricsSample(t *testing.T, body, name string) (string, float64) {
 	t.Helper()
 	for _, line := range strings.Split(body, "\n") {
