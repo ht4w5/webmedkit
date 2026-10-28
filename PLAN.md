@@ -432,6 +432,13 @@ ascending.
   carries no format version and is explicitly not a stable machine
   contract; machine-readable metric gathering would be a separate
   Prometheus-format endpoint.
+- `GET /metrics` — the machine-contract **Metrics** (ADR 0014): Prometheus
+  text exposition 0.0.4, hand-rendered from the same snapshot `/stats`
+  serves plus a scrape-time Go runtime sample, cumulative since start.
+  Metric names and types are a stable machine contract — series added
+  freely, never renamed or removed without a new ADR — documented with a
+  scrape config and example alert rules in `docs/metrics.md`. GET only,
+  always registered, on the same unauthenticated listener.
 
 No `/v1` prefix, no debug endpoints. The API never writes reports; only
 `report` actions do.
