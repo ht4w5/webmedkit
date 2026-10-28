@@ -18,7 +18,7 @@ import (
 const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // metricsSnapshot is one point-in-time sample of everything /metrics renders.
-// It carries the same Stats snapshot /stats serves, so the two surfaces agree
+// It carries the same snapshot /stats serves, so the two surfaces agree
 // by construction, plus the runtime block's Runtime sample; both are read at
 // scrape time by the handler and never live inside the renderer.
 type metricsSnapshot struct {

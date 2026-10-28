@@ -35,7 +35,7 @@ newline); every line is newline-terminated; families appear in a fixed
 deterministic order. The exposition is rendered by hand from a plain
 snapshot — no Prometheus client library
 ([ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)).
-Each response is one point-in-time snapshot: the statistics block and
+Each response is one point-in-time snapshot: the `/stats` snapshot block and
 the runtime block are alike read at scrape time, so families within a
 single response never mix sampling times.
 
