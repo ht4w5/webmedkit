@@ -18,7 +18,10 @@ Reference DNA:
 
 ## 1. DSL: flux chains + webjail filter syntax + explicit trackers
 
-Rules are YAML chains like flux; filters use webjail's expression syntax;
+Rules are YAML chains like flux; per event, evaluation enters one
+chain — the entry chain named `main` — and every other chain runs only
+when a `goto`/`jump` action names it (docs/rules.md). Filters use
+webjail's expression syntax;
 a tracker (leaky bucket) is an explicit config block with flux's
 `BYTE-BUCKET` / `FREQ-BUCKET` / `FILE-RATIO-BUCKET` semantics. A **tracker
 is a condition**, not an action: a rule matches an event when its **filter
@@ -33,12 +36,17 @@ extension if real rules need it.
 version: 0
 
 chains:
-  - name: ingress
+  - name: main
     rules:
       - id: skip-internal
         filter: 'src 10.0.0.0/8 or src 127.0.0.0/8'
         actions:
           - stop
+
+      - id: route-downloads
+        filter: 'path prefix "/releases"'
+        actions:
+          - jump: download-abuse
 
   - name: download-abuse
     rules:
@@ -74,13 +82,6 @@ chains:
               ttl: 24h
               penalty: limit-bandwidth
               rate: 1MB
-
-  - name: routing
-    rules:
-      - id: route-downloads
-        filter: 'path prefix "/releases"'
-        actions:
-          - jump: download-abuse
 ```
 
 ### Rule anatomy
@@ -121,7 +122,8 @@ chains:
     exit the process).
   - `goto` — run the target chain, then end this chain.
   - `jump` — run the target chain, then resume this chain.
-  - `stop` — end traversal of this chain.
+  - `stop` — end traversal of this chain (in the entry chain `main`,
+    that ends processing for the event).
 - `escalations` — alternative to `actions` and `tracker.volume`: an
   **escalation ladder** (GLOSSARY, ADR 0013) of two or more rungs, each
   an `at` threshold in the tracker's quantity (scalar only — volume
@@ -132,10 +134,15 @@ chains:
 - **Terminality is per action list**: the rule's in the single-volume
   form, per fired rung on a ladder. If any of `report` / `goto` /
   `stop` is present in the list that ran, chain traversal ends after
-  this rule (all its actions still run); other chains are still
-  evaluated. An unfired rung's actions end nothing. The `goto`/`jump`
-  graph must be **acyclic**, validated at rule build time; shared
-  target chains are allowed (a DAG, not a forest).
+  this rule (all its actions still run). Terminality ends the current
+  chain only; as `main` is the only chain entered per event, a
+  terminal rule in the entry chain ends processing for the event. An
+  unfired rung's actions end nothing. Dispatch is the only way to
+  enter any chain but the entry chain `main`; the `goto`/`jump` graph
+  must be **acyclic**, validated at rule build time (shared target
+  chains are allowed — a DAG, not a forest), `main` cannot be a
+  dispatch target, and chains unreachable from `main` are legal and
+  never run.
 
 Tracker semantics are flux's, unchanged: `value += inc`; on `Δt > 0`,
 `value = max(0, value − leak·Δt)`; overflow when `value > volume`; in-memory
@@ -269,7 +276,10 @@ log:
    `domain.Event` per §2.
 3. **Enrich** — `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA,
    warm-up gated by `minSamples`); `replay` trackers read it.
-4. **Evaluate** — per event: traverse chains in order; a rule updates its
+4. **Evaluate** — per event: enter the entry chain `main`; every other
+   chain runs only when a `goto`/`jump` action names it (dispatch runs
+   the target chain inline — `jump` resumes, `goto` ends the current
+   chain). Within a chain, rules run in order: a rule updates its
    tracker (only when its filter matches); a single-volume rule then
    checks overflow, a ladder instead fires the rungs it crosses, and on
    match runs its actions — the rule's action list, or the fired rungs'
@@ -451,8 +461,11 @@ No `/v1` prefix, no debug endpoints. The API never writes reports; only
   `debug`, `info`, `warn`, `error`).
 - Load-time rule validation: more than one tracker per rule, unknown
   `track`/volume methods, volume methods on non-replay trackers, unparseable
-  filters (with `ParseError` line/col), dangling `goto`/`jump` targets,
-  cyclic `goto`/`jump` graphs (the chain graph must be acyclic), duplicate
+  filters (with `ParseError` line/col), a document with no chain named
+  `main`, a `goto`/`jump` action targeting `main` (the entry chain has
+  in-degree 0), dangling `goto`/`jump` targets, cyclic `goto`/`jump`
+  graphs (the chain graph must be acyclic; chains unreachable from
+  `main` are legal and inert — no reachability check), duplicate
   rule IDs, `report` actions missing `reason`/`ttl`/`penalty`, `reason`
   not a slug (`^[a-z0-9][a-z0-9_-]*$`), non-positive `ttl`, unknown
   `penalty` values, `rate` with `drop`/`reject`, missing or non-positive

@@ -1,12 +1,16 @@
 # Writing rules
 
 Rules live in the rules file (`configs/rules.yml` is a complete
-example): `version: 0`, an ordered list of chains, each chain an
-ordered list of rules. A **Rule** is an id, a filter, at most one
-tracker, and an ordered list of actions (report, log, goto, jump,
-stop) — or an [escalation ladder](#escalation-ladders) of action lists
-instead of one. The filter expression language and the full DSL are specified
-in [PLAN.md](../PLAN.md) §1.
+example): `version: 0`, a list of chains, each chain an ordered list
+of rules. Per event, evaluation enters exactly one chain — the
+**entry chain** named `main` — and every other chain is a subroutine
+run only when a `goto` or `jump` action names it
+([Entry chains and dispatch](#entry-chains-and-dispatch) below). A
+**Rule** is an id, a filter, at most one tracker, and an ordered list
+of actions (report, log, goto, jump, stop) — or an [escalation
+ladder](#escalation-ladders) of action lists instead of one. The
+filter expression language and the full DSL are specified in
+[PLAN.md](../PLAN.md) §1.
 
 Two glossary entries govern what happens at runtime
 ([GLOSSARY.md](../GLOSSARY.md),
@@ -50,6 +54,62 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 
 Validate config and rules before deploying: `bandage -t -c bandage.yml
 -r rules.yml` prints the validated plan and exits without ingesting.
+
+## Entry chains and dispatch
+
+Every event is evaluated by entering exactly one chain: the **entry
+chain**, the chain named `main` ([GLOSSARY.md](../GLOSSARY.md),
+[ADR 0015](adr/0015-main-chain-entry.md)). Every other chain is a
+subroutine, entered only when a `goto` or `jump` action names it —
+the firewall shape rule authors already know: one pipeline with a
+single front door, helper chains dispatched on demand.
+
+- `jump` runs the target chain, then resumes this chain at its next
+  rule; `goto` runs the target chain, then ends this chain (its later
+  rules are skipped for the event — the fired action list still runs
+  in full). Dispatch is the only way to enter any chain but `main`.
+- A chain nothing dispatches to never runs. Drafts and shared library
+  chains are inert, like iptables custom chains — and chain
+  declaration order never matters: only the dispatch does.
+- `stop` in the entry chain gates everything below it: later rules and
+  later dispatch never see the event.
+
+Load refuses a rules file where:
+
+- no chain is named `main` — the entry chain is required, so a
+  misconfigured document fails at startup instead of silently
+  processing nothing;
+- a `goto` or `jump` action targets `main` — the entry chain has
+  in-degree 0, and dispatching back to it would be dead dispatch (the
+  event is already being evaluated there).
+
+The dispatcher pattern — the shipped example's front door. `main`
+carries one filter-less `jump` rule per topical chain, in file order;
+a `jump` is non-terminal, so the dispatcher sequences exactly like the
+topical chains' own file order, and the escalation ladder's handoff
+target (`inspect`) is deliberately *not* dispatched from `main` (see
+the pitfall below):
+
+```yaml
+  - name: main
+    rules:
+      - id: dispatch-download-abuse
+        actions: [{jump: download-abuse}]
+      - id: dispatch-api
+        actions: [{jump: api}]
+      - id: dispatch-iso-egress
+        actions: [{jump: iso-egress}]
+```
+
+**The double-dispatch pitfall.** Dispatch keeps plain subroutine
+semantics and is deliberately not deduplicated (ADR 0015): a chain
+reached twice for one event runs **twice** for that event, feeding its
+trackers twice. A diamond — `main` jumping to `shared` both directly
+and through a middle chain — overflows `shared`'s trackers at half the
+intended volume. Give each event one dispatch path to a chain: the
+shipped example leaves `inspect` to the ladder's `jump` rung alone,
+because dispatching it from `main` as well would double-feed its
+replay tracker on every handoff event.
 
 ## `penalty` and `rate`
 
@@ -260,7 +320,7 @@ by report suppression alone (see the Trigger semantics above).
 ```yaml
 version: 0
 chains:
-  - name: trip
+  - name: main
     rules:
       - id: ua-trip
         filter: 'agent keyword "curl"'
