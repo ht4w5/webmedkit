@@ -69,7 +69,7 @@ func TestMetricsDocumentTableMatchesMetricFamilies(t *testing.T) {
 	}
 	doc := string(data)
 	for _, f := range metricFamilies {
-		row := "| `" + f.name + "` | " + f.kind + " | " + f.help + " |"
+		row := "| `" + f.name + "` | " + string(f.kind) + " | " + f.help + " |"
 		if !strings.Contains(doc, row) {
 			t.Errorf("docs/metrics.md lacks family table row %q", row)
 		}
