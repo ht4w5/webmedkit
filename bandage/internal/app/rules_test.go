@@ -221,7 +221,7 @@ chains:
 			wantErr: "reason",
 		},
 		{
-			name: "reason with a dot rejected",
+			name: "reason with a dot rejected quoting the authored value",
 			yaml: `
 version: 0
 chains:
@@ -231,7 +231,7 @@ chains:
         tracker: {track: rate, leak: 1, volume: 2}
         actions: [{report: {reason: bandage.x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `,
-			wantErr: "reason",
+			wantErr: `reason: "bandage.x"`,
 		},
 		{
 			name: "good reason slug accepted",
@@ -1146,7 +1146,7 @@ func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 
 // TestPlanReasonsFollowThePassedBuild: every report action line prints
 // the reason the report will carry, namespaced under the passed build's
-// program name (ADR 0017) — a renamed binary's plan shows its own
+// program name (ADR 0017) -- a renamed binary's plan shows its own
 // namespace, and what the operator approves is what ships.
 func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 	dir := t.TempDir()
@@ -1218,7 +1218,7 @@ func TestPrintsValidatedPlan(t *testing.T) {
 // TestPlanReasonValidation: load validation at the plan seam keeps its
 // failing/passing convention for the reason code: a bare code passes and
 // the plan prints it namespaced; a code containing a dot is refused, the
-// refusal quoting the authored value. The loader is unchanged — the rules
+// refusal quoting the authored value. The loader is unchanged -- the rules
 // file declares codes bare and the plan composes the namespace itself.
 func TestPlanReasonValidation(t *testing.T) {
 	tests := []struct {

@@ -43,6 +43,15 @@ type Report struct {
 	Penalty *Penalty
 }
 
+// NamespacedReason composes a Reason's namespaced form (GLOSSARY): the
+// producer prefix (the program name, ADR 0017), a dot and the authored
+// bare code. This one join is the report contract (ADR 0016): reports
+// are namespaced at creation and the plan previews the same string, so
+// the plan and the report cannot drift (spec story 13).
+func NamespacedReason(prefix, code string) string {
+	return prefix + "." + code
+}
+
 // formatTime renders report timestamps: RFC 3339 UTC at second precision.
 func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)

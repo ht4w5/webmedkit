@@ -242,7 +242,7 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
-		Reason:    s.progName + "." + action.Reason, // namespaced at creation only (ADR 0016)
+		Reason:    domain.NamespacedReason(s.progName, action.Reason), // namespaced at creation only (ADR 0016)
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,

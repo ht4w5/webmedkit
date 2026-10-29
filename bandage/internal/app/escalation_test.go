@@ -325,6 +325,7 @@ chains:
 	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.ban" || doc.Reports[0].Tracker.Volume != 150 {
 		t.Fatalf("reports = %+v, want one at the top crossed rung's stance", doc.Reports)
 	}
+	writtenReason := doc.Reports[0].Reason // the namespaced form persisted verbatim (ticket 01)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := d1.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
@@ -343,6 +344,12 @@ chains:
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	r := doc.Reports[0]
+	// Ticket 01 pins the persistence round-trip at this seam: no migration or
+	// read-path normalization, so the reason served after the restart is
+	// exactly the namespaced form written before it.
+	if r.Reason != writtenReason {
+		t.Errorf("reason served after restart = %q, want the namespaced form written before it, %q", r.Reason, writtenReason)
+	}
 	if r.Reason != "bandage.ban" || r.CreatedAt != wallBase || r.UpdatedAt != wallBase ||
 		r.Tracker.Value != 200 || r.Tracker.Volume != 150 || r.Sample.Time != eventTime1At {
 		t.Errorf("report = %+v, want it frozen at the pre-restart write (guard rebuilt from the recorded threshold)", r)
