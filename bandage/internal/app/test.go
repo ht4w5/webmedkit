@@ -13,7 +13,7 @@ import (
 // plan (bandage --test). It opens no sockets. The plan banner carries
 // the passed build identity. The plan's contract is what the operator
 // approves is what ships: every report line prints the reason the
-// report will carry — the report carries the code namespaced under the
+// report will carry -- the report carries the code namespaced under the
 // build's program name while the rules file declares it bare (ADR 0016,
 // ADR 0017).
 func Test(configPath, rulesPath string, build identity.Build) (string, error) {
@@ -76,20 +76,20 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 }
 
 // actionText renders one action's plan text (no indentation or newline); the describer cannot fail.
-func actionText(a domain.Action, name string) string {
+func actionText(a domain.Action, progName string) string {
 	var ab strings.Builder
-	_ = a.Accept(actionDescriber{b: &ab, name: name})
+	_ = a.Accept(actionDescriber{b: &ab, progName: progName})
 	return ab.String()
 }
 
 // actionDescriber is the --test side of Action.Accept, appending one action's text to the plan.
 type actionDescriber struct {
-	b    *strings.Builder
-	name string // the build's program name: the namespace of the report reason
+	b        *strings.Builder
+	progName string // the build's program name: the namespace of the report reason (ADR 0017)
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", d.name+"."+a.Reason, a.TTL, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.progName, a.Reason), a.TTL, a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}

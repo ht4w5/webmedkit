@@ -15,7 +15,7 @@ var progNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // (ADR 0017), so it must stay slug-shaped or every composed reason stops
 // conforming to the report contract's label shape. This guard is the
 // first test on the command's run seam; the constraint is pinned here
-// rather than validated at startup — progName is a compile-time constant
+// rather than validated at startup -- progName is a compile-time constant
 // and the command's behavior is otherwise untouched.
 func TestProgNameIsSlugShaped(t *testing.T) {
 	if !progNameRe.MatchString(progName) {

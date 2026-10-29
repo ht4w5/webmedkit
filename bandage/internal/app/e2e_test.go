@@ -820,7 +820,7 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 
 // TestE2EReportReasonNamespaceFollowsThePassedBuildName: the reason
 // namespace is the name of the build the daemon was assembled with
-// (ADR 0017) — a renamed build re-namespaces every report reason,
+// (ADR 0017) -- a renamed build re-namespaces every report reason,
 // rules unchanged.
 func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
