@@ -141,7 +141,7 @@ report's Target — the whole prefix, not each host inside it.
 every recommendation can be audited before deploying:
 
 ```
-    action report reason=iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000
+    action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000
 ```
 
 Load refuses a rules file where:
@@ -306,8 +306,8 @@ rungs carry every threshold) and its `ttl` from the top rung:
     filter: any
     tracker: bandwidth leak=1000000 ttl=11h6m40s
     rung at=50000000 jump target=inspect
-    rung at=5000000000 report reason=iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000
-    rung at=40000000000 report reason=iso-egress-ban ttl=168h0m0s penalty=drop
+    rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000
+    rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop
 ```
 
 ## Pattern: the tracker-less tripwire
@@ -357,7 +357,11 @@ How it behaves:
 - `reason` is the machine-readable slug downstream tooling turns into a
   ban rule (ADR 0004): a lowercase slug `^[a-z0-9][a-z0-9_-]*$`,
   shared freely between rules; the rule id is internal provenance.
-  bandage produces reports and never ban rules.
+  bandage produces reports and never ban rules. Codes are authored bare
+  and carried namespaced: the report carries the code namespaced as
+  `<program name>.<code>` (ADR 0016, ADR 0017) while the rules file
+  declares it bare — the plan prints the namespaced reason the report
+  will carry.
 - The filter above is a case-sensitive substring match on the Event's
   user agent (`agent "…"` matches the agent exactly). Values match
   case-sensitively without normalization; `and`, `or` and `not` are

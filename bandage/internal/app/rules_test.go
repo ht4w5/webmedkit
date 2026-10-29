@@ -1144,6 +1144,35 @@ func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 	}
 }
 
+// TestPlanReasonsFollowThePassedBuild: every report action line prints
+// the reason the report will carry, namespaced under the passed build's
+// program name (ADR 0017) — a renamed binary's plan shows its own
+// namespace, and what the operator approves is what ships.
+func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bandage.yml")
+	rulesPath := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulesPath, []byte(validRules), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Test(cfgPath, rulesPath, identity.For("bandage-canary"))
+	if err != nil {
+		t.Fatalf("Test error: %v", err)
+	}
+	for _, want := range []string{
+		"action report reason=bandage-canary.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage-canary.api-rate-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
+	} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan does not contain %q:\n%s", want, plan)
+		}
+	}
+}
+
 func TestPrintsValidatedPlan(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")
@@ -1174,15 +1203,84 @@ func TestPrintsValidatedPlan(t *testing.T) {
 		"rule sustained-iso-egress",
 		"filter: any",
 		"tracker: bandwidth leak=1000000 volume=100000000000 ttl=27h46m40s",
-		"action report reason=iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
 		"chain api",
 		"rule bursty-api",
 		"tracker: rate leak=10 volume=100 ttl=10s",
-		"action report reason=api-rate-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
+		"action report reason=bandage.api-rate-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
 		}
+	}
+}
+
+// TestPlanReasonValidation: load validation at the plan seam keeps its
+// failing/passing convention for the reason code: a bare code passes and
+// the plan prints it namespaced; a code containing a dot is refused, the
+// refusal quoting the authored value. The loader is unchanged — the rules
+// file declares codes bare and the plan composes the namespace itself.
+func TestPlanReasonValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+		want    string
+	}{
+		{
+			name: "bare reason code passes and the plan prints it namespaced",
+			yaml: `version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        filter: any
+        actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
+`,
+			want: "action report reason=bandage.iso-egress-overflow ttl=1h0m0s penalty=drop",
+		},
+		{
+			name: "dotted reason code refused quoting the authored value",
+			yaml: `version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        filter: any
+        actions: [{report: {reason: bandage.x, ttl: 1h, penalty: drop}}]
+`,
+			wantErr: "bandage.x",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "bandage.yml")
+			rulesPath := filepath.Join(dir, "rules.yml")
+			if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rulesPath, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Test succeeded, want error quoting the authored value %q:\n%s", tt.wantErr, plan)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q does not quote the authored value %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Test error: %v", err)
+			}
+			if !strings.Contains(plan, tt.want) {
+				t.Errorf("plan does not contain %q:\n%s", tt.want, plan)
+			}
+		})
 	}
 }
 
@@ -1222,12 +1320,12 @@ func TestShowsActionsInPlan(t *testing.T) {
 		"rule route-downloads",
 		"action log level=debug message=\"ROUTE:\"",
 		"action jump target=download-abuse",
-		"action report reason=ua-trip ttl=24h0m0s penalty=drop",
+		"action report reason=bandage.ua-trip ttl=24h0m0s penalty=drop",
 		"action stop",
 		"chain download-abuse",
 		"rule sustained-iso-egress",
 		"action goto target=sink",
-		"action report reason=iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
 		"action stop",
 	} {
 		if !strings.Contains(plan, want) {
@@ -1978,8 +2076,8 @@ func TestShowsEscalationRungsInPlan(t *testing.T) {
 	for _, want := range []string{
 		"tracker: bandwidth leak=1000000 ttl=11h6m40s",
 		"rung at=50000000 jump target=inspect",
-		"rung at=5000000000 report reason=iso-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
-		`rung at=40000000000 log level=debug message="MARK:TOP", report reason=iso-ban ttl=168h0m0s penalty=drop`,
+		"rung at=5000000000 report reason=bandage.iso-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
+		`rung at=40000000000 log level=debug message="MARK:TOP", report reason=bandage.iso-ban ttl=168h0m0s penalty=drop`,
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
