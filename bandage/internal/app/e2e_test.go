@@ -183,10 +183,8 @@ func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYA
 	return startTestDaemonBuildCfg(t, clock, network, dbPath, rulesYAML, testBuild, mutate, extra...)
 }
 
-// startTestDaemonBuildCfg is startTestDaemonCfg with the build identity
-// the daemon is assembled with (testBuild by default): the reason
-// namespace follows the build's name (ADR 0017), so the derivation case
-// drives a differently named build.
+// startTestDaemonBuildCfg lets the caller pick the build identity: the
+// reason namespace follows its name (ADR 0017).
 func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, build identity.Build, mutate func(*Config), extra ...Option) *testDaemon {
 	t.Helper()
 	listen := filepath.Join(t.TempDir(), "log.sock")
@@ -818,10 +816,7 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	}
 }
 
-// TestE2EReportReasonNamespaceFollowsThePassedBuildName: the reason
-// namespace is the name of the build the daemon was assembled with
-// (ADR 0017) -- a renamed build re-namespaces every report reason,
-// rules unchanged.
+// ADR 0017 pinned behaviorally: a renamed build re-namespaces every reason.
 func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", bandwidthRules, identity.For("bandage-canary"), nil)

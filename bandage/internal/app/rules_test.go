@@ -1144,10 +1144,7 @@ func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 	}
 }
 
-// TestPlanReasonsFollowThePassedBuild: every report action line prints
-// the reason the report will carry, namespaced under the passed build's
-// program name (ADR 0017) -- a renamed binary's plan shows its own
-// namespace, and what the operator approves is what ships.
+// ADR 0017 at the plan seam: a renamed binary's plan shows its own namespace.
 func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")
@@ -1215,11 +1212,8 @@ func TestPrintsValidatedPlan(t *testing.T) {
 	}
 }
 
-// TestPlanReasonValidation: load validation at the plan seam keeps its
-// failing/passing convention for the reason code: a bare code passes and
-// the plan prints it namespaced; a code containing a dot is refused, the
-// refusal quoting the authored value. The loader is unchanged -- the rules
-// file declares codes bare and the plan composes the namespace itself.
+// Load validation via the plan seam: a bare code passes and prints namespaced;
+// a dotted code is refused, quoting the authored value (ADR 0016).
 func TestPlanReasonValidation(t *testing.T) {
 	tests := []struct {
 		name    string

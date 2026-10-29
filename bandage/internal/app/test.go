@@ -9,13 +9,9 @@ import (
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
-// Test validates the config and rules files and returns the validated
-// plan (bandage --test). It opens no sockets. The plan banner carries
-// the passed build identity. The plan's contract is what the operator
-// approves is what ships: every report line prints the reason the
-// report will carry -- the report carries the code namespaced under the
-// build's program name while the rules file declares it bare (ADR 0016,
-// ADR 0017).
+// Test validates the config and rules files and returns the plan (bandage
+// --test); it opens no sockets. Plan contract (ADR 0016, ADR 0017): the
+// report carries the code namespaced; the rules file declares it bare.
 func Test(configPath, rulesPath string, build identity.Build) (string, error) {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
