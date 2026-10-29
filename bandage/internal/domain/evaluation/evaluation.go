@@ -35,15 +35,20 @@ func (nopLogger) Log(domain.Level, string, map[string]any) {}
 
 // Service evaluates events against the loaded chains.
 type Service struct {
-	chains  []domain.Chain
-	byName  map[string]int
-	cache   TrackerCache
-	reports ReportSink
-	now     func() time.Time
-	logger  Logger
+	progName string
+	chains   []domain.Chain
+	byName   map[string]int
+	cache    TrackerCache
+	reports  ReportSink
+	now      func() time.Time
+	logger   Logger
 }
 
-func NewService(chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
+// NewService assembles the evaluator. progName is the producer namespace
+// of report reasons: a created report carries progName, a dot and the
+// report action's bare authored code (ADR 0016), so renaming the program
+// re-namespaces every reason (ADR 0017).
+func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
 	if logger == nil {
 		logger = nopLogger{}
 	}
@@ -51,7 +56,7 @@ func NewService(chains []domain.Chain, cache TrackerCache, reports ReportSink, n
 	for i, chain := range chains {
 		byName[chain.Name] = i
 	}
-	return &Service{chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
+	return &Service{progName: progName, chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs
@@ -237,7 +242,7 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
-		Reason:    action.Reason,
+		Reason:    s.progName + "." + action.Reason, // namespaced at creation only (ADR 0016)
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,
