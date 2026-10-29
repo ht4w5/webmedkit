@@ -125,7 +125,8 @@ type Daemon struct {
 
 // New assembles the daemon from validated config; Pipeline.Workers must
 // be at least 1. The daemon renders the passed build identity in its
-// startup log and /stats.
+// startup log and /stats, and namespaces report reasons with its name
+// (ADR 0017).
 func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option) (*Daemon, error) {
 	if cfg.Pipeline.Workers < 1 {
 		return nil, fmt.Errorf("app: pipeline.workers must be at least 1 (got %d)", cfg.Pipeline.Workers)
@@ -164,7 +165,7 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 		repo:      repo,
 		reports:   reports,
 		cache:     cache,
-		eval:      evaluation.NewService(chains, cache, reports, o.now, domainLogger{o.logger}),
+		eval:      evaluation.NewService(build.Name(), chains, cache, reports, o.now, domainLogger{o.logger}),
 		lines:     make(chan string),
 		processed: newProgress(),
 		stopSweep: make(chan struct{}),

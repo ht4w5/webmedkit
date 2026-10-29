@@ -127,7 +127,7 @@ func TestBenchChainsMatchTheirNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sink := &benchSink{}
-			svc := NewService(benchChains(tt.triggerEvery), newBenchCache(), sink, benchNow, nil)
+			svc := NewService("bandage", benchChains(tt.triggerEvery), newBenchCache(), sink, benchNow, nil)
 			for i := 0; i < passes*len(events); i++ {
 				ev := benchEvent(events, i)
 				if err := svc.Evaluate(context.Background(), &ev); err != nil {
@@ -148,7 +148,7 @@ func BenchmarkEvaluate(b *testing.B) {
 		triggerEvery bool
 	}{{"trigger-every", true}, {"match-never", false}} {
 		b.Run(tc.name, func(b *testing.B) {
-			svc := NewService(benchChains(tc.triggerEvery), newBenchCache(), &benchSink{}, benchNow, nil)
+			svc := NewService("bandage", benchChains(tc.triggerEvery), newBenchCache(), &benchSink{}, benchNow, nil)
 			events := benchEvents(1024)
 			ctx := context.Background()
 			var lines int

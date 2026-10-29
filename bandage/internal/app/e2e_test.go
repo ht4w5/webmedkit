@@ -180,6 +180,15 @@ func startTestDaemon(t *testing.T, clock *testClock, network, dbPath, rulesYAML 
 // trailing daemon options.
 func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, mutate func(*Config), extra ...Option) *testDaemon {
 	t.Helper()
+	return startTestDaemonBuildCfg(t, clock, network, dbPath, rulesYAML, testBuild, mutate, extra...)
+}
+
+// startTestDaemonBuildCfg is startTestDaemonCfg with the build identity
+// the daemon is assembled with (testBuild by default): the reason
+// namespace follows the build's name (ADR 0017), so the derivation case
+// drives a differently named build.
+func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, build identity.Build, mutate func(*Config), extra ...Option) *testDaemon {
+	t.Helper()
 	listen := filepath.Join(t.TempDir(), "log.sock")
 	switch network {
 	case "unixgram":
@@ -212,7 +221,7 @@ func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYA
 	}
 	logs := &logCapture{}
 	opts := append([]Option{WithClock(clock.Now), WithLogger(zerolog.New(logs))}, extra...)
-	d, err := New(cfg, chains, testBuild, opts...)
+	d, err := New(cfg, chains, build, opts...)
 	if err != nil {
 		t.Fatalf("New error: %v", err)
 	}
@@ -517,7 +526,7 @@ func TestE2EOverflowWritesReport(t *testing.T) {
 		t.Fatalf("reports = %d, want 1: %+v", len(doc.Reports), doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "sustained-egress" || r.Chain != domain.EntryChain || r.Reason != "egress-overflow" {
+	if r.Rule != "sustained-egress" || r.Chain != domain.EntryChain || r.Reason != "bandage.egress-overflow" {
 		t.Errorf("provenance = %q/%q/%q", r.Rule, r.Chain, r.Reason)
 	}
 	if r.Target != "203.0.113.7/32" {
@@ -806,6 +815,28 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	}
 	if got.Dirty != build.Dirty() {
 		t.Errorf("build.dirty = %v, want %v", got.Dirty, build.Dirty())
+	}
+}
+
+// TestE2EReportReasonNamespaceFollowsThePassedBuildName: the reason
+// namespace is the name of the build the daemon was assembled with
+// (ADR 0017) — a renamed build re-namespaces every report reason,
+// rules unchanged.
+func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", bandwidthRules, identity.For("bandage-canary"), nil)
+
+	// 6000 + 6000 - 1000*1s = 11000 > 10000: the second event overflows.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.waitProcessed(t, 2)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.Reason != "bandage-canary.egress-overflow" {
+		t.Errorf("reason = %q, want %q (the namespace follows the build name)", r.Reason, "bandage-canary.egress-overflow")
 	}
 }
 
@@ -1541,7 +1572,7 @@ chains:
 		t.Fatalf("reports = %+v, want exactly one (the gated rule)", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "gated-egress" || r.Reason != "gated-overflow" {
+	if r.Rule != "gated-egress" || r.Reason != "bandage.gated-overflow" {
 		t.Errorf("provenance = %q/%q", r.Rule, r.Reason)
 	}
 	if r.Tracker.Value != 28 {
@@ -1647,8 +1678,8 @@ func TestE2EGotoRunsTargetAndEndsCurrentChain(t *testing.T) {
 		t.Fatalf("reports = %+v, want exactly the topic-match report (after-goto must not match)", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "topic-match" || r.Reason != "topic-match" {
-		t.Errorf("report = %q/%q, want topic-match/topic-match", r.Rule, r.Reason)
+	if r.Rule != "topic-match" || r.Reason != "bandage.topic-match" {
+		t.Errorf("report = %q/%q, want topic-match/bandage.topic-match", r.Rule, r.Reason)
 	}
 	assertTopicRanOnce(t, d, r.Tracker.Value, "the goto'd chain takes the triggering event exactly once")
 }
@@ -1973,8 +2004,8 @@ chains:
 	if len(doc.Reports) != 2 {
 		t.Fatalf("reports = %+v, want exactly routed and topic-match", doc.Reports)
 	}
-	if r, ok := byRule["route"]; !ok || r.Reason != "routed" {
-		t.Errorf("reports = %+v, want route/routed (the report after goto still runs)", doc.Reports)
+	if r, ok := byRule["route"]; !ok || r.Reason != "bandage.routed" {
+		t.Errorf("reports = %+v, want route/bandage.routed (the report after goto still runs)", doc.Reports)
 	}
 	if _, ok := byRule["after"]; ok {
 		t.Errorf("reports = %+v, want no after (goto ends its chain)", doc.Reports)

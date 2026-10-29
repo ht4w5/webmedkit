@@ -221,6 +221,19 @@ chains:
 			wantErr: "reason",
 		},
 		{
+			name: "reason with a dot rejected",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: bandage.x, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
+`,
+			wantErr: "reason",
+		},
+		{
 			name: "good reason slug accepted",
 			yaml: `
 version: 0

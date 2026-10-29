@@ -111,7 +111,7 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 		}},
 	}}
 	return &harness{
-		svc:  NewService(chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
+		svc:  NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
 		sink: sink,
 		cch:  cache,
 	}
@@ -152,7 +152,7 @@ func newRuleHarness(t *testing.T, cfg *domain.TrackerConfig, actions ...domain.A
 		}},
 	}}
 	return &harness{
-		svc:  NewService(chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
+		svc:  NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
 		sink: sink,
 		cch:  cache,
 	}
@@ -472,7 +472,7 @@ func TestActionsSeeTriggerTimeReading(t *testing.T) {
 			{Log: &domain.LogAction{Level: domain.LevelInfo, Message: "OVERFLOW:"}},
 		},
 	}}}}
-	svc := NewService(chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, log)
+	svc := NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, log)
 
 	for i := 0; i < 3; i++ {
 		if err := svc.Evaluate(context.Background(), event(int64(100+i), "/a", 100, 0)); err != nil {
@@ -497,7 +497,7 @@ func TestEvaluateWithoutTheEntryChainErrors(t *testing.T) {
 		ID: "helper-match", Filter: matchAll{},
 		Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "helper", TTL: time.Hour}}},
 	}}}}
-	svc := NewService(chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil)
+	svc := NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil)
 
 	err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0))
 	if err == nil {
