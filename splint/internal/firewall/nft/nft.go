@@ -88,8 +88,12 @@ var _ firewall.Driver = (*Driver)(nil)
 
 // Prefilter is this driver's enforcement scope: a ban reaches only
 // traffic whose destination port is in DstPorts and whose destination
-// address is in DstAddrs. Either set may be empty, meaning all
-// (--nft-service-port, --nft-service-address). Scope is driver
+// address is in DstAddrs — the request direction's view of the
+// protected service. The response direction (the egress chain)
+// presents that same service at the packet's source, so there the
+// scope matches source port and source address. Either set may be
+// empty, meaning all (--nft-service-port, --nft-service-address).
+// Scope is driver
 // configuration, folded into the ruleset hash (ADR 0012), so
 // changing it re-enforces.
 type Prefilter struct {
@@ -267,7 +271,9 @@ func (d *Driver) placement(s firewall.Stance) (string, error) {
 
 // directionOf reports the chain a stance installs in and where its
 // target match looks: source on ingress, destination on egress for
-// the bandwidth meter (the response direction its unit names).
+// the bandwidth meter (the response direction its unit names). The
+// enforcement scope mirrors the target match — the service is the
+// packet's other end: destination on ingress, source on egress.
 func directionOf(s firewall.Stance) (name string, matchDst bool, err error) {
 	switch s {
 	case firewall.StanceDrop, firewall.StanceReject, firewall.StanceLimitPktRate:
@@ -521,11 +527,19 @@ var families = []addrFamily{
 	},
 }
 
-// The destination-port prefilter's sets, per rule index: the l4 gate
+// The service-port prefilter's sets, per rule index: the l4 gate
 // and the port set. Family-independent — both families share them.
 var (
 	l4SetName   = func(i int) string { return fmt.Sprintf("l4_%d", i) }
 	portSetName = func(i int) string { return fmt.Sprintf("port_%d", i) }
+)
+
+// The transport-header offsets of a TCP/UDP port. The service port is
+// one conversation's two packet views: the request direction's
+// destination port, the response direction's source port.
+const (
+	sportOff = 0
+	dportOff = 2
 )
 
 type familyRule struct {
@@ -557,8 +571,10 @@ func (d *Driver) ruleFamilies(r firewall.BanRule) []familyRule {
 // addBanRule buffers one ban rule's sets and kernel rules: one
 // interval set of the Target prefixes and one kernel rule per
 // reachable family, leading with the enforcement scope (port set,
-// then destination-address set, either empty meaning all), then the
-// target match, the counter and the stance's verdict.
+// then service-address set, either empty meaning all) matched at the
+// service end of the conversation — dport/daddr on ingress,
+// sport/saddr on egress — then the target match, the counter and the
+// stance's verdict.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
 	verdict, err := verdictExprs(r)
 	if err != nil {
@@ -569,14 +585,21 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		return err
 	}
 	chain, matchOff := ingress, func(f addrFamily) uint32 { return f.srcOff }
+	// The enforcement scope is the conversation's service end — the
+	// endpoint opposite the target match. The request direction
+	// (ingress) has it at the destination: daddr, dport; the response
+	// direction (egress) presents the same service at the source:
+	// saddr, sport.
+	scopeOff, portOff := func(f addrFamily) uint32 { return f.dstOff }, uint32(dportOff)
 	if matchDst {
 		chain, matchOff = egress, func(f addrFamily) uint32 { return f.dstOff }
+		scopeOff, portOff = func(f addrFamily) uint32 { return f.srcOff }, sportOff
 	}
 	familyRules := d.ruleFamilies(r)
 	if len(familyRules) == 0 {
 		return nil
 	}
-	// The destination-port prefilter is family-independent: its sets
+	// The service-port prefilter is family-independent: its sets
 	// are built once per rule and lead every family's kernel rule.
 	var portExprs []expr.Any
 	if len(d.prefilter.DstPorts) > 0 {
@@ -600,7 +623,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Lookup{SourceRegister: 1, SetName: l4SetName(i)},
 			&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
-				Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+				Base: expr.PayloadBaseTransportHeader, Offset: portOff, Len: 2},
 			&expr.Lookup{SourceRegister: 1, SetName: portSetName(i)},
 		}
 	}
@@ -630,7 +653,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			}
 			exprs = append(exprs,
 				&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
-					Base: expr.PayloadBaseNetworkHeader, Offset: fam.dstOff, Len: fam.srcLen},
+					Base: expr.PayloadBaseNetworkHeader, Offset: scopeOff(fam), Len: fam.srcLen},
 				&expr.Lookup{SourceRegister: 1, SetName: fam.dstSetName(i)},
 			)
 		}
@@ -667,7 +690,7 @@ var l4Elements = []nftables.SetElement{
 	{Key: []byte{unix.IPPROTO_UDP}},
 }
 
-// portElements encodes destination ports as a service set's exact
+// portElements encodes the service ports as a service set's exact
 // keys: two-byte big-endian port numbers, the transport header's own
 // byte order.
 func portElements(ports []uint16) []nftables.SetElement {

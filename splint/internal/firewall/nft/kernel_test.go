@@ -86,13 +86,20 @@ func TestKernelInstallReadBackReset(t *testing.T) {
 			netip.MustParsePrefix("2001:db8::5/128"),
 		},
 	}
-	scopedRules := []firewall.BanRule{{
-		Targets: []netip.Prefix{
-			netip.MustParsePrefix("203.0.113.7/32"),
-			netip.MustParsePrefix("2001:db8::7/128"),
+	scopedRules := []firewall.BanRule{
+		{
+			Targets: []netip.Prefix{
+				netip.MustParsePrefix("203.0.113.7/32"),
+				netip.MustParsePrefix("2001:db8::7/128"),
+			},
+			Stance: firewall.StanceDrop,
 		},
-		Stance: firewall.StanceDrop,
-	}}
+		{
+			Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.9/32")},
+			Stance:  firewall.StanceLimitBandwidth,
+			Rate:    ratePtr(1000000),
+		},
+	}
 	prerouting, err := New(Config{Hook: HookPrerouting, Prefilter: scope})
 	if err != nil {
 		t.Fatalf("New(prerouting): %v", err)
@@ -247,15 +254,26 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	ingressRules := []wantRule{
 		{
 			proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0",
-			l4Set: "l4_0", portSet: "port_0",
-			dstSet: "dp4_0", dstOff: 16, dstLen: 4,
+			l4Set: "l4_0", portSet: "port_0", portOff: 2,
+			scopeSet: "dp4_0", scopeOff: 16, scopeLen: 4,
 			tail: dropTail, // 203.0.113.7/32 under the full service prefilter
 		},
 		{
 			proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_0",
-			l4Set: "l4_0", portSet: "port_0",
-			dstSet: "dp6_0", dstOff: 24, dstLen: 16,
+			l4Set: "l4_0", portSet: "port_0", portOff: 2,
+			scopeSet: "dp6_0", scopeOff: 24, scopeLen: 16,
 			tail: dropTail, // 2001:db8::7/128 under the full service prefilter
+		},
+	}
+	// The egress rule meters the response direction, where the
+	// service prefilter matches as source — sport, saddr — and the
+	// ban target as destination.
+	egressRules := []wantRule{
+		{
+			proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_1",
+			l4Set: "l4_1", portSet: "port_1", portOff: 0,
+			scopeSet: "dp4_1", scopeOff: 12, scopeLen: 4,
+			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 203.0.113.9/32 under the full service prefilter
 		},
 	}
 	wantSets := map[string]wantSet{
@@ -263,10 +281,14 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 		"dp4_0":  {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
 		"v6_0":   {interval: true, elems: []string{"end 2001:db8::8", "start 2001:db8::7"}},
 		"dp6_0":  {interval: true, elems: []string{"end 2001:db8::6", "start 2001:db8::5"}},
-		"port_0": {elems: []string{"443", "53"}}, // udp and tcp dports; sorted as strings
+		"v4_1":   {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
+		"dp4_1":  {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
+		"port_0": {elems: []string{"443", "53"}}, // the service ports, matched as dports; sorted as strings
 		"l4_0":   {elems: []string{"17", "6"}},   // udp and tcp; sorted as strings
+		"port_1": {elems: []string{"443", "53"}}, // the service ports, matched as sports
+		"l4_1":   {elems: []string{"17", "6"}},
 	}
-	assertKernelState(t, conn, hook, ingressRules, nil, wantSets)
+	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets)
 }
 
 // assertEmptyKernelState asserts a rebuild that installed nothing:
@@ -368,19 +390,22 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 }
 
 // wantRule is one expected kernel rule: the match prefix in order,
-// then the counter and the stance's verdict tail. The match load is
-// the source address on ingress, the destination address on egress.
+// then the counter and the stance's verdict tail. The target-match
+// load is the source address on ingress, the destination address on
+// egress; the service-prefilter load mirrors it — the service is the
+// packet's other end.
 type wantRule struct {
 	proto   byte
 	off     uint32
 	length  uint32
 	setName string
 
-	l4Set   string // non-empty: the port prefilter gates on l4proto ∈ l4Set
-	portSet string
-	dstSet  string // non-empty: the destination-address prefilter set
-	dstOff  uint32
-	dstLen  uint32
+	l4Set    string // non-empty: the port prefilter gates on l4proto ∈ l4Set
+	portSet  string
+	portOff  uint32 // the service-port load: dport (2) on ingress, sport (0) on egress
+	scopeSet string // non-empty: the service-address prefilter set
+	scopeOff uint32
+	scopeLen uint32
 
 	tail tailCheck
 }
@@ -423,7 +448,7 @@ func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 	if w.portSet != "" {
 		wantLen += 4
 	}
-	if w.dstSet != "" {
+	if w.scopeSet != "" {
 		wantLen += 2
 	}
 	if len(exprs) < wantLen {
@@ -437,15 +462,15 @@ func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 		i++
 		assertLookup(t, "l4proto set", exprs[i], w.l4Set)
 		i++
-		assertPayload(t, "destination-port load", exprs[i], expr.PayloadBaseTransportHeader, 2, 2)
+		assertPayload(t, "service-port load", exprs[i], expr.PayloadBaseTransportHeader, w.portOff, 2)
 		i++
-		assertLookup(t, "destination-port set", exprs[i], w.portSet)
+		assertLookup(t, "service-port set", exprs[i], w.portSet)
 		i++
 	}
-	if w.dstSet != "" {
-		assertPayload(t, "destination-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.dstOff, w.dstLen)
+	if w.scopeSet != "" {
+		assertPayload(t, "service-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.scopeOff, w.scopeLen)
 		i++
-		assertLookup(t, "destination-address set", exprs[i], w.dstSet)
+		assertLookup(t, "service-address set", exprs[i], w.scopeSet)
 		i++
 	}
 	assertPayload(t, "target-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.off, w.length)

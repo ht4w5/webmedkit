@@ -338,7 +338,11 @@ The **service prefilter** is the protected destination surface every
 effective rule matches first: a ban rule applies only to traffic whose
 destination port is in `--nft-service-port` and whose destination
 address is in `--nft-service-address`. Either set may be empty,
-meaning all. It is what keeps enforcement away from SSH, monitoring,
+meaning all. The names describe the request direction: the egress
+chain meters the response direction, where that same service appears
+at the packet's source — the prefilter matches there as source port
+and source address, so a meter only ever touches the service's own
+response traffic. It is what keeps enforcement away from SSH, monitoring,
 and unrelated forwarded traffic even when a Report targets a broad
 prefix:
 
