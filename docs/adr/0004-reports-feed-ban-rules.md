@@ -14,3 +14,8 @@ Superseded in part by ADR 0011: the repo now ships **splint-nft**, the
 downstream tooling that generates and installs ban rules from reports —
 as a separate consumer binary, outside bandage the daemon, which still
 only produces reports and never enforces.
+
+Superseded in part by ADR 0016: the reason a report carries is now
+namespaced (`<prefix>.<code>`, `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`).
+The slug pattern above remains the shape of the authored code, which
+rule files still declare bare.

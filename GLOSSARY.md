@@ -109,9 +109,10 @@ sample, and penalty, alive until expiry or deletion.
 _Avoid_: finding, record, ban
 
 **Reason**:
-The machine-readable trigger code a report currently carries into
-downstream ban rules — the code of the escalation that last wrote it;
-distinct from the rule ID, which is internal.
+The machine-readable trigger code a report carries into downstream ban
+rules — the code of the escalation that last wrote it, carried in
+namespaced form rather than the unqualified code the rules author
+wrote; distinct from the rule ID, which is internal.
 _Avoid_: blame, cause
 
 **Penalty**:
