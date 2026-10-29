@@ -10,11 +10,33 @@ compile-time constant — the test is the guard.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A test at the command seam asserts the program name matches
+- [x] A test at the command seam asserts the program name matches
       `^[a-z0-9][a-z0-9_-]*$`
-- [ ] The failure message names the constraint and points at the report
+- [x] The failure message names the constraint and points at the report
       contract's label shape, so a rename author knows why
-- [ ] This is the first test on the command's pre-designed run seam; the
+- [x] This is the first test on the command's pre-designed run seam; the
       command's behavior is otherwise untouched
+
+## Answer
+
+Implemented on integration branch `feat/reason-prefix` (commit
+`27c563a`, merge `7d1b2f2`; cross-ticket code-review fix `d730581`,
+merge `b0eb730`). `TestProgNameIsSlugShaped`, the first test at the
+command's testable run seam (`bandage/cmd/bandage/main_test.go`,
+package `main`, the only place the constant is visible), asserts
+`progName` matches `^[a-z0-9][a-z0-9_-]*$`; its failure message names
+the constraint and points at the report contract's label shape, ending
+with the guide to fix the rename, not the test. No startup validation
+of the compile-time constant -- the test is the guard; the command's
+behavior is untouched.
+
+Context: spec `../spec.md`, `bandage/cmd/bandage/main.go`,
+`bandage/cmd/bandage/main_test.go`, ADR
+`docs/adr/0017-reason-prefix-comes-from-the-progname.md`.
+
+Notes:
+- The guard asserts the constant directly ("the constant is visible
+  only here"); `run` itself is not exercised -- the ticket scopes the
+  seam to the guard (review disposition O4).
