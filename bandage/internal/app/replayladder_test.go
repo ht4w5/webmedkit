@@ -103,8 +103,8 @@ chains:
 		if !ok {
 			t.Fatalf("no report for %s: %+v", target, doc.Reports)
 		}
-		if r.Rule != "iso-ladder" || r.Reason != "replay-ban" {
-			t.Errorf("report for %s = %q/%q, want iso-ladder/replay-ban", target, r.Rule, r.Reason)
+		if r.Rule != "iso-ladder" || r.Reason != "bandage.replay-ban" {
+			t.Errorf("report for %s = %q/%q, want iso-ladder/bandage.replay-ban", target, r.Rule, r.Reason)
 		}
 		if r.Tracker.Track != "replay" || r.Tracker.Value != 3 || r.Tracker.Leak != 0 || r.Tracker.Volume != 2 {
 			t.Errorf("report for %s tracker = %+v, want {replay 3 0 2} (the writing rung's threshold 2 as volume)", target, r.Tracker)
@@ -268,8 +268,8 @@ chains:
 		t.Fatalf("reports = %+v, want exactly one for (iso-ladder, 203.0.113.7/32)", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "iso-ladder" || r.Target != "203.0.113.7/32" || r.Reason != "replay-ban" {
-		t.Errorf("report = %q/%q/%q, want iso-ladder/203.0.113.7/32/replay-ban", r.Rule, r.Target, r.Reason)
+	if r.Rule != "iso-ladder" || r.Target != "203.0.113.7/32" || r.Reason != "bandage.replay-ban" {
+		t.Errorf("report = %q/%q/%q, want iso-ladder/203.0.113.7/32/bandage.replay-ban", r.Rule, r.Target, r.Reason)
 	}
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 3 || r.Tracker.Volume != 2 {
 		t.Errorf("tracker = %+v, want {replay 3 _ 2} (the writing rung's threshold as volume)", r.Tracker)

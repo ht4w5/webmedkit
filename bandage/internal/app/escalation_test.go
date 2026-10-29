@@ -213,7 +213,7 @@ chains:
 	d.waitProcessed(t, 1)
 
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "ladder" || doc.Reports[0].Reason != "first" {
+	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "ladder" || doc.Reports[0].Reason != "bandage.first" {
 		t.Fatalf("reports = %+v, want only the ladder rule's first report (a report rung ends the chain)", doc.Reports)
 	}
 }
@@ -276,8 +276,8 @@ chains:
 		t.Fatalf("reports = %+v, want exactly one per (rule, Target)", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Rule != "ladder" || r.Reason != "ban" {
-		t.Errorf("report = %q/%q, want ladder/ban (the top crossed rung's stance)", r.Rule, r.Reason)
+	if r.Rule != "ladder" || r.Reason != "bandage.ban" {
+		t.Errorf("report = %q/%q, want ladder/bandage.ban (the top crossed rung's stance)", r.Rule, r.Reason)
 	}
 	if r.Penalty == nil || r.Penalty.Action != "drop" || r.Penalty.Rate != nil {
 		t.Errorf("penalty = %+v, want the top crossed rung's drop", r.Penalty)
@@ -322,7 +322,7 @@ chains:
 	d1.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 200))
 	d1.waitProcessed(t, 1)
 	doc := d1.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "ban" || doc.Reports[0].Tracker.Volume != 150 {
+	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.ban" || doc.Reports[0].Tracker.Volume != 150 {
 		t.Fatalf("reports = %+v, want one at the top crossed rung's stance", doc.Reports)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -343,7 +343,7 @@ chains:
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Reason != "ban" || r.CreatedAt != wallBase || r.UpdatedAt != wallBase ||
+	if r.Reason != "bandage.ban" || r.CreatedAt != wallBase || r.UpdatedAt != wallBase ||
 		r.Tracker.Value != 200 || r.Tracker.Volume != 150 || r.Sample.Time != eventTime1At {
 		t.Errorf("report = %+v, want it frozen at the pre-restart write (guard rebuilt from the recorded threshold)", r)
 	}
@@ -376,8 +376,8 @@ chains:
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Reason != "throttle" || r.Penalty.Action != "limit-bandwidth" || *r.Penalty.Rate != 1000000 {
-		t.Errorf("report stance = %q %+v, want throttle/limit-bandwidth rate 1MB", r.Reason, r.Penalty)
+	if r.Reason != "bandage.throttle" || r.Penalty.Action != "limit-bandwidth" || *r.Penalty.Rate != 1000000 {
+		t.Errorf("report stance = %q %+v, want bandage.throttle/limit-bandwidth rate 1MB", r.Reason, r.Penalty)
 	}
 	if r.CreatedAt != wallBase || r.UpdatedAt != wallBase || r.ExpiresAt != "2025-10-17T19:00:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want the 18:00 write with the 1h ttl",
@@ -392,8 +392,8 @@ chains:
 		t.Fatalf("reports = %+v, want still 1 (the override moves the row in place)", doc.Reports)
 	}
 	r = doc.Reports[0]
-	if r.Reason != "squeeze" || r.Penalty.Action != "limit-req-rate" || *r.Penalty.Rate != 50 {
-		t.Errorf("report stance = %q %+v, want squeeze/limit-req-rate rate 50 (the overriding rung's)", r.Reason, r.Penalty)
+	if r.Reason != "bandage.squeeze" || r.Penalty.Action != "limit-req-rate" || *r.Penalty.Rate != 50 {
+		t.Errorf("report stance = %q %+v, want bandage.squeeze/limit-req-rate rate 50 (the overriding rung's)", r.Reason, r.Penalty)
 	}
 	if r.Tracker.Value != 160 || r.Tracker.Volume != 150 {
 		t.Errorf("tracker reading = %+v, want value 160 with the overriding rung's threshold 150", r.Tracker)
@@ -414,8 +414,8 @@ chains:
 		t.Fatalf("reports = %+v, want still 1", doc.Reports)
 	}
 	r = doc.Reports[0]
-	if r.Reason != "ban" || r.Penalty.Action != "reject" || r.Penalty.Rate != nil {
-		t.Errorf("report stance = %q %+v, want ban/reject without a rate", r.Reason, r.Penalty)
+	if r.Reason != "bandage.ban" || r.Penalty.Action != "reject" || r.Penalty.Rate != nil {
+		t.Errorf("report stance = %q %+v, want bandage.ban/reject without a rate", r.Reason, r.Penalty)
 	}
 	if r.Tracker.Value != 280 || r.Tracker.Volume != 250 {
 		t.Errorf("tracker reading = %+v, want value 280 with the overriding rung's threshold 250", r.Tracker)
@@ -450,7 +450,7 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 200))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "ban" {
+	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.ban" {
 		t.Fatalf("reports = %+v, want one at the ban stance", doc.Reports)
 	}
 
@@ -464,7 +464,7 @@ chains:
 			t.Fatalf("%s: reports = %+v, want 1", when, doc.Reports)
 		}
 		r := doc.Reports[0]
-		if r.Reason != "ban" || r.UpdatedAt != wallBase || r.ExpiresAt != "2025-10-17T19:00:00Z" ||
+		if r.Reason != "bandage.ban" || r.UpdatedAt != wallBase || r.ExpiresAt != "2025-10-17T19:00:00Z" ||
 			r.Tracker.Value != 200 || r.Tracker.Volume != 150 || r.Sample.Time != eventTime1At {
 			t.Errorf("%s: report = %+v, want the first write untouched (at-or-below Triggers are suppressed)", when, r)
 		}
@@ -500,7 +500,7 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "ban" {
+	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.ban" {
 		t.Fatalf("reports = %+v, want one at the ban stance", doc.Reports)
 	}
 	if _, n := d.del(t, url.Values{"rule": {"ladder"}}); n != 1 {
@@ -515,7 +515,7 @@ chains:
 		t.Fatalf("reports = %+v, want one fresh report", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Reason != "squeeze" || r.Penalty.Action != "limit-req-rate" || *r.Penalty.Rate != 50 {
+	if r.Reason != "bandage.squeeze" || r.Penalty.Action != "limit-req-rate" || *r.Penalty.Rate != 50 {
 		t.Errorf("report stance = %q %+v, want the top crossed rung's squeeze", r.Reason, r.Penalty)
 	}
 	if r.Tracker.Value != 145 || r.Tracker.Volume != 100 {
@@ -570,7 +570,7 @@ chains:
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 200))
 	d.waitProcessed(t, 1)
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "throttle" {
+	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.throttle" {
 		t.Fatalf("reports = %+v, want the landed throttle report", doc.Reports)
 	}
 
@@ -582,7 +582,7 @@ chains:
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	r := doc.Reports[0]
-	if r.Reason != "throttle" || r.UpdatedAt != wallBase || r.Sample.Time != eventTime1At {
+	if r.Reason != "bandage.throttle" || r.UpdatedAt != wallBase || r.Sample.Time != eventTime1At {
 		t.Errorf("report = %+v, want the first write untouched (the failed override keeps the guard)", r)
 	}
 
@@ -594,7 +594,7 @@ chains:
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	r = doc.Reports[0]
-	if r.Reason != "ban" || r.UpdatedAt != "2025-10-17T18:02:00Z" ||
+	if r.Reason != "bandage.ban" || r.UpdatedAt != "2025-10-17T18:02:00Z" ||
 		r.Tracker.Value != 185 || r.Tracker.Volume != 150 {
 		t.Errorf("report = %+v, want the retried override at 18:02 (the next matching event retries the report)", r)
 	}
