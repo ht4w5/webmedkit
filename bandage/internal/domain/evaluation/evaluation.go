@@ -44,10 +44,8 @@ type Service struct {
 	logger   Logger
 }
 
-// NewService assembles the evaluator. progName is the producer namespace
-// of report reasons: a created report carries progName, a dot and the
-// report action's bare authored code (ADR 0016), so renaming the program
-// re-namespaces every reason (ADR 0017).
+// NewService assembles the evaluator. progName namespaces report reasons;
+// renaming the program re-namespaces all of them (ADR 0016, ADR 0017).
 func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
 	if logger == nil {
 		logger = nopLogger{}
