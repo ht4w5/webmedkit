@@ -149,6 +149,24 @@ to them. The bandage daemon produces reports and never enforces;
 them.
 _Avoid_: ban
 
+**Enforcement scope**:
+The protected service's traffic surface a ban rule reaches beyond its
+Target: transport protocols, ports, and addresses — one scope per
+direction, the ingress scope and the egress scope.
+_Avoid_: prefilter, service filter, filter
+
+**Ingress**:
+The direction of traffic a ban rule's Target sends toward the
+protected service, matched by the Target as source — a direction, not
+a rules Chain.
+_Avoid_: inbound
+
+**Egress**:
+The response direction: traffic sent back to a ban rule's Target,
+matched by the Target as destination — a direction, not a rules
+Chain.
+_Avoid_: outbound
+
 **Firewall driver**:
 The pluggable backend that enforces ban rules at its enforcement
 surface — a kernel firewall like nftables, or another surface such as a
