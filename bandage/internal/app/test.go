@@ -11,7 +11,11 @@ import (
 
 // Test validates the config and rules files and returns the validated
 // plan (bandage --test). It opens no sockets. The plan banner carries
-// the passed build identity.
+// the passed build identity. The plan's contract is what the operator
+// approves is what ships: every report line prints the reason the
+// report will carry — the report carries the code namespaced under the
+// build's program name while the rules file declares it bare (ADR 0016,
+// ADR 0017).
 func Test(configPath, rulesPath string, build identity.Build) (string, error) {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
@@ -53,14 +57,14 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 				}
 			}
 			for _, action := range rule.Actions {
-				fmt.Fprintf(&b, "    action %s\n", actionText(action))
+				fmt.Fprintf(&b, "    action %s\n", actionText(action, build.Name()))
 			}
 			for _, rung := range rule.Escalations {
 				fmt.Fprintf(&b, "    rung at=%s", fmtFloat(rung.At))
 				if len(rung.Actions) > 0 {
 					parts := make([]string, 0, len(rung.Actions))
 					for _, action := range rung.Actions {
-						parts = append(parts, actionText(action))
+						parts = append(parts, actionText(action, build.Name()))
 					}
 					fmt.Fprintf(&b, " %s", strings.Join(parts, ", "))
 				}
@@ -72,19 +76,20 @@ func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
 }
 
 // actionText renders one action's plan text (no indentation or newline); the describer cannot fail.
-func actionText(a domain.Action) string {
+func actionText(a domain.Action, name string) string {
 	var ab strings.Builder
-	_ = a.Accept(actionDescriber{b: &ab})
+	_ = a.Accept(actionDescriber{b: &ab, name: name})
 	return ab.String()
 }
 
 // actionDescriber is the --test side of Action.Accept, appending one action's text to the plan.
 type actionDescriber struct {
-	b *strings.Builder
+	b    *strings.Builder
+	name string // the build's program name: the namespace of the report reason
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", a.Reason, a.TTL, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", d.name+"."+a.Reason, a.TTL, a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}
