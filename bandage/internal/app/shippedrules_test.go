@@ -72,8 +72,8 @@ func TestShippedRulesPlanShowsEveryRung(t *testing.T) {
 	}
 	for _, want := range []string{
 		"rung at=50000000 jump target=inspect",
-		"rung at=5000000000 report reason=iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
-		"rung at=40000000000 report reason=iso-egress-ban ttl=168h0m0s penalty=drop",
+		"rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
+		"rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
