@@ -440,7 +440,9 @@ $ journalctl -u splint -f
 `startup test install ok` when the endpoint, flags and kernel all
 check out. Installing nftables rules needs `CAP_NET_ADMIN` — the sample
 unit runs as root by default and carries a commented block for a
-dedicated user instead. A startup test install that keeps failing
+dedicated user instead: the `useradd` step to create it, and the
+capability grants (the only thing splint needs from root) once it
+exists. A startup test install that keeps failing
 (broken flags, endpoint or kernel) stops retrying and leaves the unit
 failed — `systemctl status splint` says why.
 

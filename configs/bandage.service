@@ -1,0 +1,65 @@
+# Sample systemd unit for bandage, the realtime web log analyzer: it
+# ingests access-log events over syslog, maintains leaky-bucket
+# trackers per target and publishes the report document splint pulls
+# (docs/ingest.md, docs/reports.md, docs/storage.md).
+#
+# Install and enable:
+#   make build
+#   install -m 0755 bin/bandage /usr/local/bin/bandage
+#   install -d /etc/bandage
+#   install -m 0644 configs/bandage.yml /etc/bandage/bandage.yml
+#   install -m 0644 configs/rules.yml /etc/bandage/rules.yml
+#   install -m 0644 configs/bandage.service /etc/systemd/system/bandage.service
+#   # edit /etc/bandage/bandage.yml: point ingest at your log source,
+#   # and /etc/bandage/rules.yml at the behavior you want enforced
+#   systemctl daemon-reload
+#   systemctl enable --now bandage
+#   journalctl -u bandage -f
+#
+# Config and rules changes take effect on restart only. `bandage -t`
+# validates both and prints the plan; the unit runs that check before
+# every start, so a broken config or rule set fails at deploy time
+# (`systemctl status bandage` says why), not mid-ingest.
+#
+# RuntimeDirectory=bandage and StateDirectory=bandage provide the
+# paths configs/bandage.yml ships with: /run/bandage (the ingest
+# socket) and /var/lib/bandage (the report store). Move either in the
+# unit and the config together. The report API serves on
+# api.listen (127.0.0.1:8080 by default) — point splint's --url at it
+# (configs/splint.service).
+#
+# A clean stop (systemctl stop) is SIGTERM: the daemon drains
+# in-flight work and closes the store before exit.
+
+[Unit]
+Description=bandage realtime web log analyzer
+After=network-online.target
+Wants=network-online.target
+# A config or rule set that never validates must fail loudly at deploy
+# time, not retry forever:
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/bin/bandage -t --config /etc/bandage/bandage.yml --rules /etc/bandage/rules.yml
+ExecStart=/usr/local/bin/bandage --config /etc/bandage/bandage.yml --rules /etc/bandage/rules.yml
+Restart=on-failure
+RestartSec=10s
+RuntimeDirectory=bandage
+StateDirectory=bandage
+# bandage needs no capabilities: it binds the ingest socket, reads
+# logs, writes its store and serves the report API. With the default
+# User=root that is all there already; for a dedicated user, create it
+# and uncomment:
+#   useradd --system --home /var/lib/bandage --shell /sbin/nologin bandage
+#User=bandage
+#Group=bandage
+#NoNewPrivileges=true
+# The log sender must be able to write the unixgram socket at
+# /run/bandage/log.sock — under a dedicated user it is owned by that
+# user, so give the sender's group write access (or run the sender as
+# the same group).
+
+[Install]
+WantedBy=multi-user.target

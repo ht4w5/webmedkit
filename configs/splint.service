@@ -32,8 +32,11 @@ Type=simple
 ExecStart=/usr/local/bin/splint --url http://127.0.0.1:8080/reports
 Restart=on-failure
 RestartSec=10s
-# Installing nftables rules needs CAP_NET_ADMIN. With the default
-# User=root that is already there; for a dedicated user, uncomment:
+# Installing nftables rules needs CAP_NET_ADMIN — the only thing splint
+# needs from root (the stop-time ruleset reset needs nothing more). With
+# the default User=root it is already there; for a dedicated user,
+# create it and uncomment:
+#   useradd --system --home /nonexistent --shell /sbin/nologin splint
 #User=splint
 #AmbientCapabilities=CAP_NET_ADMIN
 #CapabilityBoundingSet=CAP_NET_ADMIN
