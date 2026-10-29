@@ -35,7 +35,7 @@ future additive fields append after it.
 |---|---|---|
 | `rule` | string | the rule ID that triggered (unique within its chain) |
 | `chain` | string | the chain that owns the rule |
-| `reason` | string | the machine-readable trigger code (a slug), the report's downstream identity |
+| `reason` | string | the namespaced machine-readable trigger code `<prefix>.<code>` (below), the report's downstream identity |
 | `target` | string | the aggregated source prefix the report is about, e.g. `203.0.113.7/32` |
 | `created_at` | string | when the record was first written, RFC 3339 UTC |
 | `updated_at` | string | when the record was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
@@ -97,6 +97,26 @@ Every timestamp in the document is an RFC 3339 UTC string (a `Z`
 suffix), at second precision: sub-second components are truncated, not
 rounded. `generated_at` is the request time; `created_at`, `updated_at`
 and `expires_at` are wall-clock write times.
+
+### The reason
+
+The `reason` is **namespaced**: on the wire it is `<prefix>.<code>`,
+matching `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$` — each label is a
+lowercase slug `^[a-z0-9][a-z0-9_-]*$`, and the authored code is
+recoverable as the reason's second label
+([ADR 0016](adr/0016-report-reasons-are-namespaced.md)). The contract
+constrains the shape only: any prefix matching `^[a-z0-9][a-z0-9_-]*\.`
+is legal for a report, and never any producer's naming choice — what a
+producer's literal prefix is (bandage's is its program name plus a dot)
+is a producer-side decision outside this contract
+([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md)) that a
+consumer must not depend on. The pattern tightens the contract
+pre-release: the document stays at `version` 0, with no version
+migration.
+
+The reason is unchanged in every other property: it is not unique, and
+several rules may share one code so multiple signals feed a single ban
+reason ([ADR 0004](adr/0004-reports-feed-ban-rules.md)).
 
 ## Penalty
 
@@ -176,7 +196,7 @@ client that downloaded two 6000-byte files within one leak second:
     {
       "rule": "sustained-egress",
       "chain": "main",
-      "reason": "egress-overflow",
+      "reason": "bandage.egress-overflow",
       "target": "203.0.113.7/32",
       "created_at": "2025-10-17T18:00:00Z",
       "updated_at": "2025-10-17T18:00:00Z",
