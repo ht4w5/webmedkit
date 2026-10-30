@@ -30,10 +30,8 @@ type Factory struct {
 	egress    Scope
 }
 
-// scopeFlags is one direction's bound enforcement-scope flag surface:
-// the three value lists and the three flag names travel together from
-// the bind to the validation — the names are what refused-value
-// errors quote.
+// scopeFlags is one direction's bound scope flags: the flag names
+// travel with the values so refused-value errors can quote them.
 type scopeFlags struct {
 	protos, ports, addrs          []string
 	protoFlag, portFlag, addrFlag string
@@ -62,11 +60,6 @@ func (f *Factory) BindFlags(fs *flag.FlagSet) {
 	// StringArray, not StringSlice: nsfs paths are never comma lists,
 	// and an empty value stays visible to the validation below.
 	fs.StringArrayVar(&f.netns, "nft-netns", nil, "target network namespace nsfs path (repeatable; default: the current namespace)")
-	// The two enforcement scopes name the packet fields their
-	// direction matches: the ingress scope sees the service at the
-	// destination fields, the egress scope at the source fields. All
-	// values take comma lists or repeats; protocols default to
-	// tcp,udp (ADR 0018).
 	fs.StringSliceVar(&f.ingressFlags.addrs, "nft-ingress-daddr", nil, "ingress scope destination address or prefix (comma list or repeatable; default: all)")
 	fs.StringSliceVar(&f.ingressFlags.ports, "nft-ingress-dport", nil, "ingress scope destination port 1-65535 (comma list or repeatable; default: all)")
 	fs.StringSliceVar(&f.ingressFlags.protos, "nft-ingress-l4proto", []string{"tcp", "udp"}, "ingress scope transport protocol: tcp or udp (comma list or repeatable)")
@@ -100,11 +93,8 @@ func (f *Factory) Validate() error {
 	return nil
 }
 
-// parseScope resolves one direction's scope flag values into its
-// validated enforcement scope. Duplicate values resolve to one entry;
-// overlapping address prefixes are refused as ambiguous. Refused
-// values fail before anything is enforced, each error naming its flag
-// and the offending value.
+// parseScope resolves one direction's scope flags into its validated
+// scope; refused values name their flag and the offending value.
 func parseScope(flags scopeFlags) (Scope, error) {
 	var scope Scope
 	var err error
@@ -117,18 +107,11 @@ func parseScope(flags scopeFlags) (Scope, error) {
 	if scope.Addrs, err = parseAddrs(flags.addrFlag, flags.addrs); err != nil {
 		return Scope{}, err
 	}
-	// Duplicate values — within one comma list, across repeats, or a
-	// bare address and its host prefix — resolve to one scope entry,
-	// silently: a kernel batch must never see a value twice (ADR 0018).
 	scope.L4Protos = dedup(scope.L4Protos)
 	scope.Ports = dedup(scope.Ports)
 	scope.Addrs = dedup(scope.Addrs)
-	// Overlapping address prefixes within one scope are ambiguous: one
-	// covers part of the other's traffic, and the enforcement outcome
-	// would not be what the command line states. Equal prefixes were
-	// deduplicated above; CIDR blocks are either disjoint or nested,
-	// so any remaining overlap is a mistake to refuse before anything
-	// enforces.
+	// After dedup, any overlap is ambiguous — CIDR blocks are disjoint
+	// or nested — so enforcement would not match the command line.
 	for i, a := range scope.Addrs {
 		for _, b := range scope.Addrs[i+1:] {
 			if a.Overlaps(b) {
@@ -139,9 +122,8 @@ func parseScope(flags scopeFlags) (Scope, error) {
 	return scope, nil
 }
 
-// dedup drops repeated values, keeping each value's first occurrence:
-// a scope is a set of values, and its resolved entries stay in the
-// order the operator stated them.
+// dedup drops repeated values, keeping the first: a kernel batch
+// never sees a value twice, and the operator's stated order stands.
 func dedup[T comparable](values []T) []T {
 	seen := make(map[T]struct{}, len(values))
 	out := make([]T, 0, len(values))
@@ -155,8 +137,8 @@ func dedup[T comparable](values []T) []T {
 	return out
 }
 
-// parseL4Protos parses a protocol scope: strict lowercase tcp or udp,
-// the only protocols a ban rule can gate on.
+// parseL4Protos accepts strict lowercase tcp or udp — the only
+// protocols a ban rule can gate on.
 func parseL4Protos(flagName string, values []string) ([]byte, error) {
 	protos := make([]byte, 0, len(values))
 	for _, v := range values {
@@ -172,7 +154,7 @@ func parseL4Protos(flagName string, values []string) ([]byte, error) {
 	return protos, nil
 }
 
-// parsePorts parses a port scope: exact numbers 1–65535, no ranges.
+// parsePorts accepts exact numbers 1–65535, no ranges.
 func parsePorts(flagName string, values []string) ([]uint16, error) {
 	ports := make([]uint16, 0, len(values))
 	for _, v := range values {
@@ -185,8 +167,8 @@ func parsePorts(flagName string, values []string) ([]uint16, error) {
 	return ports, nil
 }
 
-// parseAddrs parses an address scope: bare addresses (counting as
-// their host prefixes) or prefixes.
+// parseAddrs accepts bare addresses (counting as their host
+// prefixes) or prefixes.
 func parseAddrs(flagName string, values []string) ([]netip.Prefix, error) {
 	addrs := make([]netip.Prefix, 0, len(values))
 	for _, v := range values {
@@ -201,8 +183,7 @@ func parseAddrs(flagName string, values []string) ([]netip.Prefix, error) {
 
 // Open expands the configured targeting into one driver instance per
 // enforcement point — one per nsfs path, the current namespace when
-// none is configured. Every enforcement point of the instance shares
-// the one scope pair. Opening is lazy: no I/O happens until a driver
+// none is configured. Opening is lazy: no I/O happens until a driver
 // method runs, so --dry-run needs no privileges.
 func (f *Factory) Open() ([]firewall.Point, error) {
 	if err := f.Validate(); err != nil {

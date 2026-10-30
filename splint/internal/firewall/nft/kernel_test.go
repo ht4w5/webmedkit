@@ -78,10 +78,7 @@ func TestKernelInstallReadBackReset(t *testing.T) {
 	assertUnscopedKernelState(t, conn, HookInput)
 
 	// Phase 2: the per-direction scoped encoding at prerouting,
-	// rebuilding over the live table. The scopes carry distinct values
-	// per direction — the ingress scope states the service's
-	// destination fields, the egress scope its source fields. Hit
-	// counts vary: only the mapping is asserted.
+	// rebuilding over the live table. Hit counts vary: only the mapping is asserted.
 	ingressScope := Scope{
 		L4Protos: []byte{unix.IPPROTO_TCP},
 		Ports:    []uint16{443, 8443},
@@ -235,10 +232,8 @@ func TestKernelDeclinesInstallNothing(t *testing.T) {
 func ratePtr(n int64) *int64 { return &n }
 
 // assertUnscopedKernelState reads the owned table back and asserts
-// the unscoped fixture's encoding: every kernel rule leads with its
-// direction's protocol gate — an unscoped ban covers tcp and udp
-// traffic only. Expectations are hand-written from the fixtures,
-// never computed the way the implementation does.
+// the unscoped fixture's encoding. Expectations are hand-written
+// from the fixtures, never computed the way the implementation does.
 func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	t.Helper()
 	// The kernel rules, in install order.
@@ -271,9 +266,7 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 
 // assertScopedKernelState reads the owned table back and asserts the
 // scoped fixture's encoding: each rule under its direction's
-// enforcement scope, with the two scopes' values distinct — the
-// ingress scope matches destination fields (dport, daddr), the
-// egress scope source fields (sport, saddr) — in both families.
+// enforcement scope, the two scopes' values distinct, in both families.
 func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	t.Helper()
 	ingressRules := []wantRule{
@@ -290,9 +283,6 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 			tail: dropTail, // 2001:db8::7/128 under the ingress scope
 		},
 	}
-	// The egress rules meter the response direction, where the egress
-	// scope matches as source — sport, saddr — and the ban target as
-	// destination.
 	egressRules := []wantRule{
 		{
 			proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_1",
@@ -423,19 +413,14 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 }
 
 // wantRule is one expected kernel rule: the match prefix in order —
-// the family gate, then the direction's enforcement scope (protocol
-// gate, ports, addresses), then the target match — then the counter
-// and the stance's verdict tail. The target match is the source
-// address on ingress, the destination address on egress; the scope
-// matches the service end of the conversation — destination fields
-// on ingress, source fields on egress.
+// family gate, scope (protocol gate, ports, addresses), target match, counter.
 type wantRule struct {
 	proto   byte
 	off     uint32 // the target-match load: source on ingress, destination on egress
 	length  uint32
 	setName string
 
-	l4Set    string // the protocol gate set, drawn from the direction's scope
+	l4Set    string // the protocol gate set
 	portSet  string // non-empty: the scope's port set
 	portOff  uint32 // the scope's port load: dport (2) on ingress, sport (0) on egress
 	scopeSet string // non-empty: the scope's address set
@@ -473,11 +458,8 @@ func assertChain(t *testing.T, conn *nftables.Conn, table *nftables.Table, name 
 // tailCheck asserts a kernel rule's verdict tail.
 type tailCheck func(t *testing.T, exprs []expr.Any)
 
-// assertMatch asserts the shared rule prefix in match order — the
-// family gate, then the direction's enforcement scope (protocol
-// gate, then the ports and addresses), then the target match — then
-// the counter immediately before the verdict, and returns the
-// verdict tail for the caller.
+// assertMatch asserts the match prefix in wantRule's order, then the
+// counter immediately before the verdict, returning the verdict tail.
 func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 	t.Helper()
 	exprs := r.Exprs
