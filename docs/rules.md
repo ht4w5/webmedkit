@@ -67,19 +67,23 @@ and `sent >= 1MB` / `sent <= 1MB` (size units are allowed only here) -
 combined with `and`, `or`, `not`, where `not` binds tighter than `and`,
 which binds tighter than `or`.
 
-`enrichment.filter` in `bandage.yml` gates the enrichment path (the
+`enrichment.filter` - the rules file's top-level `enrichment` block,
+between `version` and `chains` - gates the enrichment path (the
 Filesize estimate) with the same language, defaulting to `any` like
-rules; an invalid expression aborts startup naming the key. The gate is
-wholly in or wholly out: an unmatched event flows through evaluation
-with default derived fields and touches no enrichment state - no
-observation, no cache update. A widened filter cannot poison the
-estimate: what feeds it is the **Sampling rule**
+rules. Enrichment settings live in the rules file, not `bandage.yml`;
+an invalid expression or an unknown key in the block aborts loading,
+naming the key. The gate is wholly in or wholly out: an unmatched event
+flows through evaluation with default derived fields and touches no
+enrichment state - no observation, no cache update. A widened filter
+cannot poison the estimate: what feeds it is the **Sampling rule**
 ([GLOSSARY.md](../GLOSSARY.md)), fixed in code and stricter than any
 Filter ([ADR 0019](adr/0019-filesize-from-response-sizes.md)).
 
 ```yaml
+version: 0
 enrichment:
   filter: path prefix "/downloads/"
+chains:
 ```
 
 ## Entry chains and dispatch
