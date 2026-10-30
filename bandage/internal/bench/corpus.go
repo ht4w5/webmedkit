@@ -138,6 +138,7 @@ type eventContent struct {
 	status int
 	sent   int64
 	clen   int64  // response Content-Length; 0 on ShapeMinimal lines
+	crange int64  // Content-Range total when the header is sent (206s); 0 otherwise and on ShapeMinimal lines
 	agent  string // empty for ShapeMinimal lines
 }
 
@@ -145,8 +146,13 @@ type eventContent struct {
 func (ec eventContent) line(shape LineShape) string {
 	t := fmt.Sprintf("%d.%03d", ec.sec, ec.msec)
 	if shape == ShapeFull {
-		return fmt.Sprintf(`{"time":%q,"client":%q,"server":%q,"method":%q,"url":%q,"duration":%q,"host":%q,"status":%d,"sent":%d,"clen":"%d","agent":%q,"extra":%q}`,
-			t, ec.client, fullServer, ec.method, ec.path, fullDuration, fullHost, ec.status, ec.sent, ec.clen, ec.agent, fullExtra)
+		rangeHeader := "" // "" renders as the header not being sent
+		if ec.crange > 0 {
+			// A complete range transfer: the total is the sent bytes.
+			rangeHeader = fmt.Sprintf("bytes 0-%d/%d", ec.crange-1, ec.crange)
+		}
+		return fmt.Sprintf(`{"time":%q,"client":%q,"server":%q,"method":%q,"url":%q,"duration":%q,"host":%q,"status":%d,"sent":%d,"clen":"%d","crange":%q,"agent":%q,"extra":%q}`,
+			t, ec.client, fullServer, ec.method, ec.path, fullDuration, fullHost, ec.status, ec.sent, ec.clen, rangeHeader, ec.agent, fullExtra)
 	}
 	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d}`,
 		t, ec.client, ec.method, ec.path, ec.status, ec.sent)
@@ -155,15 +161,16 @@ func (ec eventContent) line(shape LineShape) string {
 // event renders the content as the domain Event its line parses to (nginx.Parser mapping).
 func (ec eventContent) event() domain.Event {
 	return domain.Event{
-		Time:          time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
-		RemoteAddr:    netip.MustParseAddr(ec.client),
-		Method:        ec.method,
-		Path:          ec.path,
-		Agent:         ec.agent,
-		Status:        ec.status,
-		SentBytes:     ec.sent,
-		ContentLength: ec.clen,
-		SizeBytes:     domain.FilesizeUnknown,
+		Time:              time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
+		RemoteAddr:        netip.MustParseAddr(ec.client),
+		Method:            ec.method,
+		Path:              ec.path,
+		Agent:             ec.agent,
+		Status:            ec.status,
+		SentBytes:         ec.sent,
+		ContentLength:     ec.clen,
+		ContentRangeTotal: ec.crange,
+		SizeBytes:         domain.FilesizeUnknown,
 	}
 }
 
@@ -203,8 +210,12 @@ func NewCorpus(seed uint64, shape LineShape, dist KeyDist, n int) *Corpus {
 		}
 		if shape == ShapeFull {
 			// Full-shape lines carry every optional field: a complete
-			// transfer's Content-Length is its sent bytes.
+			// transfer's Content-Length is its sent bytes, and the
+			// 206s' Content-Range (header sent) totals the same.
 			ec.clen = ec.sent
+			if ec.status == 206 {
+				ec.crange = ec.sent
+			}
 		}
 		c.events[i] = ec
 		c.lines[i] = ec.line(shape)
