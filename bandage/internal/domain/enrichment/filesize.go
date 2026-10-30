@@ -1,6 +1,5 @@
-// Package enrichment derives Event fields from observed traffic: a
-// Filesize estimate (GLOSSARY: Filesize) learned per path from observed
-// response sizes.
+// Package enrichment derives Event fields from observed traffic: a Filesize
+// estimate (GLOSSARY: Filesize) learned per path from observed response sizes.
 package enrichment
 
 import (
@@ -26,8 +25,7 @@ type FilesizeCache interface {
 	Update(ctx context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error)
 }
 
-// FilesizeEnricher estimates each path's file size from observed response
-// sizes.
+// FilesizeEnricher estimates each path's file size from observed response sizes.
 type FilesizeEnricher struct {
 	cache      FilesizeCache
 	period     int64
@@ -49,12 +47,8 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*Fi
 	}, nil
 }
 
-// Enrich sets event.SizeBytes from the path's estimate: the estimate from
-// sample minSamples on (the Nth observation included), else FilesizeUnknown.
-// The Sampling rule (GLOSSARY) is hard-coded and admits only GET/HEAD 200
-// events carrying a Content-Length and GET 206 events carrying a usable
-// Content-Range total; ineligible events add no observation but are still
-// enriched with the current estimate.
+// Enrich sets event.SizeBytes from the path's estimate (from sample
+// minSamples on, else FilesizeUnknown); only the Sampling rule observes.
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) error {
 	obs, ok := sizeObservation(event)
 	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
@@ -82,13 +76,8 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) err
 	return nil
 }
 
-// sizeObservation reports the event's size observation under the
-// Sampling rule (GLOSSARY): GET/HEAD 200 responses carrying a Content-Length
-// observe the Content-Length; GET 206 responses carrying a usable
-// Content-Range total observe that total and never their
-// Content-Length. Transferred bytes, 304 revalidations, length-less
-// responses, headerless or "*"-total ranges, 416 and error bodies never
-// observe, whatever else admits an event.
+// sizeObservation reports the event's response size under the Sampling rule
+// (GLOSSARY): GET/HEAD 200 + Content-Length, GET 206 + Content-Range total.
 func sizeObservation(event *domain.Event) (int64, bool) {
 	switch {
 	case event.Status == 200 && (event.Method == "GET" || event.Method == "HEAD") && event.ContentLength > 0:

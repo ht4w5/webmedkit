@@ -44,9 +44,8 @@ func TestNewEnricherValidation(t *testing.T) {
 	}
 }
 
-// Unmatched events carry default derived fields and nothing else: the
-// single reset clears every derived field before the gate, and no
-// enrichment state is touched - zero cache updates, zero observations.
+// Unmatched events carry default derived fields and touch no enrichment
+// state - zero cache updates, zero observations.
 func TestEnricherUnmatchedEventsResetAndTouchNothing(t *testing.T) {
 	cache := &countingCache{}
 	fe, err := NewFilesizeEnricher(cache, 5, 1)
@@ -79,10 +78,8 @@ func TestEnricherUnmatchedEventsResetAndTouchNothing(t *testing.T) {
 	}
 }
 
-// Matched events enrich as before: eligible events observe exactly one
-// response size (one cache update), matched-but-ineligible events take
-// exactly one read-through update - surfacing the current estimate - and
-// add no observation.
+// Matched events: eligible observe exactly one response size, ineligible
+// take exactly one read-through update and observe nothing.
 func TestEnricherMatchedEventsEnrichThroughTheGate(t *testing.T) {
 	cache := &countingCache{}
 	fe, err := NewFilesizeEnricher(cache, 5, 1)
@@ -118,9 +115,8 @@ func TestEnricherMatchedEventsEnrichThroughTheGate(t *testing.T) {
 	}
 }
 
-// The Sampling rule outranks the Filter: a widened filter (everything
-// matches) still admits no 304, 416, error or headerless traffic into
-// the estimate - only eligible observations move the size sequence.
+// The Sampling rule outranks the Filter: a widened filter still admits
+// no 304, 416, error or headerless traffic into the estimate.
 func TestEnricherSamplingRuleOutranksTheFilter(t *testing.T) {
 	cache := &countingCache{}
 	fe, err := NewFilesizeEnricher(cache, 5, 1)
