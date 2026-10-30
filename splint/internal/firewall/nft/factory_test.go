@@ -130,6 +130,29 @@ func TestFactoryValidations(t *testing.T) {
 			args:    []string{"--nft-egress-saddr", "203.0.113.256"},
 			wantErr: `--nft-egress-saddr: unparseable prefix (got "203.0.113.256")`,
 		},
+		{
+			name:    "overlapping ingress address prefixes are refused",
+			args:    []string{"--nft-ingress-daddr", "10.0.0.0/8,10.0.0.0/16"},
+			wantErr: `--nft-ingress-daddr: overlapping address prefixes (got "10.0.0.0/8" and "10.0.0.0/16")`,
+		},
+		{
+			name:    "an egress address prefix nested in another is refused",
+			args:    []string{"--nft-egress-saddr", "2001:db8::/32,2001:db8:1::/48"},
+			wantErr: `--nft-egress-saddr: overlapping address prefixes (got "2001:db8::/32" and "2001:db8:1::/48")`,
+		},
+		{
+			name:    "a bare address inside a listed prefix is refused",
+			args:    []string{"--nft-ingress-daddr", "10.0.0.0/8,10.0.0.5"},
+			wantErr: `--nft-ingress-daddr: overlapping address prefixes (got "10.0.0.0/8" and "10.0.0.5/32")`,
+		},
+		{
+			name: "equal address prefixes are duplicates, not overlaps",
+			args: []string{"--nft-ingress-daddr", "10.0.0.5,10.0.0.5/32,10.0.0.5"},
+		},
+		{
+			name: "the scopes may cover the same addresses: they are different directions",
+			args: []string{"--nft-ingress-daddr", "10.0.0.0/8", "--nft-egress-saddr", "10.0.0.0/16"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -197,6 +220,22 @@ func TestFactoryOpensItsEnforcementPoints(t *testing.T) {
 		}
 		if len(points) != 0 {
 			t.Errorf("Open returned %d points on a refused scope value, want 0", len(points))
+		}
+	})
+
+	t.Run("overlapping scope addresses fail before any enforcement point opens", func(t *testing.T) {
+		// An ambiguous scope is refused like any other bad value:
+		// before any point opens, so nothing enforces it.
+		f := newTestFactory(t, "--nft-egress-saddr", "2001:db8::/32,2001:db8:1::/48")
+		points, err := f.Open()
+		if err == nil {
+			t.Fatal("Open succeeded on overlapping scope addresses")
+		}
+		if !strings.Contains(err.Error(), "--nft-egress-saddr") || !strings.Contains(err.Error(), "overlapping") {
+			t.Errorf("Open error %q does not name the flag and the problem", err)
+		}
+		if len(points) != 0 {
+			t.Errorf("Open returned %d points on overlapping scope addresses, want 0", len(points))
 		}
 	})
 
@@ -297,6 +336,49 @@ func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
 		udpOnly := hashOf(t, "--nft-egress-l4proto", "udp")
 		if tcpOnly == defaults || udpOnly == defaults || tcpOnly == udpOnly {
 			t.Errorf("scopes hash defaults=%x ingress-tcp=%x egress-udp=%x: each protocol narrowing is its own scope", defaults, tcpOnly, udpOnly)
+		}
+	})
+}
+
+// Duplicate scope values — within one comma list or across repeats
+// — resolve to one scope entry, so a kernel batch never sees a value
+// twice. The plan's hash, which folds both scopes, is the external
+// witness of what the flag values resolved to.
+func TestFactoryDeduplicatesScopeValues(t *testing.T) {
+	hashOf := func(t *testing.T, args ...string) uint32 {
+		t.Helper()
+		points, err := newTestFactory(t, args...).Open()
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		plan, err := points[0].Driver.Plan(nil)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		return plan.Hash
+	}
+
+	t.Run("duplicate ports resolve to one scope entry", func(t *testing.T) {
+		dup := hashOf(t, "--nft-ingress-dport", "443,80,443", "--nft-ingress-dport", "443")
+		distinct := hashOf(t, "--nft-ingress-dport", "443,80")
+		if dup != distinct {
+			t.Errorf("duplicate ports hash %x, distinct ports %x: duplicates must resolve to one scope entry", dup, distinct)
+		}
+	})
+
+	t.Run("duplicate protocols resolve to one scope entry", func(t *testing.T) {
+		dup := hashOf(t, "--nft-egress-l4proto", "tcp,tcp,udp,tcp")
+		distinct := hashOf(t, "--nft-egress-l4proto", "tcp,udp")
+		if dup != distinct {
+			t.Errorf("duplicate protocols hash %x, distinct protocols %x: duplicates must resolve to one scope entry", dup, distinct)
+		}
+	})
+
+	t.Run("duplicate addresses resolve to one scope entry", func(t *testing.T) {
+		dup := hashOf(t, "--nft-ingress-daddr", "203.0.113.5,203.0.113.5/32")
+		distinct := hashOf(t, "--nft-ingress-daddr", "203.0.113.5/32")
+		if dup != distinct {
+			t.Errorf("duplicate addresses hash %x, one address %x: a bare address and its host prefix are one entry", dup, distinct)
 		}
 	})
 }
