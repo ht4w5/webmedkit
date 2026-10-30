@@ -151,7 +151,7 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 		return nil, err
 	}
 	// The enrichment path owns the Filter gate and the single
-	// derived-field reset (spec Implementation Decision 2).
+	// derived-field reset (ADR 0019, GLOSSARY: Filter).
 	enricher, err := enrichment.NewEnricher(cfg.Enrichment.Filter, filesize)
 	if err != nil {
 		return nil, err
