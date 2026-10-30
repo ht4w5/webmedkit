@@ -123,9 +123,9 @@ type Daemon struct {
 	shutdown  error
 }
 
-// New assembles the daemon from validated config; Pipeline.Workers must
-// be at least 1. The build's name namespaces report reasons (ADR 0017).
-func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option) (*Daemon, error) {
+// New assembles the daemon from validated config and rules; Pipeline.Workers
+// must be at least 1. The build's name namespaces report reasons (ADR 0017).
+func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon, error) {
 	if cfg.Pipeline.Workers < 1 {
 		return nil, fmt.Errorf("app: pipeline.workers must be at least 1 (got %d)", cfg.Pipeline.Workers)
 	}
@@ -152,14 +152,14 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 	}
 	// The enrichment path owns the Filter gate and the single
 	// derived-field reset (ADR 0019, GLOSSARY: Filter).
-	enricher, err := enrichment.NewEnricher(cfg.Enrichment.Filter, filesize)
+	enricher, err := enrichment.NewEnricher(rules.Enrichment.Filter, filesize)
 	if err != nil {
 		return nil, err
 	}
 
 	d := &Daemon{
 		cfg:       cfg,
-		chains:    chains,
+		chains:    rules.Chains,
 		build:     build,
 		now:       o.now,
 		logger:    o.logger,
@@ -169,7 +169,7 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 		repo:      repo,
 		reports:   reports,
 		cache:     cache,
-		eval:      evaluation.NewService(build.Name(), chains, cache, reports, o.now, domainLogger{o.logger}),
+		eval:      evaluation.NewService(build.Name(), rules.Chains, cache, reports, o.now, domainLogger{o.logger}),
 		lines:     make(chan string),
 		processed: newProgress(),
 		stopSweep: make(chan struct{}),

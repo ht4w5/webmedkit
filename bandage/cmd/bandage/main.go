@@ -114,11 +114,11 @@ func run(args []string, stdout, stderr io.Writer) (int, options) {
 		return exitOK, opts
 	}
 
-	chains, err := app.LoadRules(opts.rulesPath)
+	rules, err := app.LoadRules(opts.rulesPath)
 	if err != nil {
 		return fail(stderr, err), opts
 	}
-	d, err := app.New(cfg, chains, build, app.WithLogger(logger))
+	d, err := app.New(cfg, rules, build, app.WithLogger(logger))
 	if err != nil {
 		return fail(stderr, err), opts
 	}

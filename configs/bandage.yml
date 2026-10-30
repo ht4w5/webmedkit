@@ -16,8 +16,5 @@ db:
 cache:
   max_entries: 65536           # total entry cap across shards (default 65536)
 
-enrichment:
-  filter: any                  # rule-filter expression gating enrichment wholly (default any)
-
 api:
   listen: 127.0.0.1:8080

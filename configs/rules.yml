@@ -8,6 +8,10 @@
 # bandage.yml -r rules.yml.
 version: 0
 
+# Enrichment settings live in the rules file, not bandage.yml.
+enrichment:
+  filter: any                  # rule-filter expression gating enrichment wholly (default any)
+
 chains:
   # The entry chain: the front door, one filter-less jump rule per
   # topical chain in file order (a jump is non-terminal: it runs the

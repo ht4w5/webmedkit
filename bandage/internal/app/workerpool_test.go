@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 	"github.com/HT4w5/webmedkit/bandage/internal/domain/report"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 	"github.com/HT4w5/webmedkit/internal/identity"
@@ -35,7 +34,7 @@ chains:
 // TestNewRejectsNonPositiveWorkerCount: New rejects a worker count below 1
 // before opening any resource.
 func TestNewRejectsNonPositiveWorkerCount(t *testing.T) {
-	chains, err := ParseRules([]byte(poolRules))
+	rules, err := ParseRules([]byte(poolRules))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
@@ -45,13 +44,12 @@ func TestNewRejectsNonPositiveWorkerCount(t *testing.T) {
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
-		Cache:      Cache{MaxEntries: 65536},
-		Pipeline:   Pipeline{Workers: 0},
-		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
-		API:        API{Listen: "127.0.0.1:0"},
+		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
+		Cache:    Cache{MaxEntries: 65536},
+		Pipeline: Pipeline{Workers: 0},
+		API:      API{Listen: "127.0.0.1:0"},
 	}
-	if _, err := New(cfg, chains, identity.For("bandage")); err == nil {
+	if _, err := New(cfg, rules, identity.For("bandage")); err == nil {
 		t.Fatal("New(workers 0) succeeded, want an error")
 	} else if !strings.Contains(err.Error(), "pipeline.workers") {
 		t.Errorf("error %q does not name pipeline.workers", err)
@@ -255,17 +253,16 @@ func startWedgeDaemon(t *testing.T, clock *testClock, workers int) *wedgeDaemon 
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: dbPath}},
-		Cache:      Cache{MaxEntries: 65536},
-		Pipeline:   Pipeline{Workers: workers},
-		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
-		API:        API{Listen: "127.0.0.1:0"},
+		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: dbPath}},
+		Cache:    Cache{MaxEntries: 65536},
+		Pipeline: Pipeline{Workers: workers},
+		API:      API{Listen: "127.0.0.1:0"},
 	}
-	chains, err := ParseRules([]byte(poolRules))
+	rules, err := ParseRules([]byte(poolRules))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
-	d, err := New(cfg, chains, identity.For("bandage"), WithClock(clock.Now), withStore(store))
+	d, err := New(cfg, rules, identity.For("bandage"), WithClock(clock.Now), withStore(store))
 	if err != nil {
 		t.Fatalf("New error: %v", err)
 	}

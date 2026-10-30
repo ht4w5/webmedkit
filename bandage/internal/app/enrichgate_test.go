@@ -3,23 +3,10 @@ package app
 import (
 	"fmt"
 	"testing"
-
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 )
 
 // Primary seam: the enrichment Filter gate over the assembled daemon -
 // raw nginx lines in, derived fields and evaluation outcomes out.
-
-// enrichmentFilterConfig compiles an enrichment.filter expression the
-// way the config seam does, for a test daemon's config hook.
-func enrichmentFilterConfig(t *testing.T, src string) Enrichment {
-	t.Helper()
-	f, err := filter.Parse(src)
-	if err != nil {
-		t.Fatalf("filter.Parse(%q): %v", src, err)
-	}
-	return Enrichment{Filter: f}
-}
 
 // TestE2EEnrichmentFilterScopesTheEnrichmentPath: scoped-out traffic
 // touches no enrichment state; scoped-in enriches as without the gate.
@@ -27,6 +14,8 @@ func TestE2EEnrichmentFilterScopesTheEnrichmentPath(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
+enrichment:
+  filter: path prefix "/files/"
 chains:
   - name: main
     rules:
@@ -34,9 +23,7 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
-		c.Enrichment = enrichmentFilterConfig(t, `path prefix "/files/"`)
-	})
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// Five partial downloads under /files/ warm the estimate to 1000.
 	// tracker_cache counts the enrichment touch: unknown sizes skip the tracker.
@@ -106,6 +93,8 @@ func TestE2EEnrichmentFilterUnmatchedEventsCarryDefaultDerivedFields(t *testing.
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
+enrichment:
+  filter: method GET
 chains:
   - name: main
     rules:
@@ -113,9 +102,7 @@ chains:
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: egress-overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
-		c.Enrichment = enrichmentFilterConfig(t, `method GET`)
-	})
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// GETs warm /files/a.iso to an estimate of 1000 (their own bandwidth
 	// stays under volume).
@@ -170,6 +157,8 @@ func TestE2EWidenedFilterCannotPoisonTheEstimate(t *testing.T) {
 			clock := newTestClock(mustTime(t, wallBase))
 			rules := `
 version: 0
+enrichment:
+  filter: any
 chains:
   - name: main
     rules:
@@ -177,9 +166,7 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
-				c.Enrichment = enrichmentFilterConfig(t, "any")
-			})
+			d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 			// Warm the /f estimate to 1000 (samples 1-4 stay blind).
 			for i := 0; i < 5; i++ {

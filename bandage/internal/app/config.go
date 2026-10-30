@@ -13,7 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 )
 
 // DefaultCacheEntries is the default tracker cache entry cap.
@@ -22,13 +21,12 @@ const DefaultCacheEntries = 65536
 // Config is the validated daemon configuration. It is decoded strictly:
 // unknown keys and invalid values abort startup before any socket opens.
 type Config struct {
-	Ingest     Ingest
-	DB         DB
-	Cache      Cache
-	Pipeline   Pipeline
-	Enrichment Enrichment
-	API        API
-	Log        Log
+	Ingest   Ingest
+	DB       DB
+	Cache    Cache
+	Pipeline Pipeline
+	API      API
+	Log      Log
 }
 
 // Ingest configures the ingest driver and the log parser.
@@ -66,12 +64,6 @@ type Pipeline struct {
 	Workers int
 }
 
-// Enrichment configures the enrichment path: the Filter (the
-// enrichment.filter key) that gates it wholly (GLOSSARY: Filter).
-type Enrichment struct {
-	Filter domain.Matcher
-}
-
 // API configures the HTTP report API listener.
 type API struct {
 	Listen string
@@ -86,13 +78,12 @@ type Log struct {
 // raw config wire types (strict decode).
 
 type rawConfig struct {
-	Ingest     rawIngest     `yaml:"ingest"`
-	DB         rawDB         `yaml:"db"`
-	Cache      rawCache      `yaml:"cache"`
-	Pipeline   rawPipeline   `yaml:"pipeline"`
-	Enrichment rawEnrichment `yaml:"enrichment"`
-	API        rawAPI        `yaml:"api"`
-	Log        rawLog        `yaml:"log"`
+	Ingest   rawIngest   `yaml:"ingest"`
+	DB       rawDB       `yaml:"db"`
+	Cache    rawCache    `yaml:"cache"`
+	Pipeline rawPipeline `yaml:"pipeline"`
+	API      rawAPI      `yaml:"api"`
+	Log      rawLog      `yaml:"log"`
 }
 
 type rawIngest struct {
@@ -121,12 +112,6 @@ type rawCache struct {
 
 type rawPipeline struct {
 	Workers *int `yaml:"workers"`
-}
-
-// rawEnrichment is the whole enrichment block; absent, its filter
-// defaults to any like rules.
-type rawEnrichment struct {
-	Filter string `yaml:"filter"`
 }
 
 type rawAPI struct {
@@ -240,16 +225,5 @@ func validateConfig(raw rawConfig) (Config, error) {
 		}
 		cfg.Log.Level = level
 	}
-	// enrichment.filter gates the enrichment path wholly; it compiles
-	// with the rule filter language and defaults to any like rules.
-	expr := raw.Enrichment.Filter
-	if expr == "" {
-		expr = "any"
-	}
-	matcher, err := filter.Parse(expr)
-	if err != nil {
-		return Config{}, fmt.Errorf("config: enrichment.filter: %w", err)
-	}
-	cfg.Enrichment = Enrichment{Filter: matcher}
 	return cfg, nil
 }
