@@ -90,6 +90,7 @@ type rawFields struct {
 	Status fieldValue `json:"status"`
 	Sent   fieldValue `json:"sent"`
 	Clen   fieldValue `json:"clen"`
+	Crange fieldValue `json:"crange"`
 	Agent  fieldValue `json:"agent"`
 }
 
@@ -167,6 +168,15 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 		if ev.ContentLength, err = parseContentLength(raw); err != nil {
 			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
 		}
+	}
+
+	// crange is optional and parsed leniently: "bytes <a>-<b>/<total>"
+	// and "bytes */<total>" yield the file's total; a "*" total and
+	// anything unparsable yield 0 (no size information). Unusual
+	// Content-Range values never drop the line - they degrade. Header
+	// syntax stays here; the domain sees only the extracted total.
+	if raw = fields.Crange; raw.present && !isNull(raw) {
+		ev.ContentRangeTotal = parseContentRangeTotal(raw)
 	}
 
 	// agent is optional; when present it must be a string (null = absent).
@@ -323,6 +333,53 @@ func parseContentLength(v fieldValue) (int64, error) {
 		return 0, errors.New("must be non-negative")
 	}
 	return n, nil
+}
+
+// parseContentRangeTotal extracts the file's total size from the crange
+// field's Content-Range header value: "bytes <a>-<b>/<total>" and "bytes
+// */<total>" yield the total (the unit is case-insensitive per HTTP); a
+// "*" total and anything unparsable yield 0. Lenient by contract: no
+// value is ever invalid enough to drop the line.
+func parseContentRangeTotal(v fieldValue) int64 {
+	text := v.str
+	if !v.isStr {
+		text = string(v.raw)
+	}
+	const unit = "bytes "
+	if len(text) < len(unit) || !strings.EqualFold(text[:len(unit)], unit) {
+		return 0
+	}
+	span, total, ok := strings.Cut(text[len(unit):], "/")
+	if !ok {
+		return 0
+	}
+	if span != "*" {
+		lo, hi, ok := strings.Cut(span, "-")
+		if !ok {
+			return 0
+		}
+		if _, ok := parseSizeDigits(lo); !ok {
+			return 0
+		}
+		if _, ok := parseSizeDigits(hi); !ok {
+			return 0
+		}
+	}
+	n, ok := parseSizeDigits(total)
+	if !ok {
+		return 0
+	}
+	return n
+}
+
+// parseSizeDigits parses a non-negative decimal size (up to int64); empty,
+// signed, fractional and overflowing values fail.
+func parseSizeDigits(s string) (int64, bool) {
+	n, err := strconv.ParseUint(s, 10, 63)
+	if err != nil {
+		return 0, false
+	}
+	return int64(n), true
 }
 
 // parseTime parses the $msec time: Unix seconds with an optional
