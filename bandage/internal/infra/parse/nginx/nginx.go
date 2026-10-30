@@ -80,6 +80,15 @@ func isNull(v fieldValue) bool {
 	return v.present && !v.isStr && string(v.raw) == "null"
 }
 
+// text returns the member's value as text: the decoded string, or the
+// exact raw JSON bytes for other kinds.
+func (v fieldValue) text() string {
+	if v.isStr {
+		return v.str
+	}
+	return string(v.raw)
+}
+
 // rawFields holds the captured values of the known log fields; unknown and
 // reserved fields are never captured.
 type rawFields struct {
@@ -318,10 +327,7 @@ func parseInt(v fieldValue) (int64, error) {
 // number is accepted too. Empty means absent and only non-negative
 // integers are valid.
 func parseContentLength(v fieldValue) (int64, error) {
-	text := v.str
-	if !v.isStr {
-		text = string(v.raw)
-	}
+	text := v.text()
 	if text == "" {
 		return 0, nil
 	}
@@ -341,10 +347,7 @@ func parseContentLength(v fieldValue) (int64, error) {
 // "*" total and anything unparsable yield 0. Lenient by contract: no
 // value is ever invalid enough to drop the line.
 func parseContentRangeTotal(v fieldValue) int64 {
-	text := v.str
-	if !v.isStr {
-		text = string(v.raw)
-	}
+	text := v.text()
 	const unit = "bytes "
 	if len(text) < len(unit) || !strings.EqualFold(text[:len(unit)], unit) {
 		return 0
@@ -385,10 +388,7 @@ func parseSizeDigits(s string) (int64, bool) {
 // parseTime parses the $msec time: Unix seconds with an optional
 // fraction, as a JSON string or JSON number. The fraction is kept.
 func parseTime(v fieldValue) (time.Time, error) {
-	text := v.str
-	if !v.isStr {
-		text = string(v.raw)
-	}
+	text := v.text()
 	if text == "" || strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") {
 		return time.Time{}, errors.New("must be Unix seconds with fraction")
 	}
