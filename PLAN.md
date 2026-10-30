@@ -263,6 +263,10 @@ cache:
 pipeline:
   workers: 4                   # worker goroutines (default: CPU count, min 1)
 
+enrichment:
+  filter: any                  # rule-filter expression gating enrichment wholly (default any;
+                               # unmatched events get default derived fields and touch no state)
+
 api:
   listen: 127.0.0.1:8080
 
