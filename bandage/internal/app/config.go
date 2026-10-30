@@ -242,14 +242,14 @@ func validateConfig(raw rawConfig) (Config, error) {
 	}
 	// enrichment.filter gates the enrichment path wholly; it compiles
 	// with the rule filter language and defaults to any like rules.
-	flt := raw.Enrichment.Filter
-	if flt == "" {
-		flt = "any"
+	expr := raw.Enrichment.Filter
+	if expr == "" {
+		expr = "any"
 	}
-	parsed, err := filter.Parse(flt)
+	matcher, err := filter.Parse(expr)
 	if err != nil {
 		return Config{}, fmt.Errorf("config: enrichment.filter: %w", err)
 	}
-	cfg.Enrichment = Enrichment{Filter: parsed}
+	cfg.Enrichment = Enrichment{Filter: matcher}
 	return cfg, nil
 }

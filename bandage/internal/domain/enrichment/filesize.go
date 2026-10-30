@@ -56,7 +56,7 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*Fi
 // Content-Range total; ineligible events add no observation but are still
 // enriched with the current estimate.
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) error {
-	obs, ok := observation(event)
+	obs, ok := sizeObservation(event)
 	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
 		if !ok {
 			return // ineligible: read the record, observe nothing
@@ -82,14 +82,14 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) err
 	return nil
 }
 
-// observation reports the event's size observation under the Sampling
-// rule (GLOSSARY): GET/HEAD 200 responses carrying a Content-Length
+// sizeObservation reports the event's size observation under the
+// Sampling rule (GLOSSARY): GET/HEAD 200 responses carrying a Content-Length
 // observe the Content-Length; GET 206 responses carrying a usable
 // Content-Range total observe that total and never their
 // Content-Length. Transferred bytes, 304 revalidations, length-less
 // responses, headerless or "*"-total ranges, 416 and error bodies never
 // observe, whatever else admits an event.
-func observation(event *domain.Event) (int64, bool) {
+func sizeObservation(event *domain.Event) (int64, bool) {
 	switch {
 	case event.Status == 200 && (event.Method == "GET" || event.Method == "HEAD") && event.ContentLength > 0:
 		return event.ContentLength, true
