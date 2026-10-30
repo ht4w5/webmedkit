@@ -555,6 +555,27 @@ func TestPlanFoldsTheEffectiveRules(t *testing.T) {
 			t.Errorf("scopes hash identically (%x) with no effective rules: the scope fold must be global", before)
 		}
 	})
+
+	t.Run("scopes differing only across the protocol and port boundary hash differently", func(t *testing.T) {
+		// The hash is insensitive to nothing: l4proto=tcp dport=17 and
+		// l4proto=tcp,udp (all ports) are different scopes, and a scope
+		// edit between them must re-enforce — the protocol and port
+		// groups must never fold into each other.
+		rules := []firewall.BanRule{dropFixture("203.0.113.7/32")}
+		tcpThenPort := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP}, Ports: []uint16{17}}, Scope{}, kernel), rules)
+		tcpUdp := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}}, Scope{}, kernel), rules)
+		if tcpThenPort == tcpUdp {
+			t.Errorf("l4proto=tcp,dport=17 and l4proto=tcp,udp hash identically (%x): the protocol and port groups must never fold into each other", tcpThenPort)
+		}
+		// One port sliding on into the protocol list: the flat fields
+		// agree, so only the group boundary distinguishes
+		// l4proto=tcp dport=17,6 from l4proto=tcp,udp dport=6.
+		tcpPortTwo := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP}, Ports: []uint16{17, 6}}, Scope{}, kernel), rules)
+		tcpUdpPortOne := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}, Ports: []uint16{6}}, Scope{}, kernel), rules)
+		if tcpPortTwo == tcpUdpPortOne {
+			t.Errorf("l4proto=tcp,dport=17,6 and l4proto=tcp,udp,dport=6 hash identically (%x): the protocol and port groups must never fold into each other", tcpPortTwo)
+		}
+	})
 }
 
 func TestApplySkipsWhenUnchanged(t *testing.T) {

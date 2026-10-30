@@ -191,7 +191,7 @@ the report document's canonical example (docs/reports.md) prints:
 scope=ingress l4proto=tcp,udp dport=all daddr=all
 scope=egress l4proto=tcp,udp sport=all saddr=all
 stance=limit-bandwidth rate=1000000 placement=egress@output
-hash=bd2ea500
+hash=11a54eb2
 ```
 
 A document whose second Report carries a request-rate Penalty and
@@ -218,7 +218,7 @@ scope=ingress l4proto=tcp,udp dport=all daddr=all
 scope=egress l4proto=tcp,udp sport=all saddr=all
 stance=drop rate=- placement=ingress@input
 declined rule=1 feature=limit-req-rate reason=application-layer intent; never faked at the packet layer
-hash=9a9afc84
+hash=329a9886
 ```
 
 ```text
@@ -253,13 +253,13 @@ scope=ingress l4proto=tcp,udp dport=all daddr=all
 scope=egress l4proto=tcp,udp sport=all saddr=all
 stance=drop rate=- placement=ingress@input
 declined rule=1 feature=limit-req-rate reason=application-layer intent; never faked at the packet layer
-hash=9a9afc84
+hash=329a9886
 point=/run/netns/b
 scope=ingress l4proto=tcp,udp dport=all daddr=all
 scope=egress l4proto=tcp,udp sport=all saddr=all
 stance=drop rate=- placement=ingress@input
 declined rule=1 feature=limit-req-rate reason=application-layer intent; never faked at the packet layer
-hash=9a9afc84
+hash=329a9886
 ```
 
 Verify before enforcing: check that every Penalty in the document
@@ -465,7 +465,7 @@ scope=ingress l4proto=tcp,udp dport=443 daddr=203.0.113.10/32
 scope=egress l4proto=tcp,udp sport=8443 saddr=172.17.0.2/32
 stance=drop rate=- placement=ingress@prerouting
 stance=limit-bandwidth rate=1000000 placement=egress@forward
-hash=3d546a4b
+hash=cd035906
 ```
 
 The plan is self-contained: `scope=ingress` names the pre-translation
@@ -636,16 +636,16 @@ came back with one more `drop` Report, and SIGTERM ended the run):
 
 ```text
 INF compiled ban rules reports=2 rules=2 skipped=0
-INF installed ban rules declined=1 hash=9a9afc84 point=current rules=2
+INF installed ban rules declined=1 hash=329a9886 point=current rules=2
 WRN declined ban rule feature feature=limit-req-rate point=current reason="application-layer intent; never faked at the packet layer" rule=1
 INF startup test install ok
 ERR update failed; keeping last installed rules error="fetch: Get \"http://127.0.0.1:18090/reports\": dial tcp 127.0.0.1:18090: connect: connection refused"
 INF compiled ban rules reports=3 rules=2 skipped=0
 INF ban rule hit in the replaced ruleset bytes=2280 packets=10 point=current rule=0
-INF installed ban rules declined=1 hash=b0b5ef56 point=current rules=2
+INF installed ban rules declined=1 hash=96ce7fd4 point=current rules=2
 WRN declined ban rule feature feature=limit-req-rate point=current reason="application-layer intent; never faked at the packet layer" rule=1
 INF compiled ban rules reports=3 rules=2 skipped=0
-INF ban rules unchanged; skipping install hash=b0b5ef56 point=current
+INF ban rules unchanged; skipping install hash=96ce7fd4 point=current
 WRN declined ban rule feature feature=limit-req-rate point=current reason="application-layer intent; never faked at the packet layer" rule=1
 INF reset and exit
 ```

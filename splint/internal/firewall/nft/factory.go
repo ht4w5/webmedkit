@@ -19,14 +19,9 @@ import (
 // and opens its own surface.
 type Factory struct {
 	// The bound flag values, resolved by Validate.
-	hook          string
-	netns         []string
-	ingressAddrs  []string
-	ingressPorts  []string
-	ingressProtos []string
-	egressAddrs   []string
-	egressPorts   []string
-	egressProtos  []string
+	hook                      string
+	netns                     []string
+	ingressFlags, egressFlags scopeFlags
 
 	// The validated hook and enforcement scopes Open builds its
 	// drivers with.
@@ -35,10 +30,27 @@ type Factory struct {
 	egress    Scope
 }
 
+// scopeFlags is one direction's bound enforcement-scope flag surface:
+// the three value lists and the three flag names travel together from
+// the bind to the validation — the names are what refused-value
+// errors quote.
+type scopeFlags struct {
+	protos, ports, addrs          []string
+	protoFlag, portFlag, addrFlag string
+}
+
 var _ firewall.Factory = (*Factory)(nil)
 
 func NewFactory() *Factory {
-	return &Factory{hook: string(HookInput)}
+	return &Factory{
+		hook: string(HookInput),
+		ingressFlags: scopeFlags{
+			protoFlag: "--nft-ingress-l4proto", portFlag: "--nft-ingress-dport", addrFlag: "--nft-ingress-daddr",
+		},
+		egressFlags: scopeFlags{
+			protoFlag: "--nft-egress-l4proto", portFlag: "--nft-egress-sport", addrFlag: "--nft-egress-saddr",
+		},
+	}
 }
 
 // Name is the driver's registry name — the --firewall value that
@@ -55,12 +67,12 @@ func (f *Factory) BindFlags(fs *flag.FlagSet) {
 	// destination fields, the egress scope at the source fields. All
 	// values take comma lists or repeats; protocols default to
 	// tcp,udp (ADR 0018).
-	fs.StringSliceVar(&f.ingressAddrs, "nft-ingress-daddr", nil, "ingress scope destination address or prefix (comma list or repeatable; default: all)")
-	fs.StringSliceVar(&f.ingressPorts, "nft-ingress-dport", nil, "ingress scope destination port 1-65535 (comma list or repeatable; default: all)")
-	fs.StringSliceVar(&f.ingressProtos, "nft-ingress-l4proto", []string{"tcp", "udp"}, "ingress scope transport protocol: tcp or udp (comma list or repeatable)")
-	fs.StringSliceVar(&f.egressAddrs, "nft-egress-saddr", nil, "egress scope source address or prefix (comma list or repeatable; default: all)")
-	fs.StringSliceVar(&f.egressPorts, "nft-egress-sport", nil, "egress scope source port 1-65535 (comma list or repeatable; default: all)")
-	fs.StringSliceVar(&f.egressProtos, "nft-egress-l4proto", []string{"tcp", "udp"}, "egress scope transport protocol: tcp or udp (comma list or repeatable)")
+	fs.StringSliceVar(&f.ingressFlags.addrs, "nft-ingress-daddr", nil, "ingress scope destination address or prefix (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.ingressFlags.ports, "nft-ingress-dport", nil, "ingress scope destination port 1-65535 (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.ingressFlags.protos, "nft-ingress-l4proto", []string{"tcp", "udp"}, "ingress scope transport protocol: tcp or udp (comma list or repeatable)")
+	fs.StringSliceVar(&f.egressFlags.addrs, "nft-egress-saddr", nil, "egress scope source address or prefix (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.egressFlags.ports, "nft-egress-sport", nil, "egress scope source port 1-65535 (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.egressFlags.protos, "nft-egress-l4proto", []string{"tcp", "udp"}, "egress scope transport protocol: tcp or udp (comma list or repeatable)")
 }
 
 func (f *Factory) Validate() error {
@@ -76,13 +88,11 @@ func (f *Factory) Validate() error {
 			return fmt.Errorf("netns: duplicate namespace path %q", path)
 		}
 	}
-	ingress, err := parseScope(f.ingressProtos, f.ingressPorts, f.ingressAddrs,
-		"--nft-ingress-l4proto", "--nft-ingress-dport", "--nft-ingress-daddr")
+	ingress, err := parseScope(f.ingressFlags)
 	if err != nil {
 		return err
 	}
-	egress, err := parseScope(f.egressProtos, f.egressPorts, f.egressAddrs,
-		"--nft-egress-l4proto", "--nft-egress-sport", "--nft-egress-saddr")
+	egress, err := parseScope(f.egressFlags)
 	if err != nil {
 		return err
 	}
@@ -95,16 +105,16 @@ func (f *Factory) Validate() error {
 // overlapping address prefixes are refused as ambiguous. Refused
 // values fail before anything is enforced, each error naming its flag
 // and the offending value.
-func parseScope(protos, ports, addrs []string, protoFlag, portFlag, addrFlag string) (Scope, error) {
+func parseScope(flags scopeFlags) (Scope, error) {
 	var scope Scope
 	var err error
-	if scope.L4Protos, err = parseL4Protos(protoFlag, protos); err != nil {
+	if scope.L4Protos, err = parseL4Protos(flags.protoFlag, flags.protos); err != nil {
 		return Scope{}, err
 	}
-	if scope.Ports, err = parsePorts(portFlag, ports); err != nil {
+	if scope.Ports, err = parsePorts(flags.portFlag, flags.ports); err != nil {
 		return Scope{}, err
 	}
-	if scope.Addrs, err = parseAddrs(addrFlag, addrs); err != nil {
+	if scope.Addrs, err = parseAddrs(flags.addrFlag, flags.addrs); err != nil {
 		return Scope{}, err
 	}
 	// Duplicate values — within one comma list, across repeats, or a
@@ -122,7 +132,7 @@ func parseScope(protos, ports, addrs []string, protoFlag, portFlag, addrFlag str
 	for i, a := range scope.Addrs {
 		for _, b := range scope.Addrs[i+1:] {
 			if a.Overlaps(b) {
-				return Scope{}, fmt.Errorf("%s: overlapping address prefixes (got %q and %q)", addrFlag, a, b)
+				return Scope{}, fmt.Errorf("%s: overlapping address prefixes (got %q and %q)", flags.addrFlag, a, b)
 			}
 		}
 	}
