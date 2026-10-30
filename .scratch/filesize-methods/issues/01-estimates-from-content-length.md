@@ -14,14 +14,17 @@ replay tolerance stops shrinking on ordinary cached browsing.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The bandage nginx log format carries the response `Content-Length` as `clen`; old flux-format lines without it keep parsing unchanged
-- [ ] Events carry the parsed response length; absent, empty or zero means "no size information"
-- [ ] A negative or non-numeric `clen` is an invalid field: the line is dropped and counted, like `sent`
-- [ ] Observations come only from GET/HEAD 200 events with a response length (the Sampling rule) - never from transferred bytes, `304`, length-less `HEAD`, `206`, or error statuses, whatever else admits an event
-- [ ] Events that are not observation-eligible (e.g. chunked responses without a length) are enriched with the current estimate and add no observation, so chunked downloads stay inside replay accounting
-- [ ] The EWMA math, exact seeding and the warm-up gate are unchanged - the enricher's existing table tests pass re-pinned to response-size observations
-- [ ] End-to-end: raw log lines through parse, enrich and evaluate yield the expected derived sizes and replay outcomes; pipeline benchmarks show no regression
+- [x] The bandage nginx log format carries the response `Content-Length` as `clen`; old flux-format lines without it keep parsing unchanged
+- [x] Events carry the parsed response length; absent, empty or zero means "no size information"
+- [x] A negative or non-numeric `clen` is an invalid field: the line is dropped and counted, like `sent`
+- [x] Observations come only from GET/HEAD 200 events with a response length (the Sampling rule) - never from transferred bytes, `304`, length-less `HEAD`, `206`, or error statuses, whatever else admits an event
+- [x] Events that are not observation-eligible (e.g. chunked responses without a length) are enriched with the current estimate and add no observation, so chunked downloads stay inside replay accounting
+- [x] The EWMA math, exact seeding and the warm-up gate are unchanged - the enricher's existing table tests pass re-pinned to response-size observations
+- [x] End-to-end: raw log lines through parse, enrich and evaluate yield the expected derived sizes and replay outcomes; pipeline benchmarks show no regression
 
+Implemented on integration branch `feat/filesize-methods` (merge commit
+`d16d97c`; cross-ticket code-review fixes through `4299be9`, incl. the
+shared `fieldValue.text()` coercion and the dropped `Enrichment.FilterSource`).
 Context: spec `../spec.md` (Implementation Decisions 1, 3-4).
