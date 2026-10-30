@@ -52,8 +52,9 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*Fi
 // Enrich sets event.SizeBytes from the path's estimate: the estimate from
 // sample minSamples on (the Nth observation included), else FilesizeUnknown.
 // The Sampling rule (GLOSSARY) is hard-coded and admits only GET/HEAD 200
-// events carrying a Content-Length; ineligible events add no observation
-// but are still enriched with the current estimate.
+// events carrying a Content-Length and GET 206 events carrying a usable
+// Content-Range total; ineligible events add no observation but are still
+// enriched with the current estimate.
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) error {
 	obs, ok := observation(event)
 	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
@@ -82,13 +83,18 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) err
 }
 
 // observation reports the event's size observation under the Sampling
-// rule (GLOSSARY): only GET or HEAD 200 responses carrying a
-// Content-Length feed the estimate. Transferred bytes, 304
-// revalidations, length-less responses, range responses and error
-// bodies never observe, whatever else admits an event.
+// rule (GLOSSARY): GET/HEAD 200 responses carrying a Content-Length
+// observe the Content-Length; GET 206 responses carrying a usable
+// Content-Range total observe that total and never their
+// Content-Length. Transferred bytes, 304 revalidations, length-less
+// responses, headerless or "*"-total ranges, 416 and error bodies never
+// observe, whatever else admits an event.
 func observation(event *domain.Event) (int64, bool) {
-	if event.Status == 200 && (event.Method == "GET" || event.Method == "HEAD") && event.ContentLength > 0 {
+	switch {
+	case event.Status == 200 && (event.Method == "GET" || event.Method == "HEAD") && event.ContentLength > 0:
 		return event.ContentLength, true
+	case event.Status == 206 && event.Method == "GET" && event.ContentRangeTotal > 0:
+		return event.ContentRangeTotal, true
 	}
 	return 0, false
 }

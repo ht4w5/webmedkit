@@ -81,6 +81,15 @@ func nginxLineClen(t, client, method, path string, status int, sent int64, clen 
 		t, client, method, path, status, sent, clen)
 }
 
+// nginxLineCrange builds one raw line in the current bandage log format:
+// nginxLineClen plus the response Content-Range field. crange is the
+// rendered $sent_http_content_range content ("" when the header was not
+// sent; a range response carries "bytes <a>-<b>/<total>").
+func nginxLineCrange(t, client, method, path string, status int, sent int64, clen, crange string) string {
+	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"clen":%q,"crange":%q}`,
+		t, client, method, path, status, sent, clen, crange)
+}
+
 // testDaemon bundles a running daemon with a raw-line sender and captured
 // log records.
 type testDaemon struct {
@@ -2302,14 +2311,15 @@ chains:
 }
 
 // TestE2ESizeSamplingRuleAdmitRejectTable pins the Sampling rule at the
-// pipeline: only GET/HEAD 200 responses carrying a Content-Length feed
-// the estimate; every other shape is still enriched with the current
-// estimate and counted by replay, but adds no observation. The warm-up
-// leaves /f at size 1000; two loud probes of the row's shape move it one
-// EWMA step each when admitted (1000 -> 1600 -> 2080), and two big
-// chunked transfers close the row - length-less, they add no observation,
-// but each counts as a full download equivalent and overflows volume 2
-// when the probes did not.
+// pipeline: only GET/HEAD 200 responses carrying a Content-Length and
+// GET 206 responses carrying a usable Content-Range total feed the
+// estimate (a 206 observes only its total, never its Content-Length);
+// every other shape is still enriched with the current estimate and
+// counted by replay, but adds no observation. The warm-up leaves /f at
+// size 1000; two loud probes of the row's shape move it one EWMA step
+// each when admitted, and two big chunked transfers close the row -
+// length-less, they add no observation, but each counts as a full
+// download equivalent and overflows volume 2 when the probes did not.
 func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2317,16 +2327,20 @@ func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
 		status   int
 		sent     int64
 		clen     string
+		crange   string
 		wantSize int64
 	}{
-		{"GET 200 observes the response length", "GET", 200, 4000, "4000", 2080},
-		{"HEAD 200 observes the response length", "HEAD", 200, 0, "4000", 2080},
-		{"304 revalidations never observe", "GET", 304, 0, "4000", 1000},
-		{"length-less HEAD never observes", "HEAD", 200, 0, "", 1000},
-		{"chunked 200 bodies never observe", "GET", 200, 4000, "", 1000},
-		{"206 range responses never observe", "GET", 206, 4000, "4000", 1000},
-		{"error bodies never observe", "GET", 404, 4000, "4000", 1000},
-		{"non-GET/HEAD never observes", "POST", 200, 4000, "4000", 1000},
+		{"GET 200 observes the response length", "GET", 200, 4000, "4000", "", 2080},
+		{"HEAD 200 observes the response length", "HEAD", 200, 0, "4000", "", 2080},
+		{"304 revalidations never observe", "GET", 304, 0, "4000", "bytes 0-3999/4000", 1000},
+		{"length-less HEAD never observes", "HEAD", 200, 0, "", "", 1000},
+		{"chunked 200 bodies never observe", "GET", 200, 4000, "", "", 1000},
+		{"206 observes the Content-Range total, never its Content-Length", "GET", 206, 4000, "4000", "bytes 0-3999/5000", 2440},
+		{"206 without a usable total never observes", "GET", 206, 4000, "4000", "", 1000},
+		{"206 with a * total never observes", "GET", 206, 4000, "4000", "bytes 0-3999/*", 1000},
+		{"416 never observes its Content-Range total", "GET", 416, 4000, "", "bytes */4000", 1000},
+		{"error bodies never observe", "GET", 404, 4000, "4000", "bytes 0-3999/4000", 1000},
+		{"non-GET/HEAD never observes", "POST", 200, 4000, "4000", "bytes 0-3999/4000", 1000},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2347,7 +2361,7 @@ chains:
 				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
 			}
 			for i := 0; i < 2; i++ {
-				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen))
+				d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen, tt.crange))
 			}
 			for i := 0; i < 2; i++ {
 				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345941+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
@@ -2366,6 +2380,90 @@ chains:
 				t.Errorf("sample size = %d, want %d", r.Sample.Size, tt.wantSize)
 			}
 		})
+	}
+}
+
+// TestE2EResumedDownloadAccumulatesTrueFractions: range transfers size
+// the download by the Content-Range total and count as their true
+// fraction of a download toward replay - a resumable download across
+// several range transfers accumulates exactly one download-equivalent
+// instead of one per request - and the tolerated volume derives from
+// the exact total (step volume: the 1000-byte file sits on the high
+// rung where a 250-byte transferred chunk would not).
+func TestE2EResumedDownloadAccumulatesTrueFractions(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker:
+          track: replay
+          leak: 0
+          volume: {method: step, threshold: 500, volume_low: 1, volume_high: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+	// sendRange is one 250-byte range transfer of the 1000-byte /iso.
+	ranges := [4]string{"bytes 0-249/1000", "bytes 250-499/1000", "bytes 500-749/1000", "bytes 750-999/1000"}
+	sendRange := func(seq, i int) {
+		d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345934+seq), "203.0.113.7", "GET", "/iso", 206, 250, "250", ranges[i]))
+	}
+
+	// The first download's four range transfers warm the estimate to the
+	// exact total 1000 (observations are the totals), but are blind to
+	// replay and add nothing.
+	for i := range ranges {
+		sendRange(i, i)
+	}
+	d.waitProcessed(t, 4)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports during warm-up = %+v, want none (replay is blind until the estimate warms)", doc.Reports)
+	}
+
+	// The second (resumed) download again spans four range transfers:
+	// the fifth event crosses the warm-up gate, and the four together
+	// accumulate exactly 4 x 0.25 = one download-equivalent.
+	for i := range ranges {
+		sendRange(4+i, i)
+	}
+	d.waitProcessed(t, 8)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports after one resumed download = %+v, want none (one download totals one download-equivalent, not one per request)", doc.Reports)
+	}
+
+	// A third full download accumulates one more: value 2.0 still sits
+	// at its tolerance, so no report yet.
+	for i := range ranges {
+		sendRange(8+i, i)
+	}
+	d.waitProcessed(t, 12)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports at value 2.0 = %+v, want none (2.0 does not exceed the tolerance 2)", doc.Reports)
+	}
+
+	// The fourth download's first chunk pushes 2.25 past the tolerance.
+	sendRange(12, 0)
+	d.waitProcessed(t, 13)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.Tracker.Value != 2.25 {
+		t.Errorf("tracker value = %v, want 2.25 (nine counted quarters: the resumed downloads' true fractions)", r.Tracker.Value)
+	}
+	if r.Tracker.Volume != 2 {
+		t.Errorf("tracker volume = %v, want 2 (volume_high at the exact total 1000, not at the 250-byte chunk)", r.Tracker.Volume)
+	}
+	if r.Sample.Size != 1000 {
+		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.Size)
+	}
+	if r.Sample.Sent != 250 {
+		t.Errorf("sample sent = %d, want 250", r.Sample.Sent)
 	}
 }
 
@@ -2390,6 +2488,31 @@ func TestE2EMalformedClenDroppedAndCounted(t *testing.T) {
 	}
 	if stats.Parsed != 1 {
 		t.Errorf("stats parsed = %d, want 1", stats.Parsed)
+	}
+}
+
+// TestE2EUnusualContentRangeKeptAsNormalTraffic: unusual Content-Range
+// values degrade to "no size information" instead of invalidating the
+// line - the events parse, count as normal traffic and never reach the
+// drop counter.
+func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes 0-499/*"}`)
+	d.send(`{"time":"1734345935","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes weird"}`)
+	d.send(`{"time":"1734345936","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":10,"clen":"10","crange":"not a range"}`)
+	d.waitProcessed(t, 3)
+
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("reports = %+v, want none", doc.Reports)
+	}
+	stats := d.counters()
+	if stats.Dropped != 0 {
+		t.Errorf("stats dropped = %d, want 0 (unusual Content-Range values never drop the line)", stats.Dropped)
+	}
+	if stats.Parsed != 3 {
+		t.Errorf("stats parsed = %d, want 3 (the lines count as normal traffic)", stats.Parsed)
 	}
 }
 
