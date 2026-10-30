@@ -38,9 +38,8 @@ type Stub struct {
 	// Placement is the placement label every planned rule carries.
 	Placement string
 
-	// Scopes, when set before use, are the effective enforcement scope
-	// lines every plan reports — one already-formatted line per
-	// direction, printed by the engine and never parsed.
+	// Scopes, when set before use, are the enforcement scope lines
+	// every plan reports — one pre-formatted line per direction.
 	Scopes []string
 
 	mu      sync.Mutex

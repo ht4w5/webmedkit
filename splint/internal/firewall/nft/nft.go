@@ -86,22 +86,17 @@ type Driver struct {
 
 var _ firewall.Driver = (*Driver)(nil)
 
-// Scope is one direction's enforcement scope: the transport
-// protocols, ports and addresses its ban rules match at the service
-// end of the conversation — the destination fields in the ingress
-// scope, the source fields in the egress scope. An empty Ports or
-// Addrs matches all; an empty L4Protos is the tcp,udp default, so an
-// unscoped ban covers tcp and udp traffic only. Scope is driver
-// configuration, folded into the ruleset hash (ADR 0018), so
-// changing it re-enforces.
+// Scope is one direction's enforcement scope: the protocols, ports and
+// addresses its ban rules match at the service end — destination fields
+// on ingress, source fields on egress. Empty Ports or Addrs match all;
+// empty L4Protos is the tcp,udp default (unscoped bans: tcp, udp only).
+// Scope folds into the ruleset hash (ADR 0018), so changing it re-enforces.
 type Scope struct {
 	L4Protos []byte // IP protocol numbers: tcp (6) and udp (17)
 	Ports    []uint16
 	Addrs    []netip.Prefix
 }
 
-// l4protos is the scope's protocol gate: its configured protocols,
-// the tcp/udp default when unconfigured.
 func (s Scope) l4protos() []byte {
 	if len(s.L4Protos) == 0 {
 		return []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}
@@ -109,12 +104,8 @@ func (s Scope) l4protos() []byte {
 	return s.L4Protos
 }
 
-// fields encodes the scope's protocol gate, ports and addresses for
-// the ruleset hash. The hash fold delimits between fields, not
-// between groups, so each group leads with a StringField marker (the
-// PlannedRule fields' string-marker convention): a value can never
-// slide across a group boundary — l4proto=tcp dport=17 and
-// l4proto=tcp,udp are different scopes and fold to different hashes.
+// fields encodes the scope for the ruleset hash; each group leads
+// with a StringField marker so no value slides across a group boundary.
 func (s Scope) fields() [][]byte {
 	protos := s.l4protos()
 	fields := make([][]byte, 0, len(protos)+len(s.Ports)+len(s.Addrs)+3)
@@ -133,10 +124,8 @@ func (s Scope) fields() [][]byte {
 	return fields
 }
 
-// Config is one enforcement point's configuration: hook, the ingress
-// scope and the egress scope (one scope pair shared by all
-// enforcement points of an instance), and target namespace nsfs
-// handle path ("" is the current namespace).
+// Config is one enforcement point's configuration: hook, the shared
+// ingress and egress scopes, and the nsfs path ("" is the current namespace).
 type Config struct {
 	Hook      Hook
 	Ingress   Scope
@@ -160,11 +149,8 @@ type kernelConn interface {
 
 var _ kernelConn = (*nftables.Conn)(nil)
 
-// New builds a driver for one enforcement point: one target
-// namespace, one enforcement hook, and the ingress and egress scopes
-// shared by the instance. The nsfs handle is re-opened on every
-// apply/reset so a recreated container is picked up through its
-// stable handle.
+// New builds a driver for one enforcement point. The nsfs handle re-opens on
+// every apply/reset, picking up a recreated container through its stable handle.
 func New(cfg Config) (*Driver, error) {
 	if !cfg.Hook.valid() {
 		return nil, fmt.Errorf("hook: must be input or prerouting (got %q)", cfg.Hook)
@@ -221,10 +207,9 @@ func tableExists(conn kernelConn, table *nftables.Table) (bool, error) {
 // the effective rules (the ban rules it can honour, narrowed to the
 // target prefixes that reach their address families), their
 // placement labels (a change of --hook is a change of effective
-// rules), each direction's effective enforcement scope as one
-// already-formatted line, the ruleset hash, and the declines with
-// reasons. --dry-run prints exactly this. A ban rule neither
-// honourable nor declinable refuses the plan loudly.
+// rules), each direction's scope line, the ruleset hash, and the
+// declines with reasons. --dry-run prints exactly this. A ban rule
+// neither honourable nor declinable refuses the plan loudly.
 func (d *Driver) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
 	plan := firewall.Plan{Scopes: []string{
 		banDirection{name: ingressName, scope: d.ingressScope}.scopeLine(),
@@ -250,9 +235,8 @@ func (d *Driver) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
 		}
 		fams := ruleFamilies(r, dir.scope)
 		if len(fams) == 0 {
-			// The direction's enforcement scope cannot reach the ban rule
-			// at all: declined loudly with a reason — a vanishing ban rule
-			// would leave "why isn't this banned?" unanswerable.
+			// Declined with a reason — a vanishing ban rule would leave
+			// "why isn't this banned?" unanswerable.
 			plan.Declined = append(plan.Declined, firewall.Decline{
 				Rule:    i,
 				Feature: string(r.Stance),
@@ -271,10 +255,8 @@ func (d *Driver) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
 	return plan, nil
 }
 
-// hashEffective folds the ruleset hash: both enforcement scopes
-// once, globally — so a change to either scope re-enforces even when
-// the plan carries no effective rules — then each effective rule's
-// targets, stance, rate and placement label.
+// hashEffective folds the ruleset hash: both scopes once, globally —
+// a scope change re-enforces even with no effective rules — then each rule.
 func (d *Driver) hashEffective(rules []firewall.PlannedRule) uint32 {
 	h := firewall.NewHasher()
 	h.Step(d.ingressScope.fields()...)
@@ -324,21 +306,16 @@ func directionOf(s firewall.Stance) (name string, matchDst bool, err error) {
 	return "", false, fmt.Errorf("stance %q: not supported", s)
 }
 
-// banDirection is one ban direction with that direction's enforcement
-// scope and the packet fields the scope matches: the service end of
-// the conversation — destination fields on ingress, source fields on
-// egress. It also names the per-rule scope sets, so every scope set
-// says which direction's view it encodes.
+// banDirection pairs a ban direction with its enforcement scope and
+// its direction-prefixed per-rule scope set names.
 type banDirection struct {
 	name     string
 	matchDst bool
 	scope    Scope
 }
 
-// direction resolves a stance's ban direction with its enforcement
-// scope: the ingress scope rules the ingress chain's stances, the
-// egress scope the egress chain's — one direction's scope never
-// constrains the other direction's rules.
+// direction resolves a stance's ban direction with its own scope —
+// one direction's scope never constrains the other direction's rules.
 func (d *Driver) direction(s firewall.Stance) (banDirection, error) {
 	name, matchDst, err := directionOf(s)
 	if err != nil {
@@ -361,8 +338,7 @@ func (b banDirection) targetOff(f addrFamily) uint32 {
 }
 
 // scopeOff is the network-header offset the scope's addresses load:
-// the scope matches the service end of the conversation — the
-// destination on ingress, the source on egress.
+// the service end — destination on ingress, source on egress.
 func (b banDirection) scopeOff(f addrFamily) uint32 {
 	if b.matchDst {
 		return f.srcOff
@@ -379,12 +355,8 @@ func (b banDirection) portOff() uint32 {
 	return dportOff
 }
 
-// scopeLine formats the direction's effective enforcement scope as
-// one already-formatted --dry-run line: the scope's field names (the
-// flag names' tail — dport/daddr on ingress, sport/saddr on egress),
-// the effective protocol gate (the tcp,udp default included), and
-// "all" where the scope matches every port or address. Opaque above
-// the driver: the engine prints the line and never parses it.
+// scopeLine formats the direction's scope as its one --dry-run line,
+// named after the flag names' tail: dport/daddr vs sport/saddr.
 func (b banDirection) scopeLine() string {
 	portField, addrField := "dport", "daddr"
 	if b.matchDst {
@@ -400,8 +372,6 @@ func (b banDirection) scopeLine() string {
 		b.name, strings.Join(protos, ","), portField, ports, addrField, addrs)
 }
 
-// allOrList renders one scope-line value group as its comma list —
-// "all" where an empty list matches every value of the kind.
 func allOrList[T any](values []T, name func(T) string) string {
 	if len(values) == 0 {
 		return "all"
@@ -413,8 +383,6 @@ func allOrList[T any](values []T, name func(T) string) string {
 	return strings.Join(parts, ",")
 }
 
-// protoName names a scope protocol for the scope line: the well-known
-// tcp and udp names, the protocol number otherwise.
 func protoName(p byte) string {
 	switch p {
 	case unix.IPPROTO_TCP:
@@ -425,10 +393,8 @@ func protoName(p byte) string {
 	return strconv.Itoa(int(p))
 }
 
-// The per-ban-rule scope set names, field-named per direction: il4/
-// idp/ida for the ingress scope's l4proto/dport/daddr, el4/esp/esa
-// for the egress scope's l4proto/sport/saddr. The ban-rule index
-// stays in every name — it is what the counter read-back parses.
+// The per-ban-rule scope set names: il4/idp/ida (ingress) and
+// el4/esp/esa (egress); the index suffix is what ruleIndex parses.
 func (b banDirection) protoSet(i int) string {
 	if b.matchDst {
 		return fmt.Sprintf("el4_%d", i)
@@ -444,9 +410,9 @@ func (b banDirection) portSet(i int) string {
 }
 
 func (b banDirection) addrSet(f addrFamily, i int) string {
-	kind := "ida" // ingress scope: destination address
+	kind := "ida"
 	if b.matchDst {
-		kind = "esa" // egress scope: source address
+		kind = "esa"
 	}
 	// f.name is "v4"/"v6"; the set name wants its digit.
 	return fmt.Sprintf("%s%s_%d", kind, f.name[1:], i)
@@ -668,8 +634,7 @@ type addrFamily struct {
 }
 
 // The two families an inet table covers. Set names carry the ban
-// rule's index (parsed back by ruleIndex); the scope sets are named
-// per direction (see banDirection's set names).
+// rule's index (parsed back by ruleIndex).
 var families = []addrFamily{
 	{
 		name:    "v4",
@@ -693,9 +658,8 @@ var families = []addrFamily{
 	},
 }
 
-// The transport-header offsets of a TCP/UDP port. The scope's port
-// is one conversation's two packet views: the request direction's
-// destination port, the response direction's source port.
+// The transport-header offsets of a TCP/UDP port: one conversation's
+// two views — dport in the request direction, sport in the response.
 const (
 	sportOff = 0
 	dportOff = 2
@@ -707,12 +671,8 @@ type familyRule struct {
 	scopeAddrs []netip.Prefix
 }
 
-// ruleFamilies splits one ban rule per address family the installing
-// direction's enforcement scope can reach: a family with no target
-// prefix is out, as is one where the scope's addresses match none (no
-// service traffic of that family lives in the scope). All out means
-// the ban rule installs nothing — the reach of one direction's scope
-// is decided by that scope alone.
+// ruleFamilies splits one ban rule per family the scope can reach:
+// no target prefix or no matching scope addresses means the family is out.
 func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 	var fams []familyRule
 	for _, fam := range families {
@@ -730,12 +690,7 @@ func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 }
 
 // addBanRule buffers one ban rule's sets and kernel rules: one
-// interval set of the Target prefixes and one kernel rule per
-// reachable family, leading with the direction's enforcement scope
-// (protocol gate, then the port and address sets, either empty
-// meaning all) matched at the service end of the conversation —
-// dport/daddr on ingress, sport/saddr on egress — then the target
-// match, the counter and the stance's verdict.
+// target interval set, one kernel rule per reachable family.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
 	verdict, err := verdictExprs(r)
 	if err != nil {
@@ -753,10 +708,8 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 	if len(familyRules) == 0 {
 		return nil
 	}
-	// The protocol gate is always present, drawn from the direction's
-	// enforcement scope: an unscoped ban covers tcp and udp traffic
-	// only. The gate and the ports are family-independent: their sets
-	// are built once per rule and lead every family's kernel rule.
+	// The protocol gate is always present (the tcp,udp default when
+	// unscoped); gate and ports are family-independent, built once per rule.
 	if err := conn.AddSet(&nftables.Set{
 		Table:   table,
 		KeyType: nftables.TypeInetProto,
@@ -842,8 +795,6 @@ func familyPrefixes(prefixes []netip.Prefix, fam addrFamily) []netip.Prefix {
 	return out
 }
 
-// protoElements encodes a scope's protocol gate as an inet-protocol
-// set's exact keys.
 func protoElements(protos []byte) []nftables.SetElement {
 	elems := make([]nftables.SetElement, 0, len(protos))
 	for _, p := range protos {

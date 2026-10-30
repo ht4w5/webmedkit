@@ -28,9 +28,8 @@ func newTestFactory(t *testing.T, args ...string) *Factory {
 	return f
 }
 
-// hashOfFlags resolves args through the factory's flag group and
-// reports the plan's hash — which folds both enforcement scopes —
-// the external witness of what the flag values resolved to.
+// hashOfFlags resolves args through the factory's flag group; the
+// plan's hash is the external witness of what they resolved to.
 func hashOfFlags(t *testing.T, args ...string) uint32 {
 	t.Helper()
 	points, err := newTestFactory(t, args...).Open()
@@ -224,8 +223,6 @@ func TestFactoryOpensItsEnforcementPoints(t *testing.T) {
 	})
 
 	t.Run("a refused scope value fails before any enforcement point opens", func(t *testing.T) {
-		// Validation runs before Open builds anything: a refused value
-		// touches no enforcement surface.
 		f := newTestFactory(t, "--nft-ingress-dport", "0")
 		points, err := f.Open()
 		if err == nil {
@@ -240,8 +237,6 @@ func TestFactoryOpensItsEnforcementPoints(t *testing.T) {
 	})
 
 	t.Run("overlapping scope addresses fail before any enforcement point opens", func(t *testing.T) {
-		// An ambiguous scope is refused like any other bad value:
-		// before any point opens, so nothing enforces it.
 		f := newTestFactory(t, "--nft-egress-saddr", "2001:db8::/32,2001:db8:1::/48")
 		points, err := f.Open()
 		if err == nil {
@@ -289,9 +284,8 @@ func TestFactoryFlagGroup(t *testing.T) {
 	}
 }
 
-// The shared-scope flags are removed outright — no alias, no
-// deprecation shim — so they parse as unknown flags and keep the
-// refused-command-line exit.
+// No alias or deprecation shim: the removed shared-scope flags must
+// parse as unknown flags and keep the refused-command-line exit.
 func TestFactoryRefusesTheRemovedSharedScopeFlags(t *testing.T) {
 	for _, name := range []string{"nft-service-port", "nft-service-address"} {
 		t.Run(name, func(t *testing.T) {
@@ -309,9 +303,6 @@ func TestFactoryRefusesTheRemovedSharedScopeFlags(t *testing.T) {
 	}
 }
 
-// The scope flags resolve to one effective scope per direction;
-// hashOfFlags is the external witness of what the flag values
-// resolved to.
 func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
 	t.Run("comma lists and repeats accumulate into one scope", func(t *testing.T) {
 		lists := hashOfFlags(t, "--nft-ingress-dport", "443,80", "--nft-ingress-dport", "22")
@@ -343,10 +334,8 @@ func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
 	})
 
 	t.Run("a scope edit across the protocol and port boundary changes the hash", func(t *testing.T) {
-		// Skip-if-unchanged must not fold one scope into another:
-		// --nft-ingress-l4proto tcp --nft-ingress-dport 17 and
-		// --nft-ingress-l4proto tcp,udp are different scopes, and the
-		// edit between them must re-enforce.
+		// The skip-if-unchanged fold must not conflate these shapes:
+		// l4proto=tcp dport=17 and l4proto=tcp,udp are different scopes.
 		tcpThenPort := hashOfFlags(t, "--nft-ingress-l4proto", "tcp", "--nft-ingress-dport", "17")
 		tcpUdp := hashOfFlags(t, "--nft-ingress-l4proto", "tcp,udp")
 		if tcpThenPort == tcpUdp {
@@ -355,10 +344,6 @@ func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
 	})
 }
 
-// Duplicate scope values — within one comma list or across repeats
-// — resolve to one scope entry, so a kernel batch never sees a value
-// twice. hashOfFlags is the external witness of what the flag values
-// resolved to.
 func TestFactoryDeduplicatesScopeValues(t *testing.T) {
 	t.Run("duplicate ports resolve to one scope entry", func(t *testing.T) {
 		dup := hashOfFlags(t, "--nft-ingress-dport", "443,80,443", "--nft-ingress-dport", "443")

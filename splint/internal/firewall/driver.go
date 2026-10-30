@@ -45,13 +45,8 @@ type PlannedRule struct {
 	Placement string
 }
 
-// Plan is the pure planning step's answer — no I/O, no privileges: the
-// effective rules the driver would install (with their placement
-// labels), each direction's effective enforcement scope as one
-// already-formatted line (Scopes — like Placement, the engine prints
-// it and never parses it), the ruleset hash identifying them (see
-// Hasher), and the ban-rule features it declines with reasons.
-// --dry-run prints exactly this.
+// Plan is the pure planning step's answer: no I/O, no privileges. Scopes, like
+// Placement, are driver-formatted, never parsed; --dry-run prints exactly this.
 type Plan struct {
 	Rules    []PlannedRule
 	Scopes   []string

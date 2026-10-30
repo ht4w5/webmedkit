@@ -182,9 +182,6 @@ func (u *Updater) DryRun(ctx context.Context, w io.Writer) error {
 }
 
 func writePlan(w io.Writer, plan firewall.Plan) error {
-	// Each direction's effective enforcement scope prints alongside the
-	// placement lines — one already-formatted line per direction, like
-	// Placement: printed and never parsed.
 	for _, s := range plan.Scopes {
 		if _, err := fmt.Fprintf(w, "%s\n", s); err != nil {
 			return err

@@ -209,8 +209,6 @@ func newFakeDriver(t *testing.T, hook Hook, kernel *fakeKernel) *Driver {
 	return newFakeScopedDriver(t, hook, Scope{}, Scope{}, kernel)
 }
 
-// newFakeScopedDriver builds a fake-kernel driver with one enforcement
-// scope pair: the ingress scope and the egress scope.
 func newFakeScopedDriver(t *testing.T, hook Hook, ingress, egress Scope, kernel *fakeKernel) *Driver {
 	t.Helper()
 	d, err := New(Config{Hook: hook, Ingress: ingress, Egress: egress})
@@ -434,9 +432,8 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 	})
 }
 
-// The plan carries each direction's effective enforcement scope as
-// one already-formatted line — the --dry-run surface, opaque to
-// everything above the driver.
+// The plan carries each direction's scope as one pre-formatted line —
+// the --dry-run surface, opaque above the driver.
 func TestPlanReportsTheEnforcementScopes(t *testing.T) {
 	kernel := newFakeKernel()
 
@@ -557,18 +554,15 @@ func TestPlanFoldsTheEffectiveRules(t *testing.T) {
 	})
 
 	t.Run("scopes differing only across the protocol and port boundary hash differently", func(t *testing.T) {
-		// The hash is insensitive to nothing: l4proto=tcp dport=17 and
-		// l4proto=tcp,udp (all ports) are different scopes, and a scope
-		// edit between them must re-enforce — the protocol and port
-		// groups must never fold into each other.
+		// The fold must keep the protocol and port groups apart:
+		// l4proto=tcp dport=17 and l4proto=tcp,udp are different scopes.
 		rules := []firewall.BanRule{dropFixture("203.0.113.7/32")}
 		tcpThenPort := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP}, Ports: []uint16{17}}, Scope{}, kernel), rules)
 		tcpUdp := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}}, Scope{}, kernel), rules)
 		if tcpThenPort == tcpUdp {
 			t.Errorf("l4proto=tcp,dport=17 and l4proto=tcp,udp hash identically (%x): the protocol and port groups must never fold into each other", tcpThenPort)
 		}
-		// One port sliding on into the protocol list: the flat fields
-		// agree, so only the group boundary distinguishes
+		// The flat fields agree, so only the group boundary distinguishes
 		// l4proto=tcp dport=17,6 from l4proto=tcp,udp dport=6.
 		tcpPortTwo := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP}, Ports: []uint16{17, 6}}, Scope{}, kernel), rules)
 		tcpUdpPortOne := hashOf(t, newFakeScopedDriver(t, HookInput, Scope{L4Protos: []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}, Ports: []uint16{6}}, Scope{}, kernel), rules)

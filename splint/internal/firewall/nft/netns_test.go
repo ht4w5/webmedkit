@@ -94,9 +94,8 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 		{Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.9/32")}, Stance: firewall.StanceLimitBandwidth, Rate: ratePtr(1000000)},
 		{Targets: []netip.Prefix{netip.MustParsePrefix("255.255.255.0/24")}, Stance: firewall.StanceDrop},
 	}
-	// The scoped fixture below matches assertScopedKernelState's
-	// hand-written wants: the same shape as the root-gated kernel
-	// test, pinned here against this test's own install.
+	// The scoped fixture matches assertScopedKernelState's hand-written
+	// wants — the root-gated test's shape, pinned to this install.
 	scopedRules := []firewall.BanRule{
 		{
 			Targets: []netip.Prefix{
