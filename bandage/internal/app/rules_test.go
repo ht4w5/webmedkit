@@ -1682,7 +1682,7 @@ func TestParseRulesReplayVolumeMethods(t *testing.T) {
 			wantVol:  5,
 		},
 		{
-			name:     "clamped-linear (PLAN \u00a71 example)",
+			name:     "clamped-linear (example)",
 			volume:   "volume: {method: clamped-linear, intercept: 5, slope: -1, min: 2, max: 5}",
 			wantDesc: "clamped-linear(intercept=5 slope=-1 min=2 max=5)",
 			size:     1e9,
@@ -1814,7 +1814,7 @@ func TestParseRulesVolumeValidation(t *testing.T) {
 			wantErr: "volume.value: must be positive",
 		},
 		{
-			name:    "clamped-linear accepted (PLAN \u00a71 example)",
+			name:    "clamped-linear accepted (example)",
 			tracker: "track: replay\n          leak: 0.1\n          volume: {method: clamped-linear, intercept: 5, slope: -1, min: 2, max: 5}",
 		},
 		{

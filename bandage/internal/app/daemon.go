@@ -31,7 +31,7 @@ import (
 // sweeps and the periodic statistics log.
 const sweepInterval = time.Minute
 
-// File-size enrichment parameters (DECISIONS section 3): EWMA window
+// File-size enrichment parameters (ADR 0019): EWMA window
 // and warm-up sample gate. Not configurable by design.
 const (
 	filesizePeriod     = 5
@@ -45,7 +45,7 @@ type EventParser interface {
 }
 
 // counters is the drop accounting behind the statistics log and
-// /stats (DECISIONS section 6, ADR 0006).
+// /stats (ADR 0006).
 type counters struct {
 	Received int64 // raw lines received from the wire
 	Parsed   int64 // lines parsed into events
@@ -269,8 +269,8 @@ func (d *Daemon) sweep() {
 	}
 }
 
-// logStatistics emits the periodic statistics record (DECISIONS
-// section 6) from the same Stats snapshot /stats serves.
+// logStatistics emits the periodic statistics record (ADR 0006)
+// from the same Stats snapshot /stats serves.
 func (d *Daemon) logStatistics() {
 	s := d.Stats()
 	d.logger.Info().

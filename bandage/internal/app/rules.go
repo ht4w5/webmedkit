@@ -402,7 +402,7 @@ var volumeMethodKeys = map[string]map[string]bool{
 }
 
 // parseVolumeMethod builds one replay volume method, validating its
-// parameters at load (DECISIONS section 8).
+// parameters at load.
 func parseVolumeMethod(id string, node *yaml.Node) (domain.VolumeMethod, error) {
 	fields := map[string]*yaml.Node{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -533,8 +533,8 @@ func volumeSize(id, key string, node *yaml.Node) (float64, error) {
 	return v, nil
 }
 
-// actionForms is the format-version-0 action vocabulary (DECISIONS
-// section 9); a nil node is the bare form (`- stop`).
+// actionForms is the format-version-0 action vocabulary; a nil node is
+// the bare form (`- stop`).
 var actionForms = map[string]func(id, name string, val *yaml.Node) (domain.Action, error){
 	"report": parseReportAction,
 	"log":    parseLogAction,

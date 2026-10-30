@@ -9,8 +9,10 @@ run only when a `goto` or `jump` action names it
 **Rule** is an id, a filter, at most one tracker, and an ordered list
 of actions (report, log, goto, jump, stop) - or an [escalation
 ladder](#escalation-ladders) of action lists instead of one. The
-filter expression language and the full DSL are specified in
-[PLAN.md](../PLAN.md) §1.
+filter expression language and the full DSL are specified below in
+[Filter expressions and enrichment.filter](#filter-expressions-and-enrichmentfilter);
+the DSL's design is recorded in
+[ADR 0001](adr/0001-dsl-flux-chains-webjail-filters.md).
 
 Two glossary entries govern what happens at runtime
 ([GLOSSARY.md](../GLOSSARY.md),
@@ -54,6 +56,31 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 
 Validate config and rules before deploying: `bandage -t -c bandage.yml
 -r rules.yml` prints the validated plan and exits without ingesting.
+
+## Filter expressions and `enrichment.filter`
+
+Rule filters and the enrichment gate share one expression language over
+Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
+`status 200`, `status class 2`, `path "/exact"`,
+`path prefix|suffix|keyword "text"` (`agent` takes the same text forms),
+and `sent >= 1MB` / `sent <= 1MB` (size units are allowed only here) -
+combined with `and`, `or`, `not`, where `not` binds tighter than `and`,
+which binds tighter than `or`.
+
+`enrichment.filter` in `bandage.yml` gates the enrichment path (the
+Filesize estimate) with the same language, defaulting to `any` like
+rules; an invalid expression aborts startup naming the key. The gate is
+wholly in or wholly out: an unmatched event flows through evaluation
+with default derived fields and touches no enrichment state - no
+observation, no cache update. A widened filter cannot poison the
+estimate: what feeds it is the **Sampling rule**
+([GLOSSARY.md](../GLOSSARY.md)), fixed in code and stricter than any
+Filter ([ADR 0019](adr/0019-filesize-from-response-sizes.md)).
+
+```yaml
+enrichment:
+  filter: path prefix "/downloads/"
+```
 
 ## Entry chains and dispatch
 
