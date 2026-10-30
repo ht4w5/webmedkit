@@ -168,12 +168,13 @@ func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
 		}
 	}
 	ineligible := []*domain.Event{
-		{Path: "/a", Method: "GET", Status: 304, ContentLength: 99999},  // revalidation, even carrying a length
-		{Path: "/a", Method: "HEAD", Status: 200},                       // length-less HEAD
-		{Path: "/a", Method: "GET", Status: 200, SentBytes: 88888},      // chunked body: transferred bytes only
-		{Path: "/a", Method: "GET", Status: 206, ContentLength: 77777},  // range response
-		{Path: "/a", Method: "POST", Status: 200, ContentLength: 66666}, // non-GET/HEAD
-		{Path: "/a", Method: "GET", Status: 404, ContentLength: 55555},  // error body
+		{Path: "/a", Method: "GET", Status: 304, ContentLength: 99999},     // revalidation, even carrying a length
+		{Path: "/a", Method: "HEAD", Status: 200},                          // length-less HEAD
+		{Path: "/a", Method: "GET", Status: 200, SentBytes: 88888},         // chunked body: transferred bytes only
+		{Path: "/a", Method: "GET", Status: 206, ContentLength: 77777},     // headerless range response: a 206 never observes its Content-Length
+		{Path: "/a", Method: "GET", Status: 416, ContentRangeTotal: 44444}, // 416: the authoritative total is error-path traffic
+		{Path: "/a", Method: "POST", Status: 200, ContentLength: 66666},    // non-GET/HEAD
+		{Path: "/a", Method: "GET", Status: 404, ContentLength: 55555},     // error body
 	}
 	for i, ev := range ineligible {
 		if got := enrichEvent(t, fe, ev); got != 1000 {
@@ -202,5 +203,32 @@ func TestEnrichIneligibleEventsFollowWarmUpGate(t *testing.T) {
 	enrichOnce(t, fe, "/a", 1000)
 	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 304}); got != 1000 {
 		t.Errorf("ineligible after warm-up: size = %d, want the current estimate 1000", got)
+	}
+}
+
+// Range responses observe the Content-Range total - the file's exact
+// size - and never their Content-Length: the observation of a GET 206 is
+// always the total. A 206 without a usable total is enriched with the
+// current estimate and adds no observation.
+func TestEnrichRangeResponsesObserveContentRangeTotal(t *testing.T) {
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The observation is the total 1000, not the Content-Length 100:
+	// the first observation seeds exactly.
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 206, ContentLength: 100, ContentRangeTotal: 1000}); got != 1000 {
+		t.Errorf("seed from range total: size = %d, want 1000 (the total, not the Content-Length)", got)
+	}
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 206, ContentLength: 100, ContentRangeTotal: 500}); got != 900 {
+		t.Errorf("EWMA from range total: size = %d, want 900 (1000 + (500-1000)/5)", got)
+	}
+	// A 206 without a usable total adds no observation and keeps the estimate.
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 206, ContentLength: 77777}); got != 900 {
+		t.Errorf("headerless range response: size = %d, want the current estimate 900", got)
+	}
+	// The next total moves the estimate exactly one step: nothing in between observed.
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 206, ContentRangeTotal: 1000}); got != 920 {
+		t.Errorf("size after range total 1000 = %d, want 920 (900 + 100/5)", got)
 	}
 }
