@@ -110,7 +110,7 @@ func benchConfig(p benchParams) Config {
 		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
 		Cache:      Cache{MaxEntries: p.sc.cacheMax},
 		Pipeline:   Pipeline{Workers: p.workers},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}
 }

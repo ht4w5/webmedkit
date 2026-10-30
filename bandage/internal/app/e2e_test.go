@@ -66,20 +66,18 @@ const (
 	eventTime2At = "2024-12-16T10:45:35Z"
 )
 
-// nginxLine builds one raw nginx JSON access-log line.
+// nginxLine builds one raw nginx JSON access-log line in the old flux
+// shape (no response-size fields), which must keep parsing.
 func nginxLine(t, client, method, path string, status int, sent int64) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d}`,
-		t, client, method, path, status, sent)
+	return nginxLineFields(t, client, method, path, status, sent)
 }
 
 // nginxLineClen builds one raw line in the current bandage log format:
 // nginxLine plus the response Content-Length field. clen is the rendered
 // $sent_http_content_length content ("" when the header was not sent; a
-// complete transfer carries its sent bytes). Lines built by nginxLine
-// stay in the old flux shape (no clen) and must keep parsing.
+// complete transfer carries its sent bytes).
 func nginxLineClen(t, client, method, path string, status int, sent int64, clen string) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"clen":%q}`,
-		t, client, method, path, status, sent, clen)
+	return nginxLineFields(t, client, method, path, status, sent, fmt.Sprintf(`"clen":%q`, clen))
 }
 
 // nginxLineCrange builds one raw line in the current bandage log format:
@@ -87,8 +85,19 @@ func nginxLineClen(t, client, method, path string, status int, sent int64, clen 
 // rendered $sent_http_content_range content ("" when the header was not
 // sent; a range response carries "bytes <a>-<b>/<total>").
 func nginxLineCrange(t, client, method, path string, status int, sent int64, clen, crange string) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"clen":%q,"crange":%q}`,
-		t, client, method, path, status, sent, clen, crange)
+	return nginxLineFields(t, client, method, path, status, sent,
+		fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
+}
+
+// nginxLineFields renders one raw nginx JSON line: the mapped base
+// fields plus the given already-rendered JSON members (`"key":value`)
+// in order. Every nginxLine* shape composes through it.
+func nginxLineFields(t, client, method, path string, status int, sent int64, extra ...string) string {
+	line := fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d`, t, client, method, path, status, sent)
+	for _, member := range extra {
+		line += "," + member
+	}
+	return line + "}"
 }
 
 // testDaemon bundles a running daemon with a raw-line sender and captured
@@ -228,7 +237,7 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 		// The suite asserts exact accumulation values, so it runs the
 		// deterministic single-worker pipeline.
 		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}
 	if mutate != nil {
@@ -809,7 +818,7 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
 		Cache:      Cache{MaxEntries: 65536},
 		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}, chains, build, WithLogger(zerolog.Nop()))
 	if err != nil {

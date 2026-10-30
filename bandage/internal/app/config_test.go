@@ -84,10 +84,7 @@ api: {listen: "127.0.0.1:8080"}
 		t.Errorf("pipeline.workers = %d, want default %d (CPU count)", cfg.Pipeline.Workers, runtime.NumCPU())
 	}
 	// The whole enrichment block is optional; enrichment.filter defaults
-	// to any, like rules.
-	if cfg.Enrichment.FilterSource != "any" {
-		t.Errorf("enrichment.filter = %q, want default %q", cfg.Enrichment.FilterSource, "any")
-	}
+	// to any, like rules - observable as a filter that matches everything.
 	if !cfg.Enrichment.Filter.Match(&domain.Event{Path: "/x", Method: "GET", Status: 200}) {
 		t.Error("default enrichment.filter rejects an event, want any to match everything")
 	}
@@ -100,9 +97,6 @@ func TestParseConfigEnrichmentFilter(t *testing.T) {
 	cfg, err := ParseConfig([]byte(yaml))
 	if err != nil {
 		t.Fatalf("ParseConfig error: %v", err)
-	}
-	if cfg.Enrichment.FilterSource != `path prefix "/files/"` {
-		t.Errorf("enrichment.filter = %q, want the expression as written", cfg.Enrichment.FilterSource)
 	}
 	for path, want := range map[string]bool{"/files/a.iso": true, "/other": false} {
 		if got := cfg.Enrichment.Filter.Match(&domain.Event{Path: path, Method: "GET", Status: 200}); got != want {

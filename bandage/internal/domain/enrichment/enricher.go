@@ -31,7 +31,7 @@ func NewEnricher(filter domain.Matcher, filesize *FilesizeEnricher) (*Enricher, 
 }
 
 // Enrich resets every derived field to its default, then applies the
-// Filter gate wholly (spec Implementation Decision 2): unmatched events
+// Filter gate wholly (ADR 0019): unmatched events
 // end here with default derived fields and touch no enrichment state -
 // no observation, no cache update. Matched events run every enrichment;
 // ineligible ones are enriched with the current estimate and observe

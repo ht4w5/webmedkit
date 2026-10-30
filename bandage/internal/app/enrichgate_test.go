@@ -18,7 +18,7 @@ func enrichmentFilterConfig(t *testing.T, src string) Enrichment {
 	if err != nil {
 		t.Fatalf("filter.Parse(%q): %v", src, err)
 	}
-	return Enrichment{FilterSource: src, Filter: f}
+	return Enrichment{Filter: f}
 }
 
 // TestE2EEnrichmentFilterScopesTheEnrichmentPath: the Filter gates the
