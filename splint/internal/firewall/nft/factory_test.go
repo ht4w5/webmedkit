@@ -62,22 +62,73 @@ func TestFactoryValidations(t *testing.T) {
 			args: []string{"--nft-netns", "/var/run/netns/a", "--nft-netns", "/run/netns/b"},
 		},
 		{
-			name:    "an out-of-range service port is refused",
-			args:    []string{"--nft-service-port", "0"},
-			wantErr: "service port: must be between 1 and 65535 (got 0)",
+			name: "the scope flags accept comma lists and repeats",
+			args: []string{
+				"--nft-ingress-daddr", "203.0.113.5,2001:db8::/64",
+				"--nft-ingress-daddr", "198.51.100.5",
+				"--nft-ingress-dport", "443,80",
+				"--nft-ingress-dport", "22",
+				"--nft-ingress-l4proto", "tcp",
+				"--nft-egress-saddr", "192.0.2.5",
+				"--nft-egress-sport", "53,8053",
+				"--nft-egress-l4proto", "udp",
+			},
 		},
 		{
-			name: "service ports in range are accepted",
-			args: []string{"--nft-service-port", "53", "--nft-service-port", "443"},
+			name: "bare addresses count as their host prefixes",
+			args: []string{"--nft-ingress-daddr", "203.0.113.5", "--nft-egress-saddr", "2001:db8::5"},
 		},
 		{
-			name:    "an unparseable service address is refused",
-			args:    []string{"--nft-service-address", "not-an-address"},
-			wantErr: `service address: unparseable prefix (got "not-an-address")`,
+			name: "the port boundaries are accepted",
+			args: []string{"--nft-ingress-dport", "1", "--nft-egress-sport", "65535"},
 		},
 		{
-			name: "service addresses parse as prefixes or bare addresses",
-			args: []string{"--nft-service-address", "203.0.113.5/32", "--nft-service-address", "2001:db8::5"},
+			name: "the protocol scope defaults to tcp and udp",
+		},
+		{
+			name:    "an uppercase protocol is refused",
+			args:    []string{"--nft-ingress-l4proto", "TCP"},
+			wantErr: `--nft-ingress-l4proto: must be tcp or udp (got "TCP")`,
+		},
+		{
+			name:    "an unknown protocol is refused",
+			args:    []string{"--nft-egress-l4proto", "sctp"},
+			wantErr: `--nft-egress-l4proto: must be tcp or udp (got "sctp")`,
+		},
+		{
+			name:    "an empty protocol entry is refused",
+			args:    []string{"--nft-ingress-l4proto", "tcp,,"},
+			wantErr: `--nft-ingress-l4proto: must be tcp or udp (got "")`,
+		},
+		{
+			name:    "a zero ingress port is refused",
+			args:    []string{"--nft-ingress-dport", "0"},
+			wantErr: `--nft-ingress-dport: must be a number between 1 and 65535 (got "0")`,
+		},
+		{
+			name:    "a port above 65535 is refused",
+			args:    []string{"--nft-egress-sport", "65536"},
+			wantErr: `--nft-egress-sport: must be a number between 1 and 65535 (got "65536")`,
+		},
+		{
+			name:    "a port range is refused",
+			args:    []string{"--nft-ingress-dport", "443-445"},
+			wantErr: `--nft-ingress-dport: must be a number between 1 and 65535 (got "443-445")`,
+		},
+		{
+			name:    "a garbage egress port is refused",
+			args:    []string{"--nft-egress-sport", "https"},
+			wantErr: `--nft-egress-sport: must be a number between 1 and 65535 (got "https")`,
+		},
+		{
+			name:    "a garbage ingress address is refused",
+			args:    []string{"--nft-ingress-daddr", "not-an-address"},
+			wantErr: `--nft-ingress-daddr: unparseable prefix (got "not-an-address")`,
+		},
+		{
+			name:    "a garbage egress address is refused",
+			args:    []string{"--nft-egress-saddr", "203.0.113.256"},
+			wantErr: `--nft-egress-saddr: unparseable prefix (got "203.0.113.256")`,
 		},
 	}
 	for _, tt := range tests {
@@ -133,6 +184,22 @@ func TestFactoryOpensItsEnforcementPoints(t *testing.T) {
 		}
 	})
 
+	t.Run("a refused scope value fails before any enforcement point opens", func(t *testing.T) {
+		// Validation runs before Open builds anything: a refused value
+		// touches no enforcement surface.
+		f := newTestFactory(t, "--nft-ingress-dport", "0")
+		points, err := f.Open()
+		if err == nil {
+			t.Fatal("Open succeeded on a refused scope value")
+		}
+		if !strings.Contains(err.Error(), "--nft-ingress-dport") {
+			t.Errorf("Open error %q does not name the flag", err)
+		}
+		if len(points) != 0 {
+			t.Errorf("Open returned %d points on a refused scope value, want 0", len(points))
+		}
+	})
+
 	t.Run("each instance enforces at its own target handle", func(t *testing.T) {
 		// A vanished target surfaces as firewall.ErrUnreachable (the
 		// update cycle warns and skips it), naming the instance's path.
@@ -156,10 +223,82 @@ func TestFactoryFlagGroup(t *testing.T) {
 	f.BindFlags(fs)
 	var got []string
 	fs.VisitAll(func(fl *pflag.Flag) { got = append(got, fl.Name) })
-	want := []string{"nft-hook", "nft-netns", "nft-service-address", "nft-service-port"}
+	want := []string{
+		"nft-egress-l4proto", "nft-egress-saddr", "nft-egress-sport",
+		"nft-hook",
+		"nft-ingress-daddr", "nft-ingress-dport", "nft-ingress-l4proto",
+		"nft-netns",
+	}
 	if !slices.Equal(got, want) {
 		t.Errorf("flag group = %q, want %q", got, want)
 	}
+}
+
+// The shared-scope flags are removed outright — no alias, no
+// deprecation shim — so they parse as unknown flags and keep the
+// refused-command-line exit.
+func TestFactoryRefusesTheRemovedSharedScopeFlags(t *testing.T) {
+	for _, name := range []string{"nft-service-port", "nft-service-address"} {
+		t.Run(name, func(t *testing.T) {
+			f := NewFactory()
+			fs := pflag.NewFlagSet("splint", pflag.ContinueOnError)
+			f.BindFlags(fs)
+			err := fs.Parse([]string{"--" + name, "443"})
+			if err == nil {
+				t.Fatalf("--%s parsed, want an unknown-flag refusal", name)
+			}
+			if !strings.Contains(err.Error(), "unknown flag") {
+				t.Errorf("parse error %q does not name the flag unknown", err)
+			}
+		})
+	}
+}
+
+// The scope flags resolve to one effective scope per direction. The
+// plan's hash — which folds both scopes — is the external witness of
+// what the flag values resolved to.
+func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
+	hashOf := func(t *testing.T, args ...string) uint32 {
+		t.Helper()
+		points, err := newTestFactory(t, args...).Open()
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		plan, err := points[0].Driver.Plan(nil)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		return plan.Hash
+	}
+
+	t.Run("comma lists and repeats accumulate into one scope", func(t *testing.T) {
+		lists := hashOf(t, "--nft-ingress-dport", "443,80", "--nft-ingress-dport", "22")
+		repeats := hashOf(t, "--nft-ingress-dport", "443", "--nft-ingress-dport", "80,22")
+		if lists != repeats {
+			t.Errorf("comma lists hash %x, repeats hash %x: both must resolve to one scope", lists, repeats)
+		}
+	})
+
+	t.Run("a bare address counts as its host prefix", func(t *testing.T) {
+		bare := hashOf(t, "--nft-egress-saddr", "203.0.113.5")
+		prefix := hashOf(t, "--nft-egress-saddr", "203.0.113.5/32")
+		if bare != prefix {
+			t.Errorf("bare address hashes %x, host prefix %x: a bare address is its host prefix", bare, prefix)
+		}
+	})
+
+	t.Run("the protocol scope defaults to tcp and udp", func(t *testing.T) {
+		defaults := hashOf(t)
+		explicit := hashOf(t, "--nft-ingress-l4proto", "tcp,udp", "--nft-egress-l4proto", "tcp,udp")
+		if defaults != explicit {
+			t.Errorf("defaults hash %x, explicit tcp,udp %x: the protocol scope must default to tcp and udp", defaults, explicit)
+		}
+		tcpOnly := hashOf(t, "--nft-ingress-l4proto", "tcp")
+		udpOnly := hashOf(t, "--nft-egress-l4proto", "udp")
+		if tcpOnly == defaults || udpOnly == defaults || tcpOnly == udpOnly {
+			t.Errorf("scopes hash defaults=%x ingress-tcp=%x egress-udp=%x: each protocol narrowing is its own scope", defaults, tcpOnly, udpOnly)
+		}
+	})
 }
 
 func TestFactoryName(t *testing.T) {
