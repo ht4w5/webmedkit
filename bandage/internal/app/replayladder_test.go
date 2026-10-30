@@ -31,7 +31,7 @@ chains:
 
 	// The first 4 samples warm the size estimate and are skipped; only known sizes climb.
 	send := func(client, path string, sent int64, i int) {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), client, "GET", path, 200, sent))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), client, "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
 	}
 	for i := 0; i < 4; i++ {
 		send("203.0.113.7", "/small.iso", 1000, i)
@@ -134,7 +134,7 @@ chains:
 
 	// The /stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker bucket.
 	for i := 0; i < 4; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 4)
 	if got := marks(d); len(got) != 0 {
@@ -152,7 +152,7 @@ chains:
 
 	// Only the known-size samples climb: the report's reading counts those alone.
 	for i := 4; i < 7; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
@@ -189,7 +189,7 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	for i := 0; i < 4; i++ {
-		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
+		d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 4)
 
@@ -198,7 +198,7 @@ chains:
 		if i > 0 {
 			clock.Advance(5 * time.Second)
 		}
-		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
+		d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
 		d.waitProcessed(t, int64(5+i))
 	}
 	if got := marks(d); len(got) != 4 {
@@ -206,14 +206,14 @@ chains:
 	}
 
 	clock.Advance(30 * time.Second)
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
 	d.waitProcessed(t, 10)
 	if got := marks(d); len(got) != 4 {
 		t.Errorf("marks = %v, want still 4 (state restarted past the TTL)", got)
 	}
 
 	clock.Advance(5 * time.Second)
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
 	d.waitProcessed(t, 11)
 	if got := marks(d); len(got) != 5 {
 		t.Errorf("marks = %v, want 5 (the climb resumes from the fresh state)", got)
@@ -245,7 +245,7 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	for i := 0; i < 7; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 		d.waitProcessed(t, int64(i+1))
 	}
 
@@ -305,17 +305,17 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	for i := 0; i < 4; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 4)
 
 	// The wall clock moves between the first write and the climb so a frozen created_at is observable.
-	d.send(nginxLine("1734345938", "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+	d.send(nginxLineClen("1734345938", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	d.waitProcessed(t, 5)
-	d.send(nginxLine("1734345939", "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+	d.send(nginxLineClen("1734345939", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	d.waitProcessed(t, 6)
 	clock.Advance(10 * time.Minute)
-	d.send(nginxLine("1734345940", "203.0.113.7", "GET", "/releases.iso", 200, 1000))
+	d.send(nginxLineClen("1734345940", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	d.waitProcessed(t, 7)
 
 	doc := d.getReports(t, nil)

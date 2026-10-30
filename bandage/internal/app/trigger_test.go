@@ -103,7 +103,7 @@ chains:
 
 func warmThenOverflow(d *testDaemon, epoch int, path string, sent int64, overflow int) {
 	for i := range 4 + overflow {
-		d.send(nginxLine(fmt.Sprintf("%d", epoch+i), "203.0.113.7", "GET", path, 200, sent))
+		d.send(nginxLineClen(fmt.Sprintf("%d", epoch+i), "203.0.113.7", "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
 	}
 }
 

@@ -71,6 +71,16 @@ func nginxLine(t, client, method, path string, status int, sent int64) string {
 		t, client, method, path, status, sent)
 }
 
+// nginxLineClen builds one raw line in the current bandage log format:
+// nginxLine plus the response Content-Length field. clen is the rendered
+// $sent_http_content_length content ("" when the header was not sent; a
+// complete transfer carries its sent bytes). Lines built by nginxLine
+// stay in the old flux shape (no clen) and must keep parsing.
+func nginxLineClen(t, client, method, path string, status int, sent int64, clen string) string {
+	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"clen":%q}`,
+		t, client, method, path, status, sent, clen)
+}
+
 // testDaemon bundles a running daemon with a raw-line sender and captured
 // log records.
 type testDaemon struct {
@@ -2175,7 +2185,7 @@ chains:
 	// Warm-up (the first 4 of 5 samples): the size estimate is unknown,
 	// so every event is skipped entirely.
 	for i := 0; i < 4; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 4)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
@@ -2185,7 +2195,7 @@ chains:
 	// Samples 5..7 are enriched (size 1000): each full transfer adds
 	// fraction 1, and value 3 > volume 2 overflows on the third.
 	for i := 4; i < 7; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
@@ -2222,8 +2232,8 @@ chains:
 	// Interleave small (100 B) and big (10 000 B) transfers of two paths
 	// from one client: each path warms and accumulates on its own.
 	for i := 0; i < 6; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100))
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100, "100"))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000, "10000"))
 	}
 	d.waitProcessed(t, 12)
 
@@ -2239,6 +2249,147 @@ chains:
 	}
 	if r.Sample.Path != "/small.iso" || r.Sample.Size != 100 {
 		t.Errorf("sample = %+v, want /small.iso with enriched size 100", r.Sample)
+	}
+}
+
+// TestE2ESizeEstimateTracksResponseLengthNotSentBytes: the estimate
+// learns the length the server reports, not the bytes that happened to
+// transfer, and cached revalidations leave it alone - so replay tolerates
+// ordinary partial downloads instead of counting each as a full one.
+func TestE2ESizeEstimateTracksResponseLengthNotSentBytes(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker: {track: replay, leak: 0, volume: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+	// Five partial downloads (500 of 1000 bytes on the wire) warm the
+	// estimate to the reported length 1000; each counts half a download.
+	for i := 0; i < 5; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
+	}
+	// Cached revalidations (304, nothing on the wire) move nothing.
+	for i := 0; i < 4; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", "GET", "/releases/24.04.iso", 304, 0, ""))
+	}
+	// Four more partial downloads add 0.5 each and overflow volume 2 at
+	// 2.5 on the last.
+	for i := 0; i < 4; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345943+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
+	}
+	d.waitProcessed(t, 13)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.Tracker.Value != 2.5 {
+		t.Errorf("tracker value = %v, want 2.5 (nine half-downloads; the revalidations added none)", r.Tracker.Value)
+	}
+	if r.Sample.Size != 1000 {
+		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.Size)
+	}
+	if r.Sample.Sent != 500 {
+		t.Errorf("sample sent = %d, want 500", r.Sample.Sent)
+	}
+}
+
+// TestE2ESizeSamplingRuleAdmitRejectTable pins the Sampling rule at the
+// pipeline: only GET/HEAD 200 responses carrying a Content-Length feed
+// the estimate; every other shape is still enriched with the current
+// estimate and counted by replay, but adds no observation. The warm-up
+// leaves /f at size 1000; two loud probes of the row's shape move it one
+// EWMA step each when admitted (1000 -> 1600 -> 2080), and two big
+// chunked transfers close the row - length-less, they add no observation,
+// but each counts as a full download equivalent and overflows volume 2
+// when the probes did not.
+func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		status   int
+		sent     int64
+		clen     string
+		wantSize int64
+	}{
+		{"GET 200 observes the response length", "GET", 200, 4000, "4000", 2080},
+		{"HEAD 200 observes the response length", "HEAD", 200, 0, "4000", 2080},
+		{"304 revalidations never observe", "GET", 304, 0, "4000", 1000},
+		{"length-less HEAD never observes", "HEAD", 200, 0, "", 1000},
+		{"chunked 200 bodies never observe", "GET", 200, 4000, "", 1000},
+		{"206 range responses never observe", "GET", 206, 4000, "4000", 1000},
+		{"error bodies never observe", "GET", 404, 4000, "4000", 1000},
+		{"non-GET/HEAD never observes", "POST", 200, 4000, "4000", 1000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker: {track: replay, leak: 0, volume: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+			d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+			// Warm the /f estimate to 1000 (samples 1-4 stay blind).
+			for i := 0; i < 5; i++ {
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
+			}
+			for i := 0; i < 2; i++ {
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen))
+			}
+			for i := 0; i < 2; i++ {
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345941+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
+			}
+			d.waitProcessed(t, 9)
+
+			doc := d.getReports(t, nil)
+			if len(doc.Reports) != 1 {
+				t.Fatalf("reports = %+v, want exactly 1 (the overflow)", doc.Reports)
+			}
+			r := doc.Reports[0]
+			if r.Tracker.Value != 3 {
+				t.Errorf("tracker value = %v, want 3 (three unit fractions at trigger)", r.Tracker.Value)
+			}
+			if r.Sample.Size != tt.wantSize {
+				t.Errorf("sample size = %d, want %d", r.Sample.Size, tt.wantSize)
+			}
+		})
+	}
+}
+
+// TestE2EMalformedClenDroppedAndCounted: a malformed response length is
+// an invalid field - the line is dropped and counted like any other.
+func TestE2EMalformedClenDroppedAndCounted(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"-5"}`)
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"abc"}`)
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":true}`)
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/small", 200, 10, "10"))
+	d.waitProcessed(t, 4)
+
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("dropped lines produced reports %+v, want none", doc.Reports)
+	}
+	stats := d.counters()
+	if stats.Dropped != 3 {
+		t.Errorf("stats dropped = %d, want 3", stats.Dropped)
+	}
+	if stats.Parsed != 1 {
+		t.Errorf("stats parsed = %d, want 1", stats.Parsed)
 	}
 }
 

@@ -493,7 +493,7 @@ chains:
 	// the first; the replay rule overflows on the sixth (value 2 > 1).
 	const events = 6
 	for i := range events {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, events)
 
@@ -547,7 +547,7 @@ chains:
 	// Two paths, one Target: each path overflows on its sixth transfer;
 	// the second path's Trigger is suppressed at (rule, Target) grain.
 	for i := range 6 {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/a.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/a.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 6)
 	doc := d.getReports(t, nil)
@@ -556,7 +556,7 @@ chains:
 	}
 
 	for i := 6; i < 12; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/b.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/b.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 12)
 	doc = d.getReports(t, nil)
