@@ -2491,6 +2491,31 @@ func TestE2EMalformedClenDroppedAndCounted(t *testing.T) {
 	}
 }
 
+// TestE2EUnusualContentRangeKeptAsNormalTraffic: unusual Content-Range
+// values degrade to "no size information" instead of invalidating the
+// line - the events parse, count as normal traffic and never reach the
+// drop counter.
+func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes 0-499/*"}`)
+	d.send(`{"time":"1734345935","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes weird"}`)
+	d.send(`{"time":"1734345936","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":10,"clen":"10","crange":"not a range"}`)
+	d.waitProcessed(t, 3)
+
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("reports = %+v, want none", doc.Reports)
+	}
+	stats := d.counters()
+	if stats.Dropped != 0 {
+		t.Errorf("stats dropped = %d, want 0 (unusual Content-Range values never drop the line)", stats.Dropped)
+	}
+	if stats.Parsed != 3 {
+		t.Errorf("stats parsed = %d, want 3 (the lines count as normal traffic)", stats.Parsed)
+	}
+}
+
 // TestStartupLogCarriesBuildIdentity: the startup log record carries the
 // build identity fields, so the log stream identifies the running build.
 func TestStartupLogCarriesBuildIdentity(t *testing.T) {
