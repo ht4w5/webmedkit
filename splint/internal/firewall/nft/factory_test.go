@@ -28,6 +28,22 @@ func newTestFactory(t *testing.T, args ...string) *Factory {
 	return f
 }
 
+// hashOfFlags resolves args through the factory's flag group and
+// reports the plan's hash — which folds both enforcement scopes —
+// the external witness of what the flag values resolved to.
+func hashOfFlags(t *testing.T, args ...string) uint32 {
+	t.Helper()
+	points, err := newTestFactory(t, args...).Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	plan, err := points[0].Driver.Plan(nil)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	return plan.Hash
+}
+
 func TestFactoryValidations(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -293,90 +309,76 @@ func TestFactoryRefusesTheRemovedSharedScopeFlags(t *testing.T) {
 	}
 }
 
-// The scope flags resolve to one effective scope per direction. The
-// plan's hash — which folds both scopes — is the external witness of
-// what the flag values resolved to.
+// The scope flags resolve to one effective scope per direction;
+// hashOfFlags is the external witness of what the flag values
+// resolved to.
 func TestFactoryScopeFlagsResolveOneScopePerDirection(t *testing.T) {
-	hashOf := func(t *testing.T, args ...string) uint32 {
-		t.Helper()
-		points, err := newTestFactory(t, args...).Open()
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		plan, err := points[0].Driver.Plan(nil)
-		if err != nil {
-			t.Fatalf("Plan: %v", err)
-		}
-		return plan.Hash
-	}
-
 	t.Run("comma lists and repeats accumulate into one scope", func(t *testing.T) {
-		lists := hashOf(t, "--nft-ingress-dport", "443,80", "--nft-ingress-dport", "22")
-		repeats := hashOf(t, "--nft-ingress-dport", "443", "--nft-ingress-dport", "80,22")
+		lists := hashOfFlags(t, "--nft-ingress-dport", "443,80", "--nft-ingress-dport", "22")
+		repeats := hashOfFlags(t, "--nft-ingress-dport", "443", "--nft-ingress-dport", "80,22")
 		if lists != repeats {
 			t.Errorf("comma lists hash %x, repeats hash %x: both must resolve to one scope", lists, repeats)
 		}
 	})
 
 	t.Run("a bare address counts as its host prefix", func(t *testing.T) {
-		bare := hashOf(t, "--nft-egress-saddr", "203.0.113.5")
-		prefix := hashOf(t, "--nft-egress-saddr", "203.0.113.5/32")
+		bare := hashOfFlags(t, "--nft-egress-saddr", "203.0.113.5")
+		prefix := hashOfFlags(t, "--nft-egress-saddr", "203.0.113.5/32")
 		if bare != prefix {
 			t.Errorf("bare address hashes %x, host prefix %x: a bare address is its host prefix", bare, prefix)
 		}
 	})
 
 	t.Run("the protocol scope defaults to tcp and udp", func(t *testing.T) {
-		defaults := hashOf(t)
-		explicit := hashOf(t, "--nft-ingress-l4proto", "tcp,udp", "--nft-egress-l4proto", "tcp,udp")
+		defaults := hashOfFlags(t)
+		explicit := hashOfFlags(t, "--nft-ingress-l4proto", "tcp,udp", "--nft-egress-l4proto", "tcp,udp")
 		if defaults != explicit {
 			t.Errorf("defaults hash %x, explicit tcp,udp %x: the protocol scope must default to tcp and udp", defaults, explicit)
 		}
-		tcpOnly := hashOf(t, "--nft-ingress-l4proto", "tcp")
-		udpOnly := hashOf(t, "--nft-egress-l4proto", "udp")
+		tcpOnly := hashOfFlags(t, "--nft-ingress-l4proto", "tcp")
+		udpOnly := hashOfFlags(t, "--nft-egress-l4proto", "udp")
 		if tcpOnly == defaults || udpOnly == defaults || tcpOnly == udpOnly {
 			t.Errorf("scopes hash defaults=%x ingress-tcp=%x egress-udp=%x: each protocol narrowing is its own scope", defaults, tcpOnly, udpOnly)
+		}
+	})
+
+	t.Run("a scope edit across the protocol and port boundary changes the hash", func(t *testing.T) {
+		// Skip-if-unchanged must not fold one scope into another:
+		// --nft-ingress-l4proto tcp --nft-ingress-dport 17 and
+		// --nft-ingress-l4proto tcp,udp are different scopes, and the
+		// edit between them must re-enforce.
+		tcpThenPort := hashOfFlags(t, "--nft-ingress-l4proto", "tcp", "--nft-ingress-dport", "17")
+		tcpUdp := hashOfFlags(t, "--nft-ingress-l4proto", "tcp,udp")
+		if tcpThenPort == tcpUdp {
+			t.Errorf("l4proto=tcp,dport=17 and l4proto=tcp,udp hash identically (%x): the edit must be a scope change", tcpThenPort)
 		}
 	})
 }
 
 // Duplicate scope values — within one comma list or across repeats
 // — resolve to one scope entry, so a kernel batch never sees a value
-// twice. The plan's hash, which folds both scopes, is the external
-// witness of what the flag values resolved to.
+// twice. hashOfFlags is the external witness of what the flag values
+// resolved to.
 func TestFactoryDeduplicatesScopeValues(t *testing.T) {
-	hashOf := func(t *testing.T, args ...string) uint32 {
-		t.Helper()
-		points, err := newTestFactory(t, args...).Open()
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		plan, err := points[0].Driver.Plan(nil)
-		if err != nil {
-			t.Fatalf("Plan: %v", err)
-		}
-		return plan.Hash
-	}
-
 	t.Run("duplicate ports resolve to one scope entry", func(t *testing.T) {
-		dup := hashOf(t, "--nft-ingress-dport", "443,80,443", "--nft-ingress-dport", "443")
-		distinct := hashOf(t, "--nft-ingress-dport", "443,80")
+		dup := hashOfFlags(t, "--nft-ingress-dport", "443,80,443", "--nft-ingress-dport", "443")
+		distinct := hashOfFlags(t, "--nft-ingress-dport", "443,80")
 		if dup != distinct {
 			t.Errorf("duplicate ports hash %x, distinct ports %x: duplicates must resolve to one scope entry", dup, distinct)
 		}
 	})
 
 	t.Run("duplicate protocols resolve to one scope entry", func(t *testing.T) {
-		dup := hashOf(t, "--nft-egress-l4proto", "tcp,tcp,udp,tcp")
-		distinct := hashOf(t, "--nft-egress-l4proto", "tcp,udp")
+		dup := hashOfFlags(t, "--nft-egress-l4proto", "tcp,tcp,udp,tcp")
+		distinct := hashOfFlags(t, "--nft-egress-l4proto", "tcp,udp")
 		if dup != distinct {
 			t.Errorf("duplicate protocols hash %x, distinct protocols %x: duplicates must resolve to one scope entry", dup, distinct)
 		}
 	})
 
 	t.Run("duplicate addresses resolve to one scope entry", func(t *testing.T) {
-		dup := hashOf(t, "--nft-ingress-daddr", "203.0.113.5,203.0.113.5/32")
-		distinct := hashOf(t, "--nft-ingress-daddr", "203.0.113.5/32")
+		dup := hashOfFlags(t, "--nft-ingress-daddr", "203.0.113.5,203.0.113.5/32")
+		distinct := hashOfFlags(t, "--nft-ingress-daddr", "203.0.113.5/32")
 		if dup != distinct {
 			t.Errorf("duplicate addresses hash %x, one address %x: a bare address and its host prefix are one entry", dup, distinct)
 		}

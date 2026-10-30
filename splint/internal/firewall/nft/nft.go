@@ -110,16 +110,23 @@ func (s Scope) l4protos() []byte {
 }
 
 // fields encodes the scope's protocol gate, ports and addresses for
-// the ruleset hash.
+// the ruleset hash. The hash fold delimits between fields, not
+// between groups, so each group leads with a StringField marker (the
+// PlannedRule fields' string-marker convention): a value can never
+// slide across a group boundary — l4proto=tcp dport=17 and
+// l4proto=tcp,udp are different scopes and fold to different hashes.
 func (s Scope) fields() [][]byte {
 	protos := s.l4protos()
-	fields := make([][]byte, 0, len(protos)+len(s.Ports)+len(s.Addrs))
+	fields := make([][]byte, 0, len(protos)+len(s.Ports)+len(s.Addrs)+3)
+	fields = append(fields, firewall.StringField("l4proto"))
 	for _, p := range protos {
 		fields = append(fields, firewall.Uint16Field(uint16(p)))
 	}
+	fields = append(fields, firewall.StringField("port"))
 	for _, p := range s.Ports {
 		fields = append(fields, firewall.Uint16Field(p))
 	}
+	fields = append(fields, firewall.StringField("addr"))
 	for _, a := range s.Addrs {
 		fields = append(fields, firewall.PrefixField(a))
 	}
@@ -387,24 +394,23 @@ func (b banDirection) scopeLine() string {
 	for _, p := range b.scope.l4protos() {
 		protos = append(protos, protoName(p))
 	}
-	ports := "all"
-	if len(b.scope.Ports) > 0 {
-		nums := make([]string, 0, len(b.scope.Ports))
-		for _, p := range b.scope.Ports {
-			nums = append(nums, strconv.Itoa(int(p)))
-		}
-		ports = strings.Join(nums, ",")
-	}
-	addrs := "all"
-	if len(b.scope.Addrs) > 0 {
-		strs := make([]string, 0, len(b.scope.Addrs))
-		for _, a := range b.scope.Addrs {
-			strs = append(strs, a.Masked().String())
-		}
-		addrs = strings.Join(strs, ",")
-	}
+	ports := allOrList(b.scope.Ports, func(p uint16) string { return strconv.Itoa(int(p)) })
+	addrs := allOrList(b.scope.Addrs, func(a netip.Prefix) string { return a.Masked().String() })
 	return fmt.Sprintf("scope=%s l4proto=%s %s=%s %s=%s",
 		b.name, strings.Join(protos, ","), portField, ports, addrField, addrs)
+}
+
+// allOrList renders one scope-line value group as its comma list —
+// "all" where an empty list matches every value of the kind.
+func allOrList[T any](values []T, name func(T) string) string {
+	if len(values) == 0 {
+		return "all"
+	}
+	parts := make([]string, 0, len(values))
+	for _, v := range values {
+		parts = append(parts, name(v))
+	}
+	return strings.Join(parts, ",")
 }
 
 // protoName names a scope protocol for the scope line: the well-known
