@@ -297,6 +297,17 @@ path whether it is a 1MB or a 10GB file). Each rung's actions are
 validated by the same action parser as rule actions, and rung
 `goto`/`jump` targets join the same acyclic chain-graph validation.
 
+Replay measures traffic in download equivalents: each event counts its
+transferred fraction of the path's **Filesize** - the estimated total
+size of the path's content, learned from response sizes
+(`Content-Length` on GET/HEAD 200, `Content-Range` totals on GET 206),
+never from the bytes a request happened to transfer
+([GLOSSARY.md](../GLOSSARY.md),
+[ADR 0019](adr/0019-filesize-from-response-sizes.md)). While the
+estimate is unknown - warm-up, or a log emitter without the
+response-size fields - replay is blind and the event adds nothing to
+the tracker.
+
 The shipped ladder's `bandage -t` output shows every rung with its
 threshold and its actions; the tracker line carries no volume (the
 rungs carry every threshold) and its `ttl` from the top rung:
