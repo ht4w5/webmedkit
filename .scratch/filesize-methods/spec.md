@@ -123,14 +123,15 @@ requests anything from the protected server itself.
    The parser extracts the total; header syntax never reaches the
    domain. `Sent` keeps its current meaning and uses.
 
-2. **The Filter gates the enrichment path wholly.** A new
-   `enrichment.filter` config key (optional, default `any`, compiled by
-   the same expression parser and matcher seam as rule filters).
+2. **The Filter gates the enrichment path wholly.** The rules file's
+   top-level `enrichment` block carries `enrichment.filter` (optional,
+   default `any`, compiled by the same expression parser and matcher
+   seam as rule filters).
    Unmatched: every derived field is reset to its default in one place -
    the single reset reserved for future enrichments - with no
    observation and no enrichment-state touch. Matched: the event is
-   enriched. The whole enrichment config block is optional; unknown
-   keys and invalid values abort startup naming the key.
+   enriched. The whole enrichment block is optional; unknown
+   keys and invalid values abort loading naming the key.
 
 3. **The Sampling rule is a hard-coded invariant, not configuration.**
    Only matched events can observe, and among those only: GET or HEAD
@@ -170,7 +171,7 @@ requests anything from the protected server itself.
 8. **Modules touched.** The Event type (two new original fields); the
    nginx log-format definition and parser (two fields, strict/lenient
    split); the enrichment module (gate, reset, Sampling rule,
-   observation source); the daemon configuration and pipeline wiring
+   observation source); the rules loader and pipeline wiring
    (the enrichment block, filter compilation); documentation (glossary,
    ADR, ingest/rules docs). The evaluation module, tracker math and
    report persistence are unchanged.
@@ -201,9 +202,10 @@ active probing removed the only one that had been proposed):
 3. **Existing parser seam** (one line in, one event or error out): the
    strict-vs-lenient field tables for `clen` and `crange`. Prior art:
    the parser's current field-validation table tests.
-4. **Existing config seam** (strict decode): `enrichment.filter`
-   compiles or aborts startup naming the key; unknown enrichment keys
-   abort. Prior art: the config's strict-decode tests.
+4. **Existing rules-loading seam** (strict decode): the rules file's
+   `enrichment` block compiles or aborts loading naming the key;
+   unknown enrichment keys abort. Prior art: the rules loader's
+   block-validation tests.
 
 Benchmarks run at the pipeline bench seam with the new observation path;
 they must show no regression.
@@ -223,6 +225,10 @@ they must show no regression.
 
 ## Further Notes
 
+- **Amended after implementation:** the enrichment settings live in the
+  rules file's `enrichment` block, not the application config - the
+  rules author owns them, and `enrichment:` in `bandage.yml` is
+  rejected as an unknown key.
 - **Already recorded during design:** `GLOSSARY.md` redefines **Filesize**
   (learned from observed response sizes) and **Filter** (decides whether
   a rule or the enrichment path considers an event), and adds
