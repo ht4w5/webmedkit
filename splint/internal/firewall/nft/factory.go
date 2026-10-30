@@ -91,8 +91,10 @@ func (f *Factory) Validate() error {
 }
 
 // parseScope resolves one direction's scope flag values into its
-// validated enforcement scope. Refused values fail before anything is
-// enforced, each error naming its flag and the offending value.
+// validated enforcement scope. Duplicate values resolve to one entry;
+// overlapping address prefixes are refused as ambiguous. Refused
+// values fail before anything is enforced, each error naming its flag
+// and the offending value.
 func parseScope(protos, ports, addrs []string, protoFlag, portFlag, addrFlag string) (Scope, error) {
 	var scope Scope
 	var err error
@@ -105,7 +107,42 @@ func parseScope(protos, ports, addrs []string, protoFlag, portFlag, addrFlag str
 	if scope.Addrs, err = parseAddrs(addrFlag, addrs); err != nil {
 		return Scope{}, err
 	}
+	// Duplicate values — within one comma list, across repeats, or a
+	// bare address and its host prefix — resolve to one scope entry,
+	// silently: a kernel batch must never see a value twice (ADR 0018).
+	scope.L4Protos = dedup(scope.L4Protos)
+	scope.Ports = dedup(scope.Ports)
+	scope.Addrs = dedup(scope.Addrs)
+	// Overlapping address prefixes within one scope are ambiguous: one
+	// covers part of the other's traffic, and the enforcement outcome
+	// would not be what the command line states. Equal prefixes were
+	// deduplicated above; CIDR blocks are either disjoint or nested,
+	// so any remaining overlap is a mistake to refuse before anything
+	// enforces.
+	for i, a := range scope.Addrs {
+		for _, b := range scope.Addrs[i+1:] {
+			if a.Overlaps(b) {
+				return Scope{}, fmt.Errorf("%s: overlapping address prefixes (got %q and %q)", addrFlag, a, b)
+			}
+		}
+	}
 	return scope, nil
+}
+
+// dedup drops repeated values, keeping each value's first occurrence:
+// a scope is a set of values, and its resolved entries stay in the
+// order the operator stated them.
+func dedup[T comparable](values []T) []T {
+	seen := make(map[T]struct{}, len(values))
+	out := make([]T, 0, len(values))
+	for _, v := range values {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // parseL4Protos parses a protocol scope: strict lowercase tcp or udp,
