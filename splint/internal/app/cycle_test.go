@@ -680,6 +680,32 @@ func TestUpdateCycleLogsAndCountsDeclinedFeatures(t *testing.T) {
 		}
 	})
 
+	t.Run("a scope-unreachable decline is logged with its reason and counted", func(t *testing.T) {
+		srv := newDocServer(t)
+		srv.serve(http.StatusOK, fixture(t, func(t *testing.T, doc map[string]any) {
+			setReports(t, doc, []reportSpec{{target: "203.0.113.7/32", action: domain.PenaltyDrop}})
+		}))
+		u, stub, logs := newTestUpdater(t, srv)
+		stub.ApplyDeclined = []firewall.Decline{{
+			Rule:    0,
+			Feature: "drop",
+			Reason:  "the ingress enforcement scope cannot reach any target address family",
+		}}
+
+		if _, err := u.Update(context.Background()); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		logText := logs.String()
+		if n := strings.Count(logText, "declined ban rule feature"); n != 1 {
+			t.Fatalf("logged %d declines, want 1: %s", n, logText)
+		}
+		for _, want := range []string{`"rule":0`, `"feature":"drop"`, `"reason":"the ingress enforcement scope cannot reach any target address family"`, `"declined":1`} {
+			if !strings.Contains(logText, want) {
+				t.Errorf("the scope-unreachable decline is not logged with %q: %s", want, logText)
+			}
+		}
+	})
+
 	t.Run("a cycle whose driver declines nothing logs no declines", func(t *testing.T) {
 		srv := newDocServer(t)
 		srv.serve(http.StatusOK, doc)
@@ -1541,6 +1567,40 @@ func TestDryRunPrintsTheDriverPlan(t *testing.T) {
     "rate": 1000000
   }
 ]
+stance=limit-bandwidth rate=1000000 placement=test
+`
+		body, _ := splitDryRunHash(t, out.String())
+		if body != want {
+			t.Errorf("DryRun output = %q, want %q", body, want)
+		}
+		assertApplies(t, stub, nil)
+	})
+
+	t.Run("each direction's effective scope prints next to the placement lines", func(t *testing.T) {
+		srv := newDocServer(t)
+		srv.serve(http.StatusOK, canonicalDoc(t))
+		u, stub, _ := newTestUpdater(t, srv)
+		stub.Placement = "test"
+		stub.Scopes = []string{
+			"scope=ingress l4proto=tcp,udp dport=443 daddr=203.0.113.5/32",
+			"scope=egress l4proto=tcp,udp sport=443 saddr=203.0.113.5/32",
+		}
+
+		var out bytes.Buffer
+		if err := u.DryRun(context.Background(), &out); err != nil {
+			t.Fatalf("DryRun: %v", err)
+		}
+		want := `[
+  {
+    "targets": [
+      "203.0.113.7/32"
+    ],
+    "stance": "limit-bandwidth",
+    "rate": 1000000
+  }
+]
+scope=ingress l4proto=tcp,udp dport=443 daddr=203.0.113.5/32
+scope=egress l4proto=tcp,udp sport=443 saddr=203.0.113.5/32
 stance=limit-bandwidth rate=1000000 placement=test
 `
 		body, _ := splitDryRunHash(t, out.String())

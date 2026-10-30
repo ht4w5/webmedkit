@@ -214,11 +214,15 @@ func tableExists(conn kernelConn, table *nftables.Table) (bool, error) {
 // the effective rules (the ban rules it can honour, narrowed to the
 // target prefixes that reach their address families), their
 // placement labels (a change of --hook is a change of effective
-// rules), the ruleset hash, and the declines with reasons. --dry-run
-// prints exactly this. A ban rule neither honourable nor declinable
-// refuses the plan loudly.
+// rules), each direction's effective enforcement scope as one
+// already-formatted line, the ruleset hash, and the declines with
+// reasons. --dry-run prints exactly this. A ban rule neither
+// honourable nor declinable refuses the plan loudly.
 func (d *Driver) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
-	plan := firewall.Plan{}
+	plan := firewall.Plan{Scopes: []string{
+		banDirection{name: ingressName, scope: d.ingressScope}.scopeLine(),
+		banDirection{name: egressName, matchDst: true, scope: d.egressScope}.scopeLine(),
+	}}
 	for i, r := range rules {
 		if r.Stance == firewall.StanceLimitReqRate {
 			// limit-req-rate is application-layer intent the packet layer
@@ -239,7 +243,15 @@ func (d *Driver) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
 		}
 		fams := ruleFamilies(r, dir.scope)
 		if len(fams) == 0 {
-			continue // the direction's enforcement scope cannot reach it: it installs nothing
+			// The direction's enforcement scope cannot reach the ban rule
+			// at all: declined loudly with a reason — a vanishing ban rule
+			// would leave "why isn't this banned?" unanswerable.
+			plan.Declined = append(plan.Declined, firewall.Decline{
+				Rule:    i,
+				Feature: string(r.Stance),
+				Reason:  fmt.Sprintf("the %s enforcement scope cannot reach any target address family", dir.name),
+			})
+			continue
 		}
 		effective := r
 		effective.Targets = nil
@@ -358,6 +370,53 @@ func (b banDirection) portOff() uint32 {
 		return sportOff
 	}
 	return dportOff
+}
+
+// scopeLine formats the direction's effective enforcement scope as
+// one already-formatted --dry-run line: the scope's field names (the
+// flag names' tail — dport/daddr on ingress, sport/saddr on egress),
+// the effective protocol gate (the tcp,udp default included), and
+// "all" where the scope matches every port or address. Opaque above
+// the driver: the engine prints the line and never parses it.
+func (b banDirection) scopeLine() string {
+	portField, addrField := "dport", "daddr"
+	if b.matchDst {
+		portField, addrField = "sport", "saddr"
+	}
+	protos := make([]string, 0, len(b.scope.l4protos()))
+	for _, p := range b.scope.l4protos() {
+		protos = append(protos, protoName(p))
+	}
+	ports := "all"
+	if len(b.scope.Ports) > 0 {
+		nums := make([]string, 0, len(b.scope.Ports))
+		for _, p := range b.scope.Ports {
+			nums = append(nums, strconv.Itoa(int(p)))
+		}
+		ports = strings.Join(nums, ",")
+	}
+	addrs := "all"
+	if len(b.scope.Addrs) > 0 {
+		strs := make([]string, 0, len(b.scope.Addrs))
+		for _, a := range b.scope.Addrs {
+			strs = append(strs, a.Masked().String())
+		}
+		addrs = strings.Join(strs, ",")
+	}
+	return fmt.Sprintf("scope=%s l4proto=%s %s=%s %s=%s",
+		b.name, strings.Join(protos, ","), portField, ports, addrField, addrs)
+}
+
+// protoName names a scope protocol for the scope line: the well-known
+// tcp and udp names, the protocol number otherwise.
+func protoName(p byte) string {
+	switch p {
+	case unix.IPPROTO_TCP:
+		return "tcp"
+	case unix.IPPROTO_UDP:
+		return "udp"
+	}
+	return strconv.Itoa(int(p))
 }
 
 // The per-ban-rule scope set names, field-named per direction: il4/

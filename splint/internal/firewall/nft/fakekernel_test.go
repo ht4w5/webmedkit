@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 
 	"github.com/HT4w5/webmedkit/splint/internal/firewall"
 )
@@ -310,7 +311,7 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 		}
 	})
 
-	t.Run("the ingress scope narrows ingress rules to the families it can reach", func(t *testing.T) {
+	t.Run("the ingress scope narrows a partially reachable ingress rule and never declines it", func(t *testing.T) {
 		rules := []firewall.BanRule{{
 			Targets: []netip.Prefix{
 				netip.MustParsePrefix("203.0.113.7/32"),
@@ -333,9 +334,12 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 		if !reflect.DeepEqual(plan.Rules, want) {
 			t.Errorf("effective rules = %+v, want only the reachable family's target: %+v", plan.Rules, want)
 		}
+		if len(plan.Declined) != 0 {
+			t.Errorf("declined = %+v, want none (a partially reachable ban rule is never declined)", plan.Declined)
+		}
 	})
 
-	t.Run("the egress scope narrows egress rules to the families it can reach", func(t *testing.T) {
+	t.Run("the egress scope narrows a partially reachable egress rule and never declines it", func(t *testing.T) {
 		rules := []firewall.BanRule{bandwidthFixture(1000000,
 			"203.0.113.9/32",
 			"2001:db8::9/128",
@@ -356,41 +360,59 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 		if !reflect.DeepEqual(plan.Rules, want) {
 			t.Errorf("effective rules = %+v, want only the reachable family's target: %+v", plan.Rules, want)
 		}
+		if len(plan.Declined) != 0 {
+			t.Errorf("declined = %+v, want none (a partially reachable ban rule is never declined)", plan.Declined)
+		}
 	})
 
 	t.Run("an ingress-only scope never constrains egress rules", func(t *testing.T) {
 		rules := []firewall.BanRule{
-			{Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.7/32")}, Stance: firewall.StanceDrop},
-			bandwidthFixture(1000000, "203.0.113.9/32"),
+			{Targets: []netip.Prefix{netip.MustParsePrefix("2001:db8::7/128")}, Stance: firewall.StanceDrop},
+			bandwidthFixture(1000000, "203.0.113.9/32", "2001:db8::9/128"),
 		}
 		ingress := Scope{Addrs: []netip.Prefix{netip.MustParsePrefix("2001:db8::5/128")}}
 		plan, err := newFakeScopedDriver(t, HookInput, ingress, Scope{}, kernel).Plan(rules)
 		if err != nil {
 			t.Fatalf("Plan: %v", err)
 		}
-		want := []firewall.PlannedRule{{BanRule: rules[1], Placement: "egress@output"}}
+		want := []firewall.PlannedRule{
+			{BanRule: rules[0], Placement: "ingress@input"},
+			{BanRule: rules[1], Placement: "egress@output"},
+		}
 		if !reflect.DeepEqual(plan.Rules, want) {
-			t.Errorf("effective rules = %+v, want the egress rule whole: %+v", plan.Rules, want)
+			t.Errorf("effective rules = %+v, want both rules whole (the egress rule keeps every family): %+v", plan.Rules, want)
+		}
+		if len(plan.Declined) != 0 {
+			t.Errorf("declined = %+v, want none", plan.Declined)
 		}
 	})
 
 	t.Run("an egress-only scope never constrains ingress rules", func(t *testing.T) {
 		rules := []firewall.BanRule{
-			{Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.7/32")}, Stance: firewall.StanceDrop},
-			bandwidthFixture(1000000, "203.0.113.9/32"),
+			{Targets: []netip.Prefix{
+				netip.MustParsePrefix("203.0.113.7/32"),
+				netip.MustParsePrefix("2001:db8::7/128"),
+			}, Stance: firewall.StanceDrop},
+			bandwidthFixture(1000000, "2001:db8::9/128"),
 		}
 		egress := Scope{Addrs: []netip.Prefix{netip.MustParsePrefix("2001:db8::5/128")}}
 		plan, err := newFakeScopedDriver(t, HookInput, Scope{}, egress, kernel).Plan(rules)
 		if err != nil {
 			t.Fatalf("Plan: %v", err)
 		}
-		want := []firewall.PlannedRule{{BanRule: rules[0], Placement: "ingress@input"}}
+		want := []firewall.PlannedRule{
+			{BanRule: rules[0], Placement: "ingress@input"},
+			{BanRule: rules[1], Placement: "egress@output"},
+		}
 		if !reflect.DeepEqual(plan.Rules, want) {
-			t.Errorf("effective rules = %+v, want the ingress rule whole: %+v", plan.Rules, want)
+			t.Errorf("effective rules = %+v, want both rules whole (the ingress rule keeps every family): %+v", plan.Rules, want)
+		}
+		if len(plan.Declined) != 0 {
+			t.Errorf("declined = %+v, want none", plan.Declined)
 		}
 	})
 
-	t.Run("a ban rule no family can reach installs nothing and is not effective", func(t *testing.T) {
+	t.Run("a ban rule no direction's scope can reach is declined with a reason and is not effective", func(t *testing.T) {
 		rules := []firewall.BanRule{{
 			Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.7/32")},
 			Stance:  firewall.StanceDrop,
@@ -400,8 +422,58 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Plan: %v", err)
 		}
-		if len(plan.Rules) != 0 || len(plan.Declined) != 0 {
-			t.Errorf("plan = %+v, want no effective rules and no declines for an unreachable ban rule", plan)
+		if len(plan.Rules) != 0 {
+			t.Errorf("effective rules = %+v, want none (the unreachable ban rule installs nothing)", plan.Rules)
+		}
+		if len(plan.Declined) != 1 {
+			t.Fatalf("declined = %+v, want exactly rule 0's scope-unreachable decline", plan.Declined)
+		}
+		if got := plan.Declined[0]; got.Rule != 0 || got.Feature != "drop" || got.Reason == "" {
+			t.Errorf("declined = %+v, want rule 0's drop with a reason", got)
+		}
+	})
+}
+
+// The plan carries each direction's effective enforcement scope as
+// one already-formatted line — the --dry-run surface, opaque to
+// everything above the driver.
+func TestPlanReportsTheEnforcementScopes(t *testing.T) {
+	kernel := newFakeKernel()
+
+	t.Run("each direction's line states its protocols, ports and addresses", func(t *testing.T) {
+		ingress := Scope{
+			L4Protos: []byte{unix.IPPROTO_TCP},
+			Ports:    []uint16{443},
+			Addrs:    mustPrefixes("203.0.113.5/32"),
+		}
+		egress := Scope{
+			Ports: []uint16{80, 443},
+			Addrs: mustPrefixes("2001:db8::5/128"),
+		}
+		plan, err := newFakeScopedDriver(t, HookInput, ingress, egress, kernel).Plan(nil)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		want := []string{
+			"scope=ingress l4proto=tcp dport=443 daddr=203.0.113.5/32",
+			"scope=egress l4proto=tcp,udp sport=80,443 saddr=2001:db8::5/128",
+		}
+		if !reflect.DeepEqual(plan.Scopes, want) {
+			t.Errorf("scope lines = %q, want %q", plan.Scopes, want)
+		}
+	})
+
+	t.Run("an unscoped direction reports the tcp,udp default and all ports and addresses", func(t *testing.T) {
+		plan, err := newFakeDriver(t, HookInput, kernel).Plan(nil)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		want := []string{
+			"scope=ingress l4proto=tcp,udp dport=all daddr=all",
+			"scope=egress l4proto=tcp,udp sport=all saddr=all",
+		}
+		if !reflect.DeepEqual(plan.Scopes, want) {
+			t.Errorf("scope lines = %q, want %q", plan.Scopes, want)
 		}
 	})
 }

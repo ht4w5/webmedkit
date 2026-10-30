@@ -38,6 +38,11 @@ type Stub struct {
 	// Placement is the placement label every planned rule carries.
 	Placement string
 
+	// Scopes, when set before use, are the effective enforcement scope
+	// lines every plan reports — one already-formatted line per
+	// direction, printed by the engine and never parsed.
+	Scopes []string
+
 	mu      sync.Mutex
 	applies [][]firewall.BanRule
 	resets  int
@@ -52,7 +57,7 @@ func (s *Stub) Plan(rules []firewall.BanRule) (firewall.Plan, error) {
 }
 
 func (s *Stub) scriptedPlan(rules []firewall.BanRule) firewall.Plan {
-	plan := firewall.Plan{Declined: slices.Clone(s.ApplyDeclined)}
+	plan := firewall.Plan{Declined: slices.Clone(s.ApplyDeclined), Scopes: slices.Clone(s.Scopes)}
 	declined := map[int]bool{}
 	for _, d := range plan.Declined {
 		declined[d.Rule] = true
