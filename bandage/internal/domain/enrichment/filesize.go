@@ -1,5 +1,6 @@
 // Package enrichment derives Event fields from observed traffic: a
-// Filesize estimate (GLOSSARY: Filesize) learned per path from transfers.
+// Filesize estimate (GLOSSARY: Filesize) learned per path from observed
+// response sizes.
 package enrichment
 
 import (
@@ -14,7 +15,7 @@ import (
 type FilesizeRecord struct {
 	// SizeEWMA is the smoothed average size in bytes (integer EWMA).
 	SizeEWMA int64
-	// Samples counts the observed transfers of the path.
+	// Samples counts the observed response sizes of the path.
 	Samples int
 }
 
@@ -25,7 +26,8 @@ type FilesizeCache interface {
 	Update(ctx context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error)
 }
 
-// FilesizeEnricher estimates each path's file size from observed transfers.
+// FilesizeEnricher estimates each path's file size from observed response
+// sizes.
 type FilesizeEnricher struct {
 	cache      FilesizeCache
 	period     int64
@@ -47,16 +49,24 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*Fi
 	}, nil
 }
 
-// Enrich records the event's transfer and sets event.SizeBytes: the estimate from sample minSamples on (the Nth event included), else FilesizeUnknown.
+// Enrich sets event.SizeBytes from the path's estimate: the estimate from
+// sample minSamples on (the Nth observation included), else FilesizeUnknown.
+// The Sampling rule (GLOSSARY) is hard-coded and admits only GET/HEAD 200
+// events carrying a Content-Length; ineligible events add no observation
+// but are still enriched with the current estimate.
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) error {
+	obs, ok := observation(event)
 	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
+		if !ok {
+			return // ineligible: read the record, observe nothing
+		}
 		if r.Samples == 0 {
 			// Seed with the first observation exactly (no blending).
-			r.SizeEWMA = event.SentBytes
+			r.SizeEWMA = obs
 			r.Samples = 1
 			return
 		}
-		r.SizeEWMA = ewma(r.SizeEWMA, event.SentBytes, fe.period)
+		r.SizeEWMA = ewma(r.SizeEWMA, obs, fe.period)
 		r.Samples++
 	})
 	if err != nil {
@@ -69,6 +79,18 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) err
 		event.SizeBytes = domain.FilesizeUnknown
 	}
 	return nil
+}
+
+// observation reports the event's size observation under the Sampling
+// rule (GLOSSARY): only GET or HEAD 200 responses carrying a
+// Content-Length feed the estimate. Transferred bytes, 304
+// revalidations, length-less responses, range responses and error
+// bodies never observe, whatever else admits an event.
+func observation(event *domain.Event) (int64, bool) {
+	if event.Status == 200 && (event.Method == "GET" || event.Method == "HEAD") && event.ContentLength > 0 {
+		return event.ContentLength, true
+	}
+	return 0, false
 }
 
 // ewma is prev + (observed-prev)/period with truncating division (no floats).

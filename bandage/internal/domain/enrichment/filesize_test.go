@@ -22,9 +22,16 @@ func (c *stubCache) Update(_ context.Context, path string, fn func(*FilesizeReco
 	return r, nil
 }
 
-func enrichOnce(t *testing.T, fe *FilesizeEnricher, path string, sent int64) int64 {
+// enrichOnce feeds one observation-eligible event (a GET 200 response
+// carrying the given Content-Length) and returns its derived size.
+func enrichOnce(t *testing.T, fe *FilesizeEnricher, path string, observed int64) int64 {
 	t.Helper()
-	ev := &domain.Event{Path: path, SentBytes: sent}
+	return enrichEvent(t, fe, &domain.Event{Path: path, Method: "GET", Status: 200, ContentLength: observed})
+}
+
+// enrichEvent feeds one event and returns its derived size.
+func enrichEvent(t *testing.T, fe *FilesizeEnricher, ev *domain.Event) int64 {
+	t.Helper()
 	if err := fe.Enrich(context.Background(), ev); err != nil {
 		t.Fatalf("Enrich error: %v", err)
 	}
@@ -57,7 +64,8 @@ func TestNewFilesizeEnricherValidation(t *testing.T) {
 
 // EWMA: prev + (observed-prev)/period with int64 truncating division.
 // The first row pins the seed: the first observation lands exactly,
-// with no blend against an implied zero.
+// with no blend against an implied zero. Observations are response
+// sizes (Content-Length), never transferred bytes.
 func TestEnrichEWMAIntegerMath(t *testing.T) {
 	tests := []struct {
 		observed int64
@@ -86,9 +94,9 @@ func TestEnrichPeriodOneTracksObservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sent := range []int64{500, 7, 3000} {
-		if got := enrichOnce(t, fe, "/a", sent); got != sent {
-			t.Errorf("size after %d = %d, want %d", sent, got, sent)
+	for _, observed := range []int64{500, 7, 3000} {
+		if got := enrichOnce(t, fe, "/a", observed); got != observed {
+			t.Errorf("size after %d = %d, want %d", observed, got, observed)
 		}
 	}
 }
@@ -116,7 +124,7 @@ func TestEnrichOverwritesStaleSizeBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := &domain.Event{Path: "/a", SentBytes: 100, SizeBytes: 999}
+	ev := &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 100, SizeBytes: 999}
 	if err := fe.Enrich(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
@@ -142,5 +150,57 @@ func TestEnrichStateIsPerPath(t *testing.T) {
 	}
 	if got := enrichOnce(t, fe, "/b", 2000); got != 2000 {
 		t.Errorf("/b warm size = %d, want 2000", got)
+	}
+}
+
+// The Sampling rule admits only GET/HEAD 200 responses carrying a
+// Content-Length; every other event is enriched with the current
+// estimate but adds no observation. Transferred bytes never observe,
+// whatever their size.
+func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []int64{0, 0, 0, 0, 1000} {
+		if got := enrichOnce(t, fe, "/a", 1000); got != want {
+			t.Fatalf("warm-up sample %d: size = %d, want %d", i+1, got, want)
+		}
+	}
+	ineligible := []*domain.Event{
+		{Path: "/a", Method: "GET", Status: 304, ContentLength: 99999},  // revalidation, even carrying a length
+		{Path: "/a", Method: "HEAD", Status: 200},                       // length-less HEAD
+		{Path: "/a", Method: "GET", Status: 200, SentBytes: 88888},      // chunked body: transferred bytes only
+		{Path: "/a", Method: "GET", Status: 206, ContentLength: 77777},  // range response
+		{Path: "/a", Method: "POST", Status: 200, ContentLength: 66666}, // non-GET/HEAD
+		{Path: "/a", Method: "GET", Status: 404, ContentLength: 55555},  // error body
+	}
+	for i, ev := range ineligible {
+		if got := enrichEvent(t, fe, ev); got != 1000 {
+			t.Errorf("ineligible %d (%s %d): size = %d, want the current estimate 1000", i, ev.Method, ev.Status, got)
+		}
+	}
+	// One more observation moves the estimate exactly one step: nothing
+	// between the last observation and this one observed.
+	if got := enrichOnce(t, fe, "/a", 2000); got != 1200 {
+		t.Errorf("size after observation 2000 = %d, want 1200 (only observations move the estimate)", got)
+	}
+}
+
+// The warm-up gate covers ineligible events too: they carry the current
+// estimate only from the gate on, else the unknown default.
+func TestEnrichIneligibleEventsFollowWarmUpGate(t *testing.T) {
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrichOnce(t, fe, "/a", 1000)
+	enrichOnce(t, fe, "/a", 1000)
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 304}); got != domain.FilesizeUnknown {
+		t.Errorf("ineligible during warm-up: size = %d, want unknown", got)
+	}
+	enrichOnce(t, fe, "/a", 1000)
+	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 304}); got != 1000 {
+		t.Errorf("ineligible after warm-up: size = %d, want the current estimate 1000", got)
 	}
 }

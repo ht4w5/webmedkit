@@ -118,7 +118,7 @@ func TestCorpusFullLinesAddOptionalAndUnknownFields(t *testing.T) {
 		if err := json.Unmarshal([]byte(c.Line(i)), &fields); err != nil {
 			t.Fatalf("line %d is not a JSON object: %v", i, err)
 		}
-		for _, k := range []string{"time", "client", "server", "method", "url", "duration", "host", "status", "sent", "agent", "extra"} {
+		for _, k := range []string{"time", "client", "server", "method", "url", "duration", "host", "status", "sent", "clen", "agent", "extra"} {
 			if _, ok := fields[k]; !ok {
 				t.Errorf("full line %d is missing field %q", i, k)
 			}
