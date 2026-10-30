@@ -1,0 +1,24 @@
+# 03: Enrichment Filter gate
+
+**What to build:** A Filter over events - the rule filter language -
+gates the enrichment path wholly, configured as `enrichment.filter` and
+defaulting to `any` like rules. Unmatched events carry default derived
+fields and nothing else: no observation, no enrichment-state touch, no
+stale values. Matched events are enriched as before. The Sampling rule
+stays stricter than any Filter, so a widened filter can never poison
+the estimate. A bad filter expression aborts startup naming the key.
+Demo: scope the filter to one path prefix and watch everything outside
+it flow through evaluation with default derived fields.
+
+**Blocked by:** 01
+
+**Status:** ready-for-agent
+
+- [ ] `enrichment.filter` compiles with the rule filter language; an invalid expression aborts startup naming the key; an unknown enrichment config key aborts startup
+- [ ] An unset filter defaults to `any`, like rules
+- [ ] Unmatched events carry default derived fields (the unknown Filesize) and never touch enrichment state - zero cache updates, zero observations
+- [ ] The derived-field reset runs for every event, before gating, in one place - the reservation for future enrichments
+- [ ] A widened filter cannot poison the estimate: `304`, `416`, error and headerless traffic never observe even when the Filter admits them
+- [ ] End-to-end: scoped-out traffic is enriched by nothing; scoped-in traffic behaves exactly as in tickets 01-02
+
+Context: spec `../spec.md` (Implementation Decisions 2-3).

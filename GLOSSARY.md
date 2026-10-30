@@ -14,13 +14,21 @@ evaluation.
 _Avoid_: request, log entry, record
 
 **Filter**:
-A predicate over an Event deciding whether a rule considers the event.
+A predicate over an Event deciding whether a rule or the enrichment path
+considers the event.
 _Avoid_: where clause, condition
 
 **Filesize**:
-The estimated total size of a path, learned from observed transfers and
-unavailable until enough samples have been seen.
+The total size of a path's content, learned from observed response sizes
+(Content-Length on GET/HEAD 200, Content-Range totals on GET 206);
+unknown until enough observations have been seen.
 _Avoid_: size index, file length
+
+**Sampling rule**:
+The fixed, non-configurable rule deciding which events contribute an
+observation to the Filesize estimate - GET/HEAD 200 with a Content-Length,
+GET 206 with a Content-Range total. Not a Filter.
+_Avoid_: ewma filter, eligibility filter
 
 ### Rules
 
