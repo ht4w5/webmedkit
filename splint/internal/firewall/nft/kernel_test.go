@@ -77,13 +77,25 @@ func TestKernelInstallReadBackReset(t *testing.T) {
 	}
 	assertUnscopedKernelState(t, conn, HookInput)
 
-	// Phase 2: the scoped encoding at prerouting, rebuilding over the
-	// live table. Hit counts vary: only the mapping is asserted.
-	scope := Prefilter{
-		DstPorts: []uint16{53, 443},
-		DstAddrs: []netip.Prefix{
+	// Phase 2: the per-direction scoped encoding at prerouting,
+	// rebuilding over the live table. The scopes carry distinct values
+	// per direction — the ingress scope states the service's
+	// destination fields, the egress scope its source fields. Hit
+	// counts vary: only the mapping is asserted.
+	ingressScope := Scope{
+		L4Protos: []byte{unix.IPPROTO_TCP},
+		Ports:    []uint16{443, 8443},
+		Addrs: []netip.Prefix{
 			netip.MustParsePrefix("198.51.100.5/32"),
 			netip.MustParsePrefix("2001:db8::5/128"),
+		},
+	}
+	egressScope := Scope{
+		L4Protos: []byte{unix.IPPROTO_UDP},
+		Ports:    []uint16{53},
+		Addrs: []netip.Prefix{
+			netip.MustParsePrefix("192.0.2.5/32"),
+			netip.MustParsePrefix("2001:db8:1::5/128"),
 		},
 	}
 	scopedRules := []firewall.BanRule{
@@ -95,12 +107,15 @@ func TestKernelInstallReadBackReset(t *testing.T) {
 			Stance: firewall.StanceDrop,
 		},
 		{
-			Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.9/32")},
-			Stance:  firewall.StanceLimitBandwidth,
-			Rate:    ratePtr(1000000),
+			Targets: []netip.Prefix{
+				netip.MustParsePrefix("203.0.113.9/32"),
+				netip.MustParsePrefix("2001:db8::9/128"),
+			},
+			Stance: firewall.StanceLimitBandwidth,
+			Rate:   ratePtr(1000000),
 		},
 	}
-	prerouting, err := New(Config{Hook: HookPrerouting, Prefilter: scope})
+	prerouting, err := New(Config{Hook: HookPrerouting, Ingress: ingressScope, Egress: egressScope})
 	if err != nil {
 		t.Fatalf("New(prerouting): %v", err)
 	}
@@ -115,11 +130,11 @@ func TestKernelInstallReadBackReset(t *testing.T) {
 	}
 	assertScopedKernelState(t, conn, HookPrerouting)
 
-	// Phase 3: the rule's only family has no destination in the scope,
-	// so it gets no kernel rule at all.
-	v4Only, err := New(Config{Hook: HookInput, Prefilter: Prefilter{
-		DstPorts: []uint16{443},
-		DstAddrs: []netip.Prefix{netip.MustParsePrefix("198.51.100.5/32")},
+	// Phase 3: the rule's only family has no service traffic in the
+	// ingress scope, so it gets no kernel rule at all.
+	v4Only, err := New(Config{Hook: HookInput, Ingress: Scope{
+		Ports: []uint16{443},
+		Addrs: []netip.Prefix{netip.MustParsePrefix("198.51.100.5/32")},
 	}})
 	if err != nil {
 		t.Fatalf("New(v4-only scope): %v", err)
@@ -220,73 +235,91 @@ func TestKernelDeclinesInstallNothing(t *testing.T) {
 func ratePtr(n int64) *int64 { return &n }
 
 // assertUnscopedKernelState reads the owned table back and asserts
-// the unscoped fixture's encoding. Expectations are hand-written
-// from the fixtures, never computed the way the implementation does.
+// the unscoped fixture's encoding: every kernel rule leads with its
+// direction's protocol gate — an unscoped ban covers tcp and udp
+// traffic only. Expectations are hand-written from the fixtures,
+// never computed the way the implementation does.
 func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	t.Helper()
 	// The kernel rules, in install order.
 	ingressRules := []wantRule{
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", tail: dropTail},                                // 203.0.113.0/24 + 198.51.100.7/32
-		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_1", tail: rejectTail},                              // 2001:db8::/32
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", tail: limitTail(expr.LimitTypePkts, 250, 250)}, // 198.51.100.9/32
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_4", tail: dropTail},                                // 255.255.255.0/24
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", l4Set: "il4_0", tail: dropTail},                                // 203.0.113.0/24 + 198.51.100.7/32
+		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_1", l4Set: "il4_1", tail: rejectTail},                              // 2001:db8::/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", tail: limitTail(expr.LimitTypePkts, 250, 250)}, // 198.51.100.9/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_4", l4Set: "il4_4", tail: dropTail},                                // 255.255.255.0/24
 	}
 	egressRules := []wantRule{
-		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
+		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
 	}
 	// The sets behind the rules; v4_4's top-touching range gets the
-	// null end (its "end 0.0.0.0" element).
+	// null end (its "end 0.0.0.0" element). Every rule's protocol gate
+	// holds the unscoped ban's tcp and udp default.
 	wantSets := map[string]wantSet{
-		"v4_0": {interval: true, elems: []string{"end 198.51.100.8", "end 203.0.114.0", "start 198.51.100.7", "start 203.0.113.0"}},
-		"v6_1": {interval: true, elems: []string{"end 2001:db9::", "start 2001:db8::"}},
-		"v4_2": {interval: true, elems: []string{"end 198.51.100.10", "start 198.51.100.9"}},
-		"v4_3": {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
-		"v4_4": {interval: true, elems: []string{"end 0.0.0.0", "start 255.255.255.0"}},
+		"v4_0":  {interval: true, elems: []string{"end 198.51.100.8", "end 203.0.114.0", "start 198.51.100.7", "start 203.0.113.0"}},
+		"v6_1":  {interval: true, elems: []string{"end 2001:db9::", "start 2001:db8::"}},
+		"v4_2":  {interval: true, elems: []string{"end 198.51.100.10", "start 198.51.100.9"}},
+		"v4_3":  {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
+		"v4_4":  {interval: true, elems: []string{"end 0.0.0.0", "start 255.255.255.0"}},
+		"il4_0": {elems: []string{"17", "6"}}, // udp and tcp; sorted as strings
+		"il4_1": {elems: []string{"17", "6"}},
+		"il4_2": {elems: []string{"17", "6"}},
+		"il4_4": {elems: []string{"17", "6"}},
+		"el4_3": {elems: []string{"17", "6"}},
 	}
 	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets)
 }
 
 // assertScopedKernelState reads the owned table back and asserts the
-// scoped fixture's encoding: the rule under the full service
-// prefilter, in both families.
+// scoped fixture's encoding: each rule under its direction's
+// enforcement scope, with the two scopes' values distinct — the
+// ingress scope matches destination fields (dport, daddr), the
+// egress scope source fields (sport, saddr) — in both families.
 func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	t.Helper()
 	ingressRules := []wantRule{
 		{
 			proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0",
-			l4Set: "l4_0", portSet: "port_0", portOff: 2,
-			scopeSet: "dp4_0", scopeOff: 16, scopeLen: 4,
-			tail: dropTail, // 203.0.113.7/32 under the full service prefilter
+			l4Set: "il4_0", portSet: "idp_0", portOff: 2,
+			scopeSet: "ida4_0", scopeOff: 16, scopeLen: 4,
+			tail: dropTail, // 203.0.113.7/32 under the ingress scope
 		},
 		{
 			proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_0",
-			l4Set: "l4_0", portSet: "port_0", portOff: 2,
-			scopeSet: "dp6_0", scopeOff: 24, scopeLen: 16,
-			tail: dropTail, // 2001:db8::7/128 under the full service prefilter
+			l4Set: "il4_0", portSet: "idp_0", portOff: 2,
+			scopeSet: "ida6_0", scopeOff: 24, scopeLen: 16,
+			tail: dropTail, // 2001:db8::7/128 under the ingress scope
 		},
 	}
-	// The egress rule meters the response direction, where the
-	// service prefilter matches as source — sport, saddr — and the
-	// ban target as destination.
+	// The egress rules meter the response direction, where the egress
+	// scope matches as source — sport, saddr — and the ban target as
+	// destination.
 	egressRules := []wantRule{
 		{
 			proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_1",
-			l4Set: "l4_1", portSet: "port_1", portOff: 0,
-			scopeSet: "dp4_1", scopeOff: 12, scopeLen: 4,
-			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 203.0.113.9/32 under the full service prefilter
+			l4Set: "el4_1", portSet: "esp_1", portOff: 0,
+			scopeSet: "esa4_1", scopeOff: 12, scopeLen: 4,
+			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 203.0.113.9/32 under the egress scope
+		},
+		{
+			proto: unix.NFPROTO_IPV6, off: 24, length: 16, setName: "v6_1",
+			l4Set: "el4_1", portSet: "esp_1", portOff: 0,
+			scopeSet: "esa6_1", scopeOff: 8, scopeLen: 16,
+			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 2001:db8::9/128 under the egress scope
 		},
 	}
 	wantSets := map[string]wantSet{
 		"v4_0":   {interval: true, elems: []string{"end 203.0.113.8", "start 203.0.113.7"}},
-		"dp4_0":  {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
 		"v6_0":   {interval: true, elems: []string{"end 2001:db8::8", "start 2001:db8::7"}},
-		"dp6_0":  {interval: true, elems: []string{"end 2001:db8::6", "start 2001:db8::5"}},
 		"v4_1":   {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
-		"dp4_1":  {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
-		"port_0": {elems: []string{"443", "53"}}, // the service ports, matched as dports; sorted as strings
-		"l4_0":   {elems: []string{"17", "6"}},   // udp and tcp; sorted as strings
-		"port_1": {elems: []string{"443", "53"}}, // the service ports, matched as sports
-		"l4_1":   {elems: []string{"17", "6"}},
+		"v6_1":   {interval: true, elems: []string{"end 2001:db8::a", "start 2001:db8::9"}},
+		"ida4_0": {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
+		"ida6_0": {interval: true, elems: []string{"end 2001:db8::6", "start 2001:db8::5"}},
+		"esa4_1": {interval: true, elems: []string{"end 192.0.2.6", "start 192.0.2.5"}},
+		"esa6_1": {interval: true, elems: []string{"end 2001:db8:1::6", "start 2001:db8:1::5"}},
+		"il4_0":  {elems: []string{"6"}},           // the ingress scope gates on tcp alone
+		"idp_0":  {elems: []string{"443", "8443"}}, // the ingress scope's dports; sorted as strings
+		"el4_1":  {elems: []string{"17"}},          // the egress scope gates on udp alone
+		"esp_1":  {elems: []string{"53"}},          // the egress scope's sport
 	}
 	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets)
 }
@@ -389,21 +422,23 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 	}
 }
 
-// wantRule is one expected kernel rule: the match prefix in order,
-// then the counter and the stance's verdict tail. The target-match
-// load is the source address on ingress, the destination address on
-// egress; the service-prefilter load mirrors it — the service is the
-// packet's other end.
+// wantRule is one expected kernel rule: the match prefix in order —
+// the family gate, then the direction's enforcement scope (protocol
+// gate, ports, addresses), then the target match — then the counter
+// and the stance's verdict tail. The target match is the source
+// address on ingress, the destination address on egress; the scope
+// matches the service end of the conversation — destination fields
+// on ingress, source fields on egress.
 type wantRule struct {
 	proto   byte
-	off     uint32
+	off     uint32 // the target-match load: source on ingress, destination on egress
 	length  uint32
 	setName string
 
-	l4Set    string // non-empty: the port prefilter gates on l4proto ∈ l4Set
-	portSet  string
-	portOff  uint32 // the service-port load: dport (2) on ingress, sport (0) on egress
-	scopeSet string // non-empty: the service-address prefilter set
+	l4Set    string // the protocol gate set, drawn from the direction's scope
+	portSet  string // non-empty: the scope's port set
+	portOff  uint32 // the scope's port load: dport (2) on ingress, sport (0) on egress
+	scopeSet string // non-empty: the scope's address set
 	scopeOff uint32
 	scopeLen uint32
 
@@ -438,15 +473,17 @@ func assertChain(t *testing.T, conn *nftables.Conn, table *nftables.Table, name 
 // tailCheck asserts a kernel rule's verdict tail.
 type tailCheck func(t *testing.T, exprs []expr.Any)
 
-// assertMatch asserts the shared rule prefix in match order, then
+// assertMatch asserts the shared rule prefix in match order — the
+// family gate, then the direction's enforcement scope (protocol
+// gate, then the ports and addresses), then the target match — then
 // the counter immediately before the verdict, and returns the
 // verdict tail for the caller.
 func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 	t.Helper()
 	exprs := r.Exprs
-	wantLen := 6
+	wantLen := 7 // family gate, protocol gate, target match, counter
 	if w.portSet != "" {
-		wantLen += 4
+		wantLen += 2
 	}
 	if w.scopeSet != "" {
 		wantLen += 2
@@ -456,21 +493,19 @@ func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 	}
 	assertMeta(t, "family gate", exprs[0], expr.MetaKeyNFPROTO)
 	assertCmp(t, "family gate", exprs[1], []byte{w.proto})
-	i := 2
+	assertMeta(t, "protocol gate", exprs[2], expr.MetaKeyL4PROTO)
+	assertLookup(t, "protocol set", exprs[3], w.l4Set)
+	i := 4
 	if w.portSet != "" {
-		assertMeta(t, "l4proto gate", exprs[i], expr.MetaKeyL4PROTO)
+		assertPayload(t, "scope-port load", exprs[i], expr.PayloadBaseTransportHeader, w.portOff, 2)
 		i++
-		assertLookup(t, "l4proto set", exprs[i], w.l4Set)
-		i++
-		assertPayload(t, "service-port load", exprs[i], expr.PayloadBaseTransportHeader, w.portOff, 2)
-		i++
-		assertLookup(t, "service-port set", exprs[i], w.portSet)
+		assertLookup(t, "scope-port set", exprs[i], w.portSet)
 		i++
 	}
 	if w.scopeSet != "" {
-		assertPayload(t, "service-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.scopeOff, w.scopeLen)
+		assertPayload(t, "scope-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.scopeOff, w.scopeLen)
 		i++
-		assertLookup(t, "service-address set", exprs[i], w.scopeSet)
+		assertLookup(t, "scope-address set", exprs[i], w.scopeSet)
 		i++
 	}
 	assertPayload(t, "target-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.off, w.length)

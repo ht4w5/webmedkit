@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strconv"
 
 	flag "github.com/spf13/pflag"
+	"golang.org/x/sys/unix"
 
 	"github.com/HT4w5/webmedkit/splint/internal/firewall"
 )
@@ -17,14 +19,20 @@ import (
 // and opens its own surface.
 type Factory struct {
 	// The bound flag values, resolved by Validate.
-	hook      string
-	netns     []string
-	ports     []uint
-	addresses []string
+	hook          string
+	netns         []string
+	ingressAddrs  []string
+	ingressPorts  []string
+	ingressProtos []string
+	egressAddrs   []string
+	egressPorts   []string
+	egressProtos  []string
 
-	// The validated hook and scope Open builds its drivers with.
+	// The validated hook and enforcement scopes Open builds its
+	// drivers with.
 	hookValue Hook
-	prefilter Prefilter
+	ingress   Scope
+	egress    Scope
 }
 
 var _ firewall.Factory = (*Factory)(nil)
@@ -42,8 +50,17 @@ func (f *Factory) BindFlags(fs *flag.FlagSet) {
 	// StringArray, not StringSlice: nsfs paths are never comma lists,
 	// and an empty value stays visible to the validation below.
 	fs.StringArrayVar(&f.netns, "nft-netns", nil, "target network namespace nsfs path (repeatable; default: the current namespace)")
-	fs.UintSliceVar(&f.ports, "nft-service-port", nil, "service destination port the ban prefilter matches (repeatable)")
-	fs.StringSliceVar(&f.addresses, "nft-service-address", nil, "service destination address or prefix the ban prefilter matches (repeatable)")
+	// The two enforcement scopes name the packet fields their
+	// direction matches: the ingress scope sees the service at the
+	// destination fields, the egress scope at the source fields. All
+	// values take comma lists or repeats; protocols default to
+	// tcp,udp (ADR 0018).
+	fs.StringSliceVar(&f.ingressAddrs, "nft-ingress-daddr", nil, "ingress scope destination address or prefix (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.ingressPorts, "nft-ingress-dport", nil, "ingress scope destination port 1-65535 (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.ingressProtos, "nft-ingress-l4proto", []string{"tcp", "udp"}, "ingress scope transport protocol: tcp or udp (comma list or repeatable)")
+	fs.StringSliceVar(&f.egressAddrs, "nft-egress-saddr", nil, "egress scope source address or prefix (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.egressPorts, "nft-egress-sport", nil, "egress scope source port 1-65535 (comma list or repeatable; default: all)")
+	fs.StringSliceVar(&f.egressProtos, "nft-egress-l4proto", []string{"tcp", "udp"}, "egress scope transport protocol: tcp or udp (comma list or repeatable)")
 }
 
 func (f *Factory) Validate() error {
@@ -59,28 +76,86 @@ func (f *Factory) Validate() error {
 			return fmt.Errorf("netns: duplicate namespace path %q", path)
 		}
 	}
-	ports := make([]uint16, 0, len(f.ports))
-	for _, v := range f.ports {
-		if v < 1 || v > 65535 {
-			return fmt.Errorf("service port: must be between 1 and 65535 (got %d)", v)
-		}
-		ports = append(ports, uint16(v))
+	ingress, err := parseScope(f.ingressProtos, f.ingressPorts, f.ingressAddrs,
+		"--nft-ingress-l4proto", "--nft-ingress-dport", "--nft-ingress-daddr")
+	if err != nil {
+		return err
 	}
-	addrs := make([]netip.Prefix, 0, len(f.addresses))
-	for _, v := range f.addresses {
+	egress, err := parseScope(f.egressProtos, f.egressPorts, f.egressAddrs,
+		"--nft-egress-l4proto", "--nft-egress-sport", "--nft-egress-saddr")
+	if err != nil {
+		return err
+	}
+	f.hookValue, f.ingress, f.egress = hook, ingress, egress
+	return nil
+}
+
+// parseScope resolves one direction's scope flag values into its
+// validated enforcement scope. Refused values fail before anything is
+// enforced, each error naming its flag and the offending value.
+func parseScope(protos, ports, addrs []string, protoFlag, portFlag, addrFlag string) (Scope, error) {
+	var scope Scope
+	var err error
+	if scope.L4Protos, err = parseL4Protos(protoFlag, protos); err != nil {
+		return Scope{}, err
+	}
+	if scope.Ports, err = parsePorts(portFlag, ports); err != nil {
+		return Scope{}, err
+	}
+	if scope.Addrs, err = parseAddrs(addrFlag, addrs); err != nil {
+		return Scope{}, err
+	}
+	return scope, nil
+}
+
+// parseL4Protos parses a protocol scope: strict lowercase tcp or udp,
+// the only protocols a ban rule can gate on.
+func parseL4Protos(flagName string, values []string) ([]byte, error) {
+	protos := make([]byte, 0, len(values))
+	for _, v := range values {
+		switch v {
+		case "tcp":
+			protos = append(protos, unix.IPPROTO_TCP)
+		case "udp":
+			protos = append(protos, unix.IPPROTO_UDP)
+		default:
+			return nil, fmt.Errorf("%s: must be tcp or udp (got %q)", flagName, v)
+		}
+	}
+	return protos, nil
+}
+
+// parsePorts parses a port scope: exact numbers 1–65535, no ranges.
+func parsePorts(flagName string, values []string) ([]uint16, error) {
+	ports := make([]uint16, 0, len(values))
+	for _, v := range values {
+		n, err := strconv.ParseUint(v, 10, 16)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("%s: must be a number between 1 and 65535 (got %q)", flagName, v)
+		}
+		ports = append(ports, uint16(n))
+	}
+	return ports, nil
+}
+
+// parseAddrs parses an address scope: bare addresses (counting as
+// their host prefixes) or prefixes.
+func parseAddrs(flagName string, values []string) ([]netip.Prefix, error) {
+	addrs := make([]netip.Prefix, 0, len(values))
+	for _, v := range values {
 		p, err := firewall.ParsePrefixOrAddr(v)
 		if err != nil {
-			return fmt.Errorf("service address: %w", err)
+			return nil, fmt.Errorf("%s: %w", flagName, err)
 		}
 		addrs = append(addrs, p)
 	}
-	f.hookValue, f.prefilter = hook, Prefilter{DstPorts: ports, DstAddrs: addrs}
-	return nil
+	return addrs, nil
 }
 
 // Open expands the configured targeting into one driver instance per
 // enforcement point — one per nsfs path, the current namespace when
-// none is configured. Opening is lazy: no I/O happens until a driver
+// none is configured. Every enforcement point of the instance shares
+// the one scope pair. Opening is lazy: no I/O happens until a driver
 // method runs, so --dry-run needs no privileges.
 func (f *Factory) Open() ([]firewall.Point, error) {
 	if err := f.Validate(); err != nil {
@@ -92,7 +167,7 @@ func (f *Factory) Open() ([]firewall.Point, error) {
 	}
 	points := make([]firewall.Point, 0, len(paths))
 	for _, path := range paths {
-		d, err := New(Config{Hook: f.hookValue, Prefilter: f.prefilter, NetNSPath: path})
+		d, err := New(Config{Hook: f.hookValue, Ingress: f.ingress, Egress: f.egress, NetNSPath: path})
 		if err != nil {
 			return nil, err
 		}

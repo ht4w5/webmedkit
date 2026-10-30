@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/nftables"
+	"golang.org/x/sys/unix"
 
 	"github.com/HT4w5/webmedkit/splint/internal/firewall"
 )
@@ -93,13 +94,26 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 		{Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.9/32")}, Stance: firewall.StanceLimitBandwidth, Rate: ratePtr(1000000)},
 		{Targets: []netip.Prefix{netip.MustParsePrefix("255.255.255.0/24")}, Stance: firewall.StanceDrop},
 	}
-	scopedRules := []firewall.BanRule{{
-		Targets: []netip.Prefix{
-			netip.MustParsePrefix("203.0.113.7/32"),
-			netip.MustParsePrefix("2001:db8::7/128"),
+	// The scoped fixture below matches assertScopedKernelState's
+	// hand-written wants: the same shape as the root-gated kernel
+	// test, pinned here against this test's own install.
+	scopedRules := []firewall.BanRule{
+		{
+			Targets: []netip.Prefix{
+				netip.MustParsePrefix("203.0.113.7/32"),
+				netip.MustParsePrefix("2001:db8::7/128"),
+			},
+			Stance: firewall.StanceDrop,
 		},
-		Stance: firewall.StanceDrop,
-	}}
+		{
+			Targets: []netip.Prefix{
+				netip.MustParsePrefix("203.0.113.9/32"),
+				netip.MustParsePrefix("2001:db8::9/128"),
+			},
+			Stance: firewall.StanceLimitBandwidth,
+			Rate:   ratePtr(1000000),
+		},
+	}
 	d, err := New(Config{Hook: HookInput, NetNSPath: path})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -111,13 +125,24 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 	nsConn := scratchConn(t, path)
 	assertUnscopedKernelState(t, nsConn, HookInput)
 
-	scoped, err := New(Config{Hook: HookInput, NetNSPath: path, Prefilter: Prefilter{
-		DstPorts: []uint16{53, 443},
-		DstAddrs: []netip.Prefix{
-			netip.MustParsePrefix("198.51.100.5/32"),
-			netip.MustParsePrefix("2001:db8::5/128"),
+	scoped, err := New(Config{Hook: HookInput, NetNSPath: path,
+		Ingress: Scope{
+			L4Protos: []byte{unix.IPPROTO_TCP},
+			Ports:    []uint16{443, 8443},
+			Addrs: []netip.Prefix{
+				netip.MustParsePrefix("198.51.100.5/32"),
+				netip.MustParsePrefix("2001:db8::5/128"),
+			},
 		},
-	}})
+		Egress: Scope{
+			L4Protos: []byte{unix.IPPROTO_UDP},
+			Ports:    []uint16{53},
+			Addrs: []netip.Prefix{
+				netip.MustParsePrefix("192.0.2.5/32"),
+				netip.MustParsePrefix("2001:db8:1::5/128"),
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("New scoped: %v", err)
 	}
