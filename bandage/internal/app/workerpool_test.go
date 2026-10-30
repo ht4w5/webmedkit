@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
+	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 	"github.com/HT4w5/webmedkit/bandage/internal/domain/report"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 	"github.com/HT4w5/webmedkit/internal/identity"
@@ -44,10 +45,11 @@ func TestNewRejectsNonPositiveWorkerCount(t *testing.T) {
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
-		Cache:    Cache{MaxEntries: 65536},
-		Pipeline: Pipeline{Workers: 0},
-		API:      API{Listen: "127.0.0.1:0"},
+		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
+		Cache:      Cache{MaxEntries: 65536},
+		Pipeline:   Pipeline{Workers: 0},
+		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		API:        API{Listen: "127.0.0.1:0"},
 	}
 	if _, err := New(cfg, chains, identity.For("bandage")); err == nil {
 		t.Fatal("New(workers 0) succeeded, want an error")
@@ -253,10 +255,11 @@ func startWedgeDaemon(t *testing.T, clock *testClock, workers int) *wedgeDaemon 
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: dbPath}},
-		Cache:    Cache{MaxEntries: 65536},
-		Pipeline: Pipeline{Workers: workers},
-		API:      API{Listen: "127.0.0.1:0"},
+		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: dbPath}},
+		Cache:      Cache{MaxEntries: 65536},
+		Pipeline:   Pipeline{Workers: workers},
+		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		API:        API{Listen: "127.0.0.1:0"},
 	}
 	chains, err := ParseRules([]byte(poolRules))
 	if err != nil {
