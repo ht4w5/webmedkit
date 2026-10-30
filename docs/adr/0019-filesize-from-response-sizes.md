@@ -15,8 +15,9 @@ drops the event. Nothing falls back to transferred bytes: an emitter
 without the new fields leaves the estimate unknown (the existing
 warm-up blindness) until it is upgraded and the path re-observed.
 
-Two gates keep the layers honest. The user-defined **Filter**
-(`enrichment.filter`, default `any` like rules) decides which events the
+Two gates keep the layers honest. The user-defined **Filter** (the
+rules file's `enrichment` block, `enrichment.filter`, default `any`
+like rules) decides which events the
 enrichment path considers at all; unmatched events are fully out -
 default derived fields, no observation, no cache touch - and
 matched-but-ineligible events are enriched without observing. The

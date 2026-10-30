@@ -117,7 +117,7 @@ func TestShippedRulesCarryTheGuideDispatcher(t *testing.T) {
 // chains and dispatch" in docs/rules.md - the rationale lives there, not
 // here).
 func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
-	chains, err := LoadRules(shippedRulesPath)
+	rules, err := LoadRules(shippedRulesPath)
 	if err != nil {
 		t.Fatalf("LoadRules(%s) error: %v", shippedRulesPath, err)
 	}
@@ -126,7 +126,7 @@ func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
 	want := []string{"download-abuse", "api", "iso-egress"}
 	var main domain.Chain
 	found := false
-	for _, chain := range chains {
+	for _, chain := range rules.Chains {
 		if chain.Name == domain.EntryChain {
 			main, found = chain, true
 		}

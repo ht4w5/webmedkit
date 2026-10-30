@@ -432,11 +432,11 @@ func assertWrites(t *testing.T, ledger *writeLedger, want map[ledgerCell]int) {
 // benchRules loads a fixture's chains or fails tb.
 func benchRules(tb testing.TB, rules string) []domain.Chain {
 	tb.Helper()
-	chains, err := ParseRules([]byte(rules))
+	doc, err := ParseRules([]byte(rules))
 	if err != nil {
 		tb.Fatalf("ParseRules error: %v", err)
 	}
-	return chains
+	return doc.Chains
 }
 
 // TestEvaluateBenchScenarios pins the episode fixtures: one write per

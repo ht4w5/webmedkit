@@ -21,7 +21,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
@@ -231,20 +230,19 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 		Cache: Cache{MaxEntries: 65536},
 		// The suite asserts exact accumulation values, so it runs the
 		// deterministic single-worker pipeline.
-		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
-		API:        API{Listen: "127.0.0.1:0"},
+		Pipeline: Pipeline{Workers: 1},
+		API:      API{Listen: "127.0.0.1:0"},
 	}
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	chains, err := ParseRules([]byte(rulesYAML))
+	rules, err := ParseRules([]byte(rulesYAML))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
 	logs := &logCapture{}
 	opts := append([]Option{WithClock(clock.Now), WithLogger(zerolog.New(logs))}, extra...)
-	d, err := New(cfg, chains, build, opts...)
+	d, err := New(cfg, rules, build, opts...)
 	if err != nil {
 		t.Fatalf("New error: %v", err)
 	}
@@ -799,7 +797,7 @@ chains:
 // identity it was assembled with - the command constructs the per-name
 // build; the daemon only mirrors it.
 func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
-	chains, err := ParseRules([]byte(bandwidthRules))
+	rules, err := ParseRules([]byte(bandwidthRules))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
@@ -810,12 +808,11 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
-		Cache:      Cache{MaxEntries: 65536},
-		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
-		API:        API{Listen: "127.0.0.1:0"},
-	}, chains, build, WithLogger(zerolog.Nop()))
+		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
+		Cache:    Cache{MaxEntries: 65536},
+		Pipeline: Pipeline{Workers: 1},
+		API:      API{Listen: "127.0.0.1:0"},
+	}, rules, build, WithLogger(zerolog.Nop()))
 	if err != nil {
 		t.Fatalf("New error: %v", err)
 	}

@@ -50,10 +50,11 @@ chains:
 `
 
 func TestParseRulesValid(t *testing.T) {
-	chains, err := ParseRules([]byte(validRules))
+	doc, err := ParseRules([]byte(validRules))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
+	chains := doc.Chains
 	if len(chains) != 2 {
 		t.Fatalf("chains = %d, want 2", len(chains))
 	}
@@ -120,11 +121,11 @@ func TestParseRulesTargetPrefixDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: rate\n          leak: 1\n          volume: 2\n          " + tt.extra
-			chains, err := ParseRules([]byte(yaml))
+			doc, err := ParseRules([]byte(yaml))
 			if err != nil {
 				t.Fatalf("ParseRules error: %v", err)
 			}
-			if got := chains[0].Rules[0].Tracker.TargetPrefix; got != tt.want {
+			if got := doc.Chains[0].Rules[0].Tracker.TargetPrefix; got != tt.want {
 				t.Errorf("target_prefix = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -321,6 +322,12 @@ chains:
 		{name: "unknown key at top level", yaml: "version: 0\nchainz: []\n", wantErr: "chainz"},
 		{name: "unknown key in rule", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        buckets: []\n", wantErr: "buckets"},
 		{name: "unknown key in tracker", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, ttl: 5}\n", wantErr: "ttl"},
+
+		// Enrichment block.
+		{name: "enrichment filter accepted", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+		{name: "empty enrichment block defaults to any", yaml: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+		{name: "invalid enrichment filter", yaml: "version: 0\nenrichment:\n  filter: bogus\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: "enrichment.filter"},
+		{name: "unknown key in enrichment block", yaml: "version: 0\nenrichment:\n  filter: any\n  observe: sent\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: `enrichment: unknown key "observe"`},
 
 		// Filter.
 		{name: "omitted filter defaults to any", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
@@ -1525,12 +1532,12 @@ func TestLoadRulesFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(validRules), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	chains, err := LoadRules(path)
+	doc, err := LoadRules(path)
 	if err != nil {
 		t.Fatalf("LoadRules error: %v", err)
 	}
-	if len(chains) != 2 {
-		t.Errorf("chains = %d, want 2", len(chains))
+	if len(doc.Chains) != 2 {
+		t.Errorf("chains = %d, want 2", len(doc.Chains))
 	}
 }
 
@@ -1570,7 +1577,7 @@ chains:
 }
 
 func TestParseRulesFilterSelectsEvents(t *testing.T) {
-	chains, err := ParseRules([]byte(`version: 0
+	doc, err := ParseRules([]byte(`version: 0
 chains:
   - name: main
     rules:
@@ -1580,7 +1587,7 @@ chains:
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
-	rule := chains[0].Rules[0]
+	rule := doc.Chains[0].Rules[0]
 	if !rule.Filter.Match(&domain.Event{Method: "GET", Path: "/releases/24.04.iso"}) {
 		t.Error("filter does not match a selected event")
 	}
@@ -1589,6 +1596,39 @@ chains:
 	}
 	if rule.Filter.Match(&domain.Event{Method: "POST", Path: "/releases/24.04.iso"}) {
 		t.Error("filter matches a non-matching method")
+	}
+}
+
+// TestParseRulesEnrichmentDefaults: the enrichment block is optional and
+// its filter defaults to any - observable as a gate that matches everything.
+func TestParseRulesEnrichmentDefaults(t *testing.T) {
+	doc, err := ParseRules([]byte(validRules))
+	if err != nil {
+		t.Fatalf("ParseRules error: %v", err)
+	}
+	if !doc.Enrichment.Filter.Match(&domain.Event{Path: "/x", Method: "GET", Status: 200}) {
+		t.Error("default enrichment.filter rejects an event, want any to match everything")
+	}
+}
+
+// TestParseRulesEnrichmentFilterScopes: enrichment.filter compiles with
+// the rule filter language and scopes events exactly like a rule filter.
+func TestParseRulesEnrichmentFilterScopes(t *testing.T) {
+	doc, err := ParseRules([]byte(`version: 0
+enrichment:
+  filter: path prefix "/files/"
+chains:
+  - name: main
+    rules:
+      - id: r
+`))
+	if err != nil {
+		t.Fatalf("ParseRules error: %v", err)
+	}
+	for path, want := range map[string]bool{"/files/a.iso": true, "/other": false} {
+		if got := doc.Enrichment.Filter.Match(&domain.Event{Path: path, Method: "GET", Status: 200}); got != want {
+			t.Errorf("enrichment.filter.Match(%q) = %v, want %v", path, got, want)
+		}
 	}
 }
 
@@ -1625,6 +1665,41 @@ chains:
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
 		}
+	}
+}
+
+// TestPrintsEnrichmentFilterSource: the plan prints the enrichment
+// block's effective filter source ("any" where the block omits it).
+func TestPrintsEnrichmentFilterSource(t *testing.T) {
+	tests := []struct {
+		name   string
+		enrich string
+		want   string
+	}{
+		{"default any", "", "enrichment.filter: any"},
+		{"the block's expression", "enrichment:\n  filter: 'path prefix \"/files/\"'\n", `enrichment.filter: path prefix "/files/"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "bandage.yml")
+			rulesPath := filepath.Join(dir, "rules.yml")
+			if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			yaml := "version: 0\n" + tt.enrich + "chains:\n  - name: main\n    rules:\n      - id: r\n"
+			if err := os.WriteFile(rulesPath, []byte(yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
+			if err != nil {
+				t.Fatalf("Test error: %v", err)
+			}
+			if !strings.Contains(plan, tt.want) {
+				t.Errorf("plan does not contain %q:\n%s", tt.want, plan)
+			}
+		})
 	}
 }
 
@@ -1706,11 +1781,11 @@ func TestParseRulesReplayVolumeMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: replay\n          leak: 0.1\n          " + tt.volume
-			chains, err := ParseRules([]byte(yaml))
+			doc, err := ParseRules([]byte(yaml))
 			if err != nil {
 				t.Fatalf("ParseRules error: %v", err)
 			}
-			cfg := chains[0].Rules[0].Tracker
+			cfg := doc.Chains[0].Rules[0].Tracker
 			if cfg == nil || cfg.Kind != domain.TrackReplay {
 				t.Fatalf("tracker = %+v, want replay", cfg)
 			}
@@ -1979,10 +2054,11 @@ chains:
 
 // A ladder carries no action list and no tracker.volume; the cache-entry TTL derives from the top rung.
 func TestParseRulesEscalations(t *testing.T) {
-	chains, err := ParseRules([]byte(ladderRules))
+	doc, err := ParseRules([]byte(ladderRules))
 	if err != nil {
 		t.Fatalf("ParseRules error: %v", err)
 	}
+	chains := doc.Chains
 	iso := chains[0].Rules[0]
 	if len(iso.Actions) != 0 {
 		t.Errorf("rule actions = %+v, want none (the ladder carries the actions)", iso.Actions)
@@ -2041,11 +2117,11 @@ func TestParseRulesEscalationTTLDefaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: " + tt.kind + ", leak: " + tt.leak + "}\n" +
 				"        escalations:\n          - at: " + tt.at + "\n            actions: [stop]\n          - at: " + tt.at2 + "\n            actions: [stop]"
-			chains, err := ParseRules([]byte(yaml))
+			doc, err := ParseRules([]byte(yaml))
 			if err != nil {
 				t.Fatalf("ParseRules error: %v", err)
 			}
-			if got := chains[0].Rules[0].Tracker.TTL; got != tt.want {
+			if got := doc.Chains[0].Rules[0].Tracker.TTL; got != tt.want {
 				t.Errorf("tracker TTL = %v, want %v", got, tt.want)
 			}
 		})

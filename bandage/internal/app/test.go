@@ -17,21 +17,22 @@ func Test(configPath, rulesPath string, build identity.Build) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	chains, err := LoadRules(rulesPath)
+	rules, err := LoadRules(rulesPath)
 	if err != nil {
 		return "", err
 	}
-	return planText(cfg, chains, build), nil
+	return planText(cfg, rules, build), nil
 }
 
-func planText(cfg Config, chains []domain.Chain, build identity.Build) string {
+func planText(cfg Config, rules Rules, build identity.Build) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", build.Header())
 	fmt.Fprintf(&b, "config: ingest syslog/%s %s %s\n", cfg.Ingest.Parser, cfg.Ingest.Syslog.Network, cfg.Ingest.Syslog.Listen)
 	fmt.Fprintf(&b, "config: db %s %s\n", cfg.DB.Driver, cfg.DB.SQLite.Path)
 	fmt.Fprintf(&b, "config: api %s\n", cfg.API.Listen)
 	fmt.Fprintf(&b, "config: cache max_entries %d\n", cfg.Cache.MaxEntries)
-	for _, chain := range chains {
+	fmt.Fprintf(&b, "enrichment.filter: %s\n", rules.Enrichment.FilterSource)
+	for _, chain := range rules.Chains {
 		fmt.Fprintf(&b, "chain %s\n", chain.Name)
 		for _, rule := range chain.Rules {
 			fmt.Fprintf(&b, "  rule %s\n", rule.ID)
