@@ -7,7 +7,7 @@ and installs them through a firewall-driver port, with `--dry-run` printing
 what would be installed without touching netlink. The lifecycle is fluxc's:
 a startup test install before the loop, the last rules kept on a failed
 fetch, and a reset on clean exit. The ban rules here are the skeleton's
-placeholder mapping — one drop ban rule per report's Target — which later
+placeholder mapping - one drop ban rule per report's Target - which later
 tickets replace with the real penalty mapping and merge policy.
 
 **Blocked by:** None (can start immediately)
@@ -15,7 +15,7 @@ tickets replace with the real penalty mapping and merge policy.
 **Status:** resolved
 
 - [x] The binary fetches the report document on an update interval defaulting to 5m with a 1m floor (a shorter value is clamped with a warning)
-- [x] The document is consumed strictly as the published contract, in the consumer's own wire types: unknown fields are ignored; an unknown document version refuses the cycle — fatal at the startup test install, keep-last-rules with a loud log on later cycles
+- [x] The document is consumed strictly as the published contract, in the consumer's own wire types: unknown fields are ignored; an unknown document version refuses the cycle - fatal at the startup test install, keep-last-rules with a loud log on later cycles
 - [x] Records with a missing or unknown penalty or an unparseable Target are skipped, logged, and counted; the remaining records still compile
 - [x] The compiler produces one drop ban rule per live report's Target (placeholder mapping, explicitly superseded by tickets 04 and 05)
 - [x] Install goes through a tiny firewall-driver port (install/reset) with a stub implementation; `--dry-run` prints the compiled ban rules and requires neither netlink nor privileges

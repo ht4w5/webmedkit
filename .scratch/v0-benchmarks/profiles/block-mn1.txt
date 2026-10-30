@@ -1,4 +1,4 @@
-# block-mn1.out — go tool pprof -top then -traces
+# block-mn1.out - go tool pprof -top then -traces
 # (code-review pass completing the extract set; same commands as findings.md reproduce)
 File: app.test
 Build ID: 7fa6491134d6ba95d8cd7fc2a83261482ebe423e

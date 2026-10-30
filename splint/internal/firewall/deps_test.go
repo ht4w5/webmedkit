@@ -12,7 +12,7 @@ import (
 // TestModulesDependOnlyOnTheSeam enforces the module shape's
 // dependency rule: the domain, the engine and the firewall drivers
 // depend on the seam, never on each other. Test files are outside the
-// rule — the engine's suite drives the recording stub by design.
+// rule - the engine's suite drives the recording stub by design.
 func TestModulesDependOnlyOnTheSeam(t *testing.T) {
 	const (
 		engine = "github.com/HT4w5/webmedkit/splint/internal/app"

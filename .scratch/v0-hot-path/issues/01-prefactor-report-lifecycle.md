@@ -1,7 +1,7 @@
-# 01: Prefactor — one report lifecycle module
+# 01: Prefactor - one report lifecycle module
 
-**What to build:** Every report mutation — the Trigger write, report
-deletion through the API, and the periodic expiry sweep — flows through
+**What to build:** Every report mutation - the Trigger write, report
+deletion through the API, and the periodic expiry sweep - flows through
 one module (the report service) instead of the write path and the
 delete/sweep paths reaching into the report repository independently.
 Nothing operator-visible changes: the report document, deletion
@@ -19,13 +19,13 @@ then make the easy change").
       write, delete-by-filter and delete-expired; the API and the
       sweeper call it, not the repository directly
 - [x] The report repository adapter keeps its own contract intact
-- [x] No behavior change anywhere: the full suite — including the daemon
-      end-to-end tests and the repository contract tests — is green
+- [x] No behavior change anywhere: the full suite - including the daemon
+      end-to-end tests and the repository contract tests - is green
       under the race detector
 
 ## Answer
 
-**Done:** report mutation now has one funnel — `report.Service` exposes
+**Done:** report mutation now has one funnel - `report.Service` exposes
 `Trigger`, `List`, `Delete(ctx, Query) (int, error)` and
 `DeleteExpired(ctx, now) (int, error)` (`bandage/internal/domain/report/report.go`),
 and every production mutation goes through it:
@@ -42,7 +42,7 @@ and every production mutation goes through it:
 Key facts:
 
 - `Delete`/`DeleteExpired` return the repository's counts and errors
-  **unwrapped** — `ErrUnfiltered` and the adapter's error strings are
+  **unwrapped** - `ErrUnfiltered` and the adapter's error strings are
   operator-visible (sweeper logs them) and must stay identical.
   `Trigger` keeps its existing `"trigger report: %w"` wrap.
 - The `Repository` port and the sqlite adapter are byte-identical; the
@@ -56,7 +56,7 @@ Key facts:
   so nothing outside the repository's own tests mutates rows around the
   service.
 - New prior art the notes flagged as missing (test-harness.md §3):
-  `bandage/internal/domain/report/report_test.go` — the report service over a
+  `bandage/internal/domain/report/report_test.go` - the report service over a
   plain stub repository (table tests, no framework), pinning the
   delegation contract ticket 03's re-arm hooks hang on.
 - Zero operator-visible change: report document, deletion counts,

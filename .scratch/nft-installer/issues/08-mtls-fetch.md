@@ -6,7 +6,7 @@ bandaid's certificate surface so the operator's existing PKI runbook applies
 unchanged. Plain HTTP keeps working for the localhost case. There is no
 insecure mode.
 
-**Blocked by:** 01 — Walking skeleton
+**Blocked by:** 01 - Walking skeleton
 
 **Status:** resolved
 

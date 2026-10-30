@@ -1,9 +1,9 @@
 # 02: Go runtime gauges on `/metrics`
 
 **What to build:** The operator's scrape response additionally carries
-the Go runtime block — `go_info{version}`, `go_goroutines`, `go_threads`,
+the Go runtime block - `go_info{version}`, `go_goroutines`, `go_threads`,
 `go_memstats_alloc_bytes`, `go_memstats_heap_inuse_bytes`,
-`go_memstats_sys_bytes`, `go_memstats_gc_cpu_fraction` — read at scrape
+`go_memstats_sys_bytes`, `go_memstats_gc_cpu_fraction` - read at scrape
 time so each response stays one point-in-time snapshot. The runtime
 sample sits behind a narrow port beside its consumer, in the same style
 as the existing stats source port (ADR 0005), satisfied by a
@@ -31,9 +31,9 @@ HTTP surface stays dependency-free.
 
 Implemented on integration branch `feat/prometheus-metrics` (merge
 commit `4eaad24`; cross-ticket code-review fixes through `7fa5a22`).
-The curated runtime block — `go_info{version}`, `go_goroutines`,
+The curated runtime block - `go_info{version}`, `go_goroutines`,
 `go_threads`, `go_memstats_alloc_bytes`, `go_memstats_heap_inuse_bytes`,
-`go_memstats_sys_bytes`, `go_memstats_gc_cpu_fraction` — rides the same
+`go_memstats_sys_bytes`, `go_memstats_gc_cpu_fraction` - rides the same
 `/metrics` response behind the new narrow `RuntimeSource` port beside
 its consumer in `httpapi` (ADR 0005 discipline), satisfied by the
 stdlib `goRuntime` adapter in `app` (thread count from the thread-create

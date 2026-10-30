@@ -7,13 +7,13 @@ library's namespace-fd netlink option. A recreated container is picked up as
 long as the operator keeps a stable namespace handle; a namespace that
 vanishes mid-run never halts enforcement elsewhere.
 
-**Blocked by:** 02 — Kernel install: the nftables driver
+**Blocked by:** 02 - Kernel install: the nftables driver
 
 **Status:** resolved
 
 - [x] A repeatable `--netns <nsfs-path>` flag selects target namespaces; the default is the current namespace
 - [x] Each namespace gets its own `splint` table; one fetch-compile serves all targets
-- [x] Netlink runs per namespace through the library's namespace-fd option — no setns, no thread locking
+- [x] Netlink runs per namespace through the library's namespace-fd option - no setns, no thread locking
 - [x] Namespace paths are re-opened every cycle, so a recreated container is picked up through a stable handle; the per-namespace installed-hash state follows each namespace
 - [x] An unreachable namespace is warned and skipped for the cycle; the other namespaces still install; reset on exit tolerates vanished namespaces
 - [x] The root-gated integration test installs into a non-default scratch namespace when privileges allow

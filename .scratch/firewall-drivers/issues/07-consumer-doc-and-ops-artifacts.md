@@ -2,15 +2,15 @@
 
 **What to build:** an operator deploys and verifies `splint` without
 reading code, whatever firewall driver they run. The consumer doc
-carries a general section — the engine's flags, the merge policy, the
-lifecycle, the dry-run audit recipe showing the plan and hash output —
+carries a general section - the engine's flags, the merge policy, the
+lifecycle, the dry-run audit recipe showing the plan and hash output -
 and one section per driver carrying its flags, its targeting and scope
 recipes, its Penalty mapping including what it declines, and its
 caveats. The sample systemd unit ships with documented install and
 enable steps.
 
-**Blocked by:** 04 — Driver-owned identity; 05 — Driver-owned targeting
-and enforcement scope; 06 — Firewall driver selection and grouped flags
+**Blocked by:** 04 - Driver-owned identity; 05 - Driver-owned targeting
+and enforcement scope; 06 - Firewall driver selection and grouped flags
 
 **Status:** resolved
 

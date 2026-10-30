@@ -3,7 +3,7 @@
 **What to build:** The operator validating a rules file sees the reason a
 report will carry: every report action line in the `bandage -t` plan prints
 `<program name>.<code>`, composed from the build identity the plan printer
-already receives — so a renamed binary's plan shows its own namespace. The
+already receives - so a renamed binary's plan shows its own namespace. The
 plan's meaning is that what the operator approves is what ships. Rules loading
 is unchanged and keeps its validation convention at this seam: a bare code
 passes, a dotted code is refused. The rules documentation explains once that

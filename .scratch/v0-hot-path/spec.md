@@ -1,4 +1,4 @@
-# Spec: v0 hot path — Trigger semantics and write-path efficiency
+# Spec: v0 hot path - Trigger semantics and write-path efficiency
 
 Status: ready-for-agent
 
@@ -8,7 +8,7 @@ bandage flags abusive Targets once and expects downstream tooling to ban
 them, but the analyzer keeps re-Triggering for an already-flagged Target:
 every further overflowing event re-runs the rule and re-upserts the same
 report row through the single serialized sqlite write path. The v0
-benchmark round measured this write path as the dominant bottleneck —
+benchmark round measured this write path as the dominant bottleneck -
 report upserts were 82–84% of write-path CPU and the Trigger path capped
 at ≈22–23k lines/s and got *slower* with more workers, while the
 trigger-free fast path scaled to 400k lines/s. Operators deploying the
@@ -22,11 +22,11 @@ connection.
 Make a **Trigger** mean one thing per (rule, Target): a Trigger empties
 the rule's tracker for that Target (abuse must recur at full volume
 before the next Trigger), and while a report for (rule, Target) is alive
-its write is suppressed — the rule keeps matching and all its actions
+its write is suppressed - the rule keeps matching and all its actions
 keep running, but the report is not written again. Multi-rule evidence
 keeps accruing (one rule's report never hides a Target from another
 rule), and flagged Targets' events keep enriching and feeding other
-trackers — bandage remains an analyzer, not an enforcer. The report
+trackers - bandage remains an analyzer, not an enforcer. The report
 database moves to WAL with a separate read path so `GET /reports` never
 queues behind writes, upserts shed their redundant work, and the parser
 rewrites on `encoding/json/v2` with a byte-identical behavior contract.
@@ -47,8 +47,8 @@ should feed over.
    actions to run even while the write is suppressed, so that chain
    control flow (goto, jump, stop) and log actions behave identically
    for every event.
-4. As an operator, I want the tracker emptied on every Trigger — whether
-   or not the write landed — so that a rule's actions run once per
+4. As an operator, I want the tracker emptied on every Trigger - whether
+   or not the write landed - so that a rule's actions run once per
    accumulation episode rather than per event.
 5. As an operator, I want a failed report write to leave the tracker
    intact, so that the next event retries the report instead of losing
@@ -62,7 +62,7 @@ should feed over.
    Filesize estimates and feeding other rules' trackers, so that analysis
    stays complete for every event.
 9. As an operator, I want deleting a report to re-arm writing for that
-   (rule, Target), so that a still-abusive Target is reported again —
+   (rule, Target), so that a still-abusive Target is reported again -
    tracker rules after a fresh episode, tracker-less rules on the next
    matching event.
 10. As an operator, I want an expired report to re-arm writing the same
@@ -148,13 +148,13 @@ should feed over.
 
 - **Trigger semantics** follow ADR 0008 and the GLOSSARY entry of the
   same name: a Trigger is a match that ran the rule's report action; it
-  empties the matched rule's tracker for the Target (the match's key —
+  empties the matched rule's tracker for the Target (the match's key -
   per (Target, path) for replay trackers), and while a report for
   (rule, Target) is alive its write is suppressed. A failed write is not
   a Trigger outcome: the tracker stays intact and the next event
   retries.
 - **Suppression lives in the report write path** (the report service),
-  keyed exactly like report rows — (rule, Target). Its live-report set
+  keyed exactly like report rows - (rule, Target). Its live-report set
   is derived from the report table: rebuilt at startup, maintained on
   Trigger, delete and expiry. In-memory state behind it is acceptable;
   the report table is the correctness source, so a restart re-derives it.
@@ -165,14 +165,14 @@ should feed over.
   suppression alone bounds their writes.
 - **Report deletion and expiry re-arm writing**: the delete paths and
   the periodic sweeper must inform the live-report set as rows leave the
-  table. The documented delete promise holds — a still-abusive Target is
+  table. The documented delete promise holds - a still-abusive Target is
   reported again on the next Trigger (immediately for tracker-less
   rules, after a fresh episode for tracker rules).
 - **The report store** moves to `journal_mode=WAL` with
   `synchronous=NORMAL` (ADR 0009). Writes keep the single connection
   (write determinism, ADR 0007); reads move onto their own connections
   so the API never contends with upserts. `:memory:` databases ignore
-  WAL and treat connections as separate databases — the test wiring
+  WAL and treat connections as separate databases - the test wiring
   handles this (shared-cache URI or single-connection fallback).
 - **Upsert sheds its pre-read**: created_at is preserved by the upsert
   statement itself rather than a preceding SELECT; statements are
@@ -206,7 +206,7 @@ should feed over.
   delete/expiry, restart re-derivation and the worker-pool interplay are
   all observable there end to end.
 - Supporting seams, used only where the daemon seam can't observe
-  cheaply — all existing: the evaluation service over stub tracker/report
+  cheaply - all existing: the evaluation service over stub tracker/report
   ports (reset cadence and action runs), the report service over a stub
   repository (suppression and re-arm rules), the report repository's own
   contract tests (WAL, split connections, pre-read-free upsert), and the
@@ -216,7 +216,7 @@ should feed over.
   waiting, log capture), the worker-pool/shutdown tests with wedged
   stores, and the benchmark suite's fixture-correctness tests. The
   domain-purity lint (domain packages never import adapters) stays green
-  — suppression state is wired at the app layer, not into the domain.
+  - suppression state is wired at the app layer, not into the domain.
 - The performance claims are verified by the benchmark suite itself
   (`-benchmem`, regenerated baseline), not by ad-hoc timing in tests.
 
@@ -224,13 +224,13 @@ should feed over.
 
 - **Write-behind / deferred report writes**: shelved; ADR 0008 records
   the accepted deferral window as policy for the future only.
-- **Dropping flagged Targets' events** (a global skip set): rejected —
+- **Dropping flagged Targets' events** (a global skip set): rejected -
   it blinds other rules and makes an analyzer behave like an enforcer
   (ADR 0008 "Considered").
 - **Ban-rule generation and enforcement**: never bandage's job (ADR
   0004).
-- **The two remaining hot-path candidates** — de-globalizing per-line
-  bookkeeping and alloc-free cache keys — stay measured candidates in
+- **The two remaining hot-path candidates** - de-globalizing per-line
+  bookkeeping and alloc-free cache keys - stay measured candidates in
   the benchmark findings; their urgency dropped with the Trigger churn
   gone.
 - **A CI benchstat regression gate**: the baseline stays a manual

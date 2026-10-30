@@ -9,7 +9,7 @@ import (
 // The ruleset hash is bandaid's rolling-hash construction
 // (.reference/bandaid/internal/model/model.go), shared by every
 // firewall driver folding its own effective rules: seed 114514, one
-// fresh FNV-1a 32-bit step per effective rule — previous hash
+// fresh FNV-1a 32-bit step per effective rule - previous hash
 // big-endian first, then the rule's fields, each 0x00-terminated. It
 // identifies what was actually installed: a change detector, not a
 // cryptographic commitment.

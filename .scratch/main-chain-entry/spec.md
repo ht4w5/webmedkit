@@ -17,7 +17,7 @@ chain is the front door.
 
 ## Solution
 
-Evaluation enters exactly one chain per event — the **entry chain**
+Evaluation enters exactly one chain per event - the **entry chain**
 named `main`. Every other chain is a subroutine, entered only when a
 `goto`/`jump` action names it. A document without a chain named `main`
 is refused at load, and `goto`/`jump` cannot target `main`; chains
@@ -95,7 +95,7 @@ dispatch, and the docs, glossary and a new ADR describe the model.
 ## Implementation Decisions
 
 - The rules domain model gains the entry chain name as a constant,
-  `main` — the reserved name of the entry chain in the rules format. The
+  `main` - the reserved name of the entry chain in the rules format. The
   Chain concept's documentation is reworded accordingly.
 - The evaluation service's event entry point runs only the entry chain,
   by name, through the same per-chain traversal that `goto`/`jump`
@@ -107,7 +107,7 @@ dispatch, and the docs, glossary and a new ADR describe the model.
   document with no chain named `main` (`rules: no chain named "main"`)
   and any `goto`/`jump` action targeting `main` (an explicit error
   instead of the cycle error a reachable attempt would earn). Existing
-  checks — unique chain names, resolvable targets, acyclic graph — stay.
+  checks - unique chain names, resolvable targets, acyclic graph - stay.
   The entry chain therefore has in-degree 0.
 - Chains unreachable from `main` remain legal and inert, like iptables
   custom chains; no reachability check.
@@ -137,10 +137,10 @@ dispatch, and the docs, glossary and a new ADR describe the model.
 - A good test here asserts only external behaviour: which reports a
   rules document and a stream of events produce (and which they don't),
   and which rules documents the loader accepts or refuses with which
-  error — never internal call counts or traversal order inside the
+  error - never internal call counts or traversal order inside the
   evaluator.
 - Primary seam: the existing daemon-level seam used by the end-to-end
-  tests — a rules document and log lines in, reports and the reports API
+  tests - a rules document and log lines in, reports and the reports API
   out. It covers loader and evaluation together, including load refusal
   at startup, and is where the entry-chain behaviour (sub chains silent
   without dispatch, `jump` resumes, `goto` ends, single-feed handoffs,
@@ -150,8 +150,8 @@ dispatch, and the docs, glossary and a new ADR describe the model.
   (missing `main`, `goto`/`jump` targeting `main`, unchanged graph
   checks).
 - The existing evaluation-service stub seam is kept for tracker-level
-  cases invisible above (readings, TTLs, cache keys) — prior art: its
-  replay/tracker tests — but new behaviour assertions live at the
+  cases invisible above (readings, TTLs, cache keys) - prior art: its
+  replay/tracker tests - but new behaviour assertions live at the
   daemon seam.
 - Prior art: the existing `goto`/`jump` end-to-end tests (their
   double-feed assertion becomes a single-feed assertion), the

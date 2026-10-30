@@ -1,8 +1,8 @@
-# 06: Report lifecycle — triggers, expiry, dismiss
+# 06: Report lifecycle - triggers, expiry, dismiss
 
 **What to build:** a report consumer sees when a target first appeared and whether it is still active; stale reports age out on their own; an operator can dismiss a false positive knowing that a persisting condition will surface again.
 
-**Blocked by:** 01: Walking skeleton — Event to Report list
+**Blocked by:** 01: Walking skeleton - Event to Report list
 
 **Status:** resolved
 
@@ -20,9 +20,9 @@ Implemented on `feat/v0-analyzer` (merge commit `51b249f`).
 re-Trigger refreshes tracker reading + sample; expired rows excluded from
 `GET /reports` and deleted by the periodic sweeper (`sweepOnce` shared
 with tests); `DELETE /reports` requires `?rule=`/`?target=`, returns
-`{"deleted": n}`, 400 without filters, and is dismiss-not-silence — all
+`{"deleted": n}`, 400 without filters, and is dismiss-not-silence - all
 verified via the injected clock with no sleeps.
 
 Decision (flagged by the implementer, kept): `DELETE` counts rows
-regardless of expiry — dismissal addresses storage, not just the live
+regardless of expiry - dismissal addresses storage, not just the live
 list. Context: `/home/user2/Devel/bandage-impl-notes/DECISIONS.md` §9.

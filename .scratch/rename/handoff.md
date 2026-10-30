@@ -2,14 +2,14 @@
 
 For a session whose context still holds the old layout. Everything here is
 current as of `0b3f9c1` and describes what is on disk. The checkout directory
-is deliberately still `/home/user2/Devel/bandage` — the path was not renamed.
+is deliberately still `/home/user2/Devel/bandage` - the path was not renamed.
 
 ## What happened, in two commits
 
-1. `d796c50` — `internal/domain/` moved to `internal/bandage/` (the package was
+1. `d796c50` - `internal/domain/` moved to `internal/bandage/` (the package was
    already `package bandage`, so this was paths only, aliases dropped).
-   **Superseded by the next commit** — do not look for `internal/bandage/`.
-2. `0b3f9c1` — the code split into product trees, and the project, module and
+   **Superseded by the next commit** - do not look for `internal/bandage/`.
+2. `0b3f9c1` - the code split into product trees, and the project, module and
    GitHub repo renamed `bandage` → `webmedkit`.
 
 ## Old path → new path
@@ -23,7 +23,7 @@ is deliberately still `/home/user2/Devel/bandage` — the path was not renamed.
 | `internal/bench/` | `bandage/internal/bench/` |
 | `internal/splint/` | split in two: `splint/internal/domain/` and `splint/internal/app/` (below) |
 | `internal/firewall/{nft,firewalltest}` | `splint/internal/firewall/…` |
-| `internal/identity/` | `internal/identity/` — unchanged, the one shared tier |
+| `internal/identity/` | `internal/identity/` - unchanged, the one shared tier |
 | `cmd/bandage/` | `bandage/cmd/bandage/` |
 | `cmd/splint/` | `splint/cmd/splint/` |
 | module `github.com/HT4w5/bandage` | `github.com/HT4w5/webmedkit` |
@@ -32,12 +32,12 @@ is deliberately still `/home/user2/Devel/bandage` — the path was not renamed.
 
 `internal/splint` was one package (engine + wire model). It is now two:
 
-- `splint/internal/domain/` (`package domain`) — **what splint knows**: the
+- `splint/internal/domain/` (`package domain`) - **what splint knows**: the
   version-0 report document (`wire.go`: Document, Report, Tracker, Sample,
   Penalty, PenaltyAction, ParseDocument), the exclusion policy (`policy.go`:
   Policy, NewPolicy), and ban-rule compilation (`compile.go`: Compile, Skip).
   It imports the seam `splint/internal/firewall` for `BanRule`/`Stance`.
-- `splint/internal/app/` (`package app`) — **what splint does**: the update
+- `splint/internal/app/` (`package app`) - **what splint does**: the update
   cycle (`updater.go`: Updater, New, Update, DryRun, Run, ClampInterval,
   DefaultInterval) and the mTLS fetcher (`fetch.go`). The whole test suite
   (`cycle_test`, `points_test`, `mtls_test`, `fetch_test`) lives here; it drives
@@ -54,7 +54,7 @@ is deliberately still `/home/user2/Devel/bandage` — the path was not renamed.
   `splint/internal/firewall`). In imports and prose, qualify by product.
 - splint's engine API moved package: `splint.New(...)` → `app.New(...)`, but
   `splint.NewPolicy` → `domain.NewPolicy`.
-- The **project** is webmedkit; the **two binaries keep their names** —
+- The **project** is webmedkit; the **two binaries keep their names** -
   `bandage` (the analyzer) and `splint` (the enforcer); webmedkit is the kit
   they ship in. Tool-scoped names are unchanged and still say "bandage":
   `bandage.yml`, `rules.yml`, `/var/lib/bandage/reports.db`,
@@ -70,9 +70,9 @@ is importable by both, and both binaries stamp their version from it.
 
 The two dependency lints moved with the code and were re-scoped:
 
-- `bandage/internal/domain/deps_test.go` — the core imports the stdlib and the
+- `bandage/internal/domain/deps_test.go` - the core imports the stdlib and the
   core only (`domainPath` is `…/webmedkit/bandage/internal/domain`).
-- `splint/internal/firewall/deps_test.go` — `app` and `domain` are "core",
+- `splint/internal/firewall/deps_test.go` - `app` and `domain` are "core",
   `firewall/{nft,firewalltest}` are "driver": core may import the seam root
   only, drivers never import core, and neither imports the other.
 
@@ -99,5 +99,5 @@ make build && ./bin/bandage --version && ./bin/splint --version
 ```
 
 Repo: `git@github.com:ht4w5/webmedkit.git` (renamed from `ht4w5/bandage`; the
-old GitHub URL redirects). History is intact — git recorded the moves as
+old GitHub URL redirects). History is intact - git recorded the moves as
 renames in both commits.

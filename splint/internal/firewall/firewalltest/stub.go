@@ -39,7 +39,7 @@ type Stub struct {
 	Placement string
 
 	// Scopes, when set before use, are the enforcement scope lines
-	// every plan reports — one pre-formatted line per direction.
+	// every plan reports - one pre-formatted line per direction.
 	Scopes []string
 
 	mu      sync.Mutex

@@ -4,28 +4,28 @@
 enforcement. It fetches the report document (`GET /reports`, see
 [the report document](reports.md)) on a fixed interval, compiles every
 [Report](../GLOSSARY.md) the document publishes into
-[ban rules](../GLOSSARY.md) — the Report's [Target](../GLOSSARY.md)
-prefixes plus the [Penalty](../GLOSSARY.md) as stated — and installs
+[ban rules](../GLOSSARY.md) - the Report's [Target](../GLOSSARY.md)
+prefixes plus the [Penalty](../GLOSSARY.md) as stated - and installs
 them through the selected **[firewall driver](../GLOSSARY.md)**
 (`--firewall`, nftables by default). The bandage daemon produces
 Reports and never enforces; `splint` is the tool that derives ban rules
 from Reports and installs them.
 
-One binary serves every enforcement surface. The engine — report
+One binary serves every enforcement surface. The engine - report
 fetch, contract parsing, exclusions, the merge policy, the update
-lifecycle — speaks only ban rules. Everything about the enforcement
+lifecycle - speaks only ban rules. Everything about the enforcement
 surface belongs to the firewall driver: where to enforce (its
 targeting), what to police (its enforcement scopes), how each Penalty
 becomes real, and its own identity (the ruleset hash, the
 skip-if-unchanged decision and the rule counters). A driver applies
-each Penalty exactly as stated or declines it loudly — never
-substitutes, weakens or tunes — and what it declines is logged and
+each Penalty exactly as stated or declines it loudly - never
+substitutes, weakens or tunes - and what it declines is logged and
 counted so lost enforcement is visible (the decision of record is
 [ADR 0012](adr/0012-enforcement-through-pluggable-firewall-drivers.md)).
 
-This document is structured around drivers: a general section — the
+This document is structured around drivers: a general section - the
 engine's options, the merge policy, the exclusions, the lifecycle and
-the `--dry-run` audit recipe — followed by one section per firewall
+the `--dry-run` audit recipe - followed by one section per firewall
 driver carrying that driver's options, recipes and caveats. The
 nftables driver is the one that ships today.
 
@@ -35,12 +35,12 @@ The lifecycle is built to fail at deploy time and never open the
 floodgates:
 
 - a **startup test install** runs one full fetch-compile-install before
-  the loop begins — a broken flag, endpoint, or kernel exits non-zero at
+  the loop begins - a broken flag, endpoint, or kernel exits non-zero at
   deploy time, not at ban time;
 - every **update interval** (default 5m, floor 1m) refetches the
   document and rebuilds the ruleset wholesale; values below the 1m
   floor are clamped up with a warning;
-- a **failed fetch** keeps the last installed rules with a loud log — a
+- a **failed fetch** keeps the last installed rules with a loud log - a
   bandage outage never opens the floodgates;
 - **SIGINT/SIGTERM** reset the owned ruleset before exit, so a clean
   shutdown leaves no stale ban rules;
@@ -54,7 +54,7 @@ malformed Reports with a log and a counter instead of failing the cycle.
 
 ## Engine options
 
-These options configure the engine — the fetch, the policy and the
+These options configure the engine - the fetch, the policy and the
 lifecycle. Driver-specific options live in the driver's own section;
 `splint --help` groups the flags by owner (engine options first, then
 one group per registered driver), verbatim as built:
@@ -90,17 +90,17 @@ nftables driver options:
 | flag | default | meaning |
 |---|---|---|
 | `--firewall` | `nftables` | Firewall driver selected from the registry. An unknown value is refused at startup, listing the known drivers. Driver-specific flags live in their driver's own group (`--nft-*` for nftables); a flag of an unselected driver, set explicitly, is a usage error. |
-| `--url`, `-u` | (required) | URL of the report document — bandage's `GET /reports`, e.g. `http://127.0.0.1:8080/reports`. `http` or `https` with a host. |
-| `--cacert` | — | CA certificate file used to verify the bandage server's certificate (HTTPS). |
-| `--cert` | — | Client certificate file presented to the server (mutual TLS). Must be given together with `--key`. |
-| `--key` | — | Client key file. Must be given together with `--cert`. |
+| `--url`, `-u` | (required) | URL of the report document - bandage's `GET /reports`, e.g. `http://127.0.0.1:8080/reports`. `http` or `https` with a host. |
+| `--cacert` | - | CA certificate file used to verify the bandage server's certificate (HTTPS). |
+| `--cert` | - | Client certificate file presented to the server (mutual TLS). Must be given together with `--key`. |
+| `--key` | - | Client key file. Must be given together with `--cert`. |
 | `--fetch-timeout`, `-t` | `10s` | HTTP timeout for fetching the report document. Values below 1s are refused at startup. |
 | `--update-interval`, `-i` | `5m` | How often the report document is refetched and the ruleset rebuilt. Values below 1m are clamped up to the 1m floor (with a warning). |
-| `--exclude-prefix`, `-x` | — | Prefix subtracted from every ban rule's Target set, repeatable. A bare address counts as its host prefix. |
+| `--exclude-prefix`, `-x` | - | Prefix subtracted from every ban rule's Target set, repeatable. A bare address counts as its host prefix. |
 | `--exclude-private`, `-p` | `true` | Also exclude RFC1918 and ULA Targets. `--exclude-private=false` opts out. |
-| `--dry-run`, `-d` | `false` | Fetch once, print the compiled ban rules, the driver's plan and its hash, exit — no enforcement surface touched, no privileges. |
+| `--dry-run`, `-d` | `false` | Fetch once, print the compiled ban rules, the driver's plan and its hash, exit - no enforcement surface touched, no privileges. |
 | `--log-level`, `-l` | `info` | Log level: `debug`, `info`, `warn` or `error`. |
-| `--version`, `-v` | — | Print build identity and exit. |
+| `--version`, `-v` | - | Print build identity and exit. |
 
 Exit codes: `0` a clean run (including `--dry-run` and `--version`), `1`
 a configuration, load or run error (a refused flag value, a missing
@@ -124,11 +124,11 @@ strictest Penalty breaking ties:
 
 1. **The most specific Target wins, both ways**: the longer-prefix
    Report decides its own prefixes whether its Penalty is weaker or
-   stronger than the broader one — a `/32` Report can carve an
+   stronger than the broader one - a `/32` Report can carve an
    exception under a `/16` ban rule, or tighten it.
 2. **Ties on specificity resolve strictest first**: `drop` > `reject` >
    limits; within one limit action, a smaller `rate` is stricter.
-3. **Dimensionally incomparable limits at a tie are combined** — one
+3. **Dimensionally incomparable limits at a tie are combined** - one
    meter per dimension (packet rate, bandwidth, request rate), all
    enforced. No recommendation is lost to an invented ordering.
 
@@ -140,14 +140,14 @@ document's Reports.
 
 ## Exclusions
 
-Exclusions are subtracted from every Target before the merge —
-engine-side, before any driver sees the rules — overriding every
+Exclusions are subtracted from every Target before the merge -
+engine-side, before any driver sees the rules - overriding every
 Report:
 
 - **Always excluded, never re-includable:** loopback (`127.0.0.0/8`,
   `::1/128`) and link-local (`169.254.0.0/16`, `fe80::/10`).
 - **Excluded by default:** RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`,
-  `192.168.0.0/16`) and ULA (`fc00::/7`) — opt out with
+  `192.168.0.0/16`) and ULA (`fc00::/7`) - opt out with
   `--exclude-private=false`.
 - **Operator exclusions:** `--exclude-prefix` adds to the list.
 
@@ -158,7 +158,7 @@ count. A partially covered Target keeps only its residual prefixes.
 ## Auditing with --dry-run
 
 Preview and verify a ruleset before enforcing it: run `splint` with
-`--dry-run` and **the same flags the service will run with** — the
+`--dry-run` and **the same flags the service will run with** - the
 exclusion flags change the compiled ruleset and the driver's targeting
 and scope flags change the driver's effective rules and hash, so audit
 exactly what you will deploy:
@@ -170,12 +170,12 @@ $ bin/splint --dry-run --url http://127.0.0.1:8080/reports \
 ```
 
 The output on stdout has three parts: the compiled ban rules as
-indented JSON, the driver's plan — each direction's effective scope
+indented JSON, the driver's plan - each direction's effective scope
 line (`scope=…`), one line per effective rule (`stance=… rate=…
-placement=…` — with `rate=-` for non-limits) plus the declines with
-reasons — and the ruleset's rolling hash as `hash=<hex>`. Skipped
-Reports are logged on stderr. The same run with no scope flags — every
-port and address, the protocol gate at its `tcp,udp` default — against
+placement=…` - with `rate=-` for non-limits) plus the declines with
+reasons - and the ruleset's rolling hash as `hash=<hex>`. Skipped
+Reports are logged on stderr. The same run with no scope flags - every
+port and address, the protocol gate at its `tcp,udp` default - against
 the report document's canonical example (docs/reports.md) prints:
 
 ```text
@@ -196,7 +196,7 @@ hash=11a54eb2
 
 A document whose second Report carries a request-rate Penalty and
 whose third Targets a fully excluded address shows what a decline and a
-skip look like — stdout first, then the stderr log:
+skip look like - stdout first, then the stderr log:
 
 ```text
 [
@@ -230,11 +230,11 @@ Reading the output:
 
 - **`targets`** are the ban rule's Target prefixes after exclusion subtraction;
   targeting and the enforcement scopes are driver configuration, not
-  part of the ban rule — they shape the plan's effective rules and the
+  part of the ban rule - they shape the plan's effective rules and the
   hash.
 - **`scope=…`** states one direction's effective enforcement scope in
-  the packet fields it matches — `dport`/`daddr` on ingress,
-  `sport`/`saddr` on egress, `l4proto` always — with `all` for an empty
+  the packet fields it matches - `dport`/`daddr` on ingress,
+  `sport`/`saddr` on egress, `l4proto` always - with `all` for an empty
   (match-all) set. The two lines are the whole enforcement surface.
 - **`stance` and `rate`** name the compiled Penalty; the plan line's
   `placement` names where the driver puts it (an opaque label like
@@ -242,7 +242,7 @@ Reading the output:
   `declined rule=… feature=… reason=…` line instead of a plan line.
 - **`hash=<hex>`** is the ruleset's rolling hash. The same hash appears
   in every cycle's `installed ban rules` log line, so an audited
-  dry-run correlates with what the running installer later installs —
+  dry-run correlates with what the running installer later installs -
   and unchanged hashes mean the install is skipped.
 - With several enforcement points the compiled rules print once and
   each driver instance's plan follows, headed by `point=<label>`:
@@ -274,8 +274,8 @@ via the sample unit.
 One firewall driver serves the whole run (`--firewall`; mixing drivers
 per enforcement point is out of scope). The driver owns its targeting,
 its enforcement scopes and its identity: the rolling hash folds its
-**effective** rules and both enforcement scopes — after the Penalties
-it declines and whatever it drops — so changing driver configuration
+**effective** rules and both enforcement scopes - after the Penalties
+it declines and whatever it drops - so changing driver configuration
 re-enforces (the rules or the scopes changed), and its
 skip-if-unchanged probe and counter read-back are its own. A flag set explicitly that belongs to an unselected
 driver is refused at startup (`flag --X belongs to the Y driver, not
@@ -286,7 +286,7 @@ rule and feature at every cycle.
 
 The nftables firewall driver (`--firewall nftables`, the default)
 installs ban rules into a wholly-owned nftables table (`splint`, inet
-family) in the host's — or a chosen container's — network namespace.
+family) in the host's - or a chosen container's - network namespace.
 
 #### Driver options
 
@@ -294,20 +294,20 @@ family) in the host's — or a chosen container's — network namespace.
 |---|---|---|
 | `--nft-hook` | `input` | Enforcement hook: `input` (a web server host) or `prerouting` (a routing box or a NAT front end). Anything else is refused at startup. |
 | `--nft-netns` | (current namespace) | Target network namespace as a literal nsfs path, repeatable. **Replaces** the default target rather than adding to it. Empty values and duplicates are refused at startup. |
-| `--nft-ingress-daddr` | (all addresses) | Ingress scope: destination address or prefix the ingress direction matches — comma list or repeatable. A bare address counts as its host prefix. |
-| `--nft-ingress-dport` | (all ports) | Ingress scope: destination port the ingress direction matches — comma list or repeatable, values 1–65535. |
-| `--nft-ingress-l4proto` | `tcp,udp` | Ingress scope: transport protocol the ingress direction matches — comma list or repeatable, strict `tcp` or `udp`. |
-| `--nft-egress-saddr` | (all addresses) | Egress scope: source address or prefix the egress direction matches — comma list or repeatable. A bare address counts as its host prefix. |
-| `--nft-egress-sport` | (all ports) | Egress scope: source port the egress direction matches — comma list or repeatable, values 1–65535. |
-| `--nft-egress-l4proto` | `tcp,udp` | Egress scope: transport protocol the egress direction matches — comma list or repeatable, strict `tcp` or `udp`. |
+| `--nft-ingress-daddr` | (all addresses) | Ingress scope: destination address or prefix the ingress direction matches - comma list or repeatable. A bare address counts as its host prefix. |
+| `--nft-ingress-dport` | (all ports) | Ingress scope: destination port the ingress direction matches - comma list or repeatable, values 1–65535. |
+| `--nft-ingress-l4proto` | `tcp,udp` | Ingress scope: transport protocol the ingress direction matches - comma list or repeatable, strict `tcp` or `udp`. |
+| `--nft-egress-saddr` | (all addresses) | Egress scope: source address or prefix the egress direction matches - comma list or repeatable. A bare address counts as its host prefix. |
+| `--nft-egress-sport` | (all ports) | Egress scope: source port the egress direction matches - comma list or repeatable, values 1–65535. |
+| `--nft-egress-l4proto` | `tcp,udp` | Egress scope: transport protocol the egress direction matches - comma list or repeatable, strict `tcp` or `udp`. |
 
 #### Targeting: network namespaces and stable handles
 
 `--nft-netns` targets one network namespace per flag value; the flags
 are repeatable so one instance can enforce the same compiled ban rules
 across several containers and the host (addressed by its own nsfs
-path) — one driver instance per nsfs path, one fetch-compile serving
-all of them. `--nft-netns` **replaces** the default target — the
+path) - one driver instance per nsfs path, one fetch-compile serving
+all of them. `--nft-netns` **replaces** the default target - the
 current namespace is only included if you pass its path too. The nsfs
 path is re-opened every cycle, so a recreated container is picked up
 through a stable handle; a namespace that cannot be opened is warned
@@ -323,7 +323,7 @@ $ splint --url http://127.0.0.1:8080/reports --nft-netns /run/netns/splint-web
 ```
 
 When the process is recreated, re-attach the name to its new pid
-(`ip netns attach` again) and the next cycle picks it up — the path
+(`ip netns attach` again) and the next cycle picks it up - the path
 never changes:
 
 ```console
@@ -358,14 +358,14 @@ instance instead of stacking instances.
 #### Enforcement scope: the two scopes
 
 Every conversation with the protected service runs in two directions:
-the **[ingress](../GLOSSARY.md)** direction — what a ban rule's
+the **[ingress](../GLOSSARY.md)** direction - what a ban rule's
 [Target](../GLOSSARY.md) sends toward the service, matched by the
-Target as source — and the **[egress](../GLOSSARY.md)** direction — the
+Target as source - and the **[egress](../GLOSSARY.md)** direction - the
 response sent back to the Target, matched by the Target as
 destination. Each direction carries its own
 **[enforcement scope](../GLOSSARY.md)**: the protected service's
-traffic surface a ban rule reaches beyond its Target — transport
-protocols, ports and addresses — named by the packet fields its
+traffic surface a ban rule reaches beyond its Target - transport
+protocols, ports and addresses - named by the packet fields its
 direction matches:
 
 | scope | matches the service at | flags |
@@ -373,16 +373,16 @@ direction matches:
 | **ingress scope** | the packet's **destination** fields: destination address, destination port, transport protocol | `--nft-ingress-daddr`, `--nft-ingress-dport`, `--nft-ingress-l4proto` |
 | **egress scope** | the packet's **source** fields: source address, source port, transport protocol | `--nft-egress-saddr`, `--nft-egress-sport`, `--nft-egress-l4proto` |
 
-In every kernel rule the direction's scope matches first — protocol,
-then port, then address — then the Target match (the Target as source
+In every kernel rule the direction's scope matches first - protocol,
+then port, then address - then the Target match (the Target as source
 on ingress, as destination on egress), then the counter and the
 verdict. `drop`, `reject` and `limit-pkt-rate` enforce in the ingress
 scope; `limit-bandwidth` meters in the egress scope. It is the scope
 that keeps enforcement away from SSH, monitoring and unrelated
 forwarded traffic even when a Report targets a broad prefix: a ban
 rule touches its Target's service traffic and nothing else. A ban rule
-the direction's scope cannot reach at all — an IPv6-only Target under
-an IPv4-only scope — declines loudly with a reason instead of
+the direction's scope cannot reach at all - an IPv6-only Target under
+an IPv4-only scope - declines loudly with a reason instead of
 vanishing from the plan; one that only partially fits installs just
 the address families the scope reaches.
 
@@ -390,7 +390,7 @@ Scope values take comma lists or repeats, both accumulating; a bare
 address counts as its host prefix (`203.0.113.10` is
 `203.0.113.10/32`); ports are exact numbers 1–65535 (no ranges);
 protocols are strict lowercase `tcp` or `udp`. Ports and addresses
-default to all — an empty set matches everything — and protocols
+default to all - an empty set matches everything - and protocols
 default to `tcp,udp`. Duplicate values resolve to one entry, and
 overlapping address prefixes within one scope are refused at startup:
 one covers part of the other's traffic, and the enforcement outcome
@@ -403,7 +403,7 @@ its flag and the offending value and exits `1`:
 
 Both scopes are folded into the driver's ruleset hash, so a change to
 either re-enforces. Every enforcement point of one instance shares the
-two scopes — the `--nft-netns` fan-out included — so a service spread
+two scopes - the `--nft-netns` fan-out included - so a service spread
 over several containers states the union of the ports and addresses
 each direction sees.
 
@@ -424,11 +424,11 @@ on-the-wire identity between the hooks the two directions enforce at,
 so one conversation carries the service as different packet fields in
 each direction:
 
-- the **ingress** direction — the request, matched at prerouting raw,
-  before conntrack applies the port-forward — sees the
+- the **ingress** direction - the request, matched at prerouting raw,
+  before conntrack applies the port-forward - sees the
   **pre-translation** view: the service at the packet's destination
   fields is `203.0.113.10` port `443`;
-- the **egress** direction — the response, matched at forward — sees
+- the **egress** direction - the response, matched at forward - sees
   the **post-translation** view: the service at the packet's source
   fields is `172.17.0.2` port `8443`, the identity the port-forward
   gave the connection. The response is only translated back to the
@@ -471,12 +471,12 @@ hash=cd035906
 The plan is self-contained: `scope=ingress` names the pre-translation
 view as the destination fields it matches, `scope=egress` the
 post-translation view as the source fields it matches, and the
-placement lines name where each direction enforces —
+placement lines name where each direction enforces -
 `ingress@prerouting` before conntrack, `egress@forward` in the
 response direction. The `drop` discards the banned client's requests
 to the published service and only those: its SSH or monitoring traffic
 to the same host falls outside the ingress scope. The meter throttles
-the response payload the other client downloads — at the container's
+the response payload the other client downloads - at the container's
 translated source port, which is exactly what the egress scope names.
 One shared destination-only scope could state only one of the two
 views, and the other side matched nothing, silently; the split is what
@@ -488,7 +488,7 @@ above.)
 ##### Unscoped bans cover tcp and udp traffic only
 
 The protocol gate is present in every kernel rule, drawn from its
-direction's scope — so a ban rule set up with no scope flags covers
+direction's scope - so a ban rule set up with no scope flags covers
 `tcp` and `udp` traffic only. ICMP and every other protocol fall
 outside all bans. This is a deliberate delta from the removed
 shared-scope model, where an unscoped ban matched every protocol
@@ -498,8 +498,8 @@ single-protocol service narrows each direction instead with
 
 ##### Migrating from the removed `--nft-service-*` flags
 
-`--nft-service-port` and `--nft-service-address` — the single shared,
-destination-only scope both directions used to match — are removed
+`--nft-service-port` and `--nft-service-address` - the single shared,
+destination-only scope both directions used to match - are removed
 outright ([ADR 0018](adr/0018-per-chain-field-named-enforcement-scopes.md)),
 with no alias or deprecation shim. Passing either is a refused command
 line (exit `2`):
@@ -533,18 +533,18 @@ startup instead of surfacing inside a kernel batch.
 | `reject` | `reject with icmpx admin-prohibited` (TCP gets a reset automatically) |
 | `limit-pkt-rate` | `limit rate over N/second`, then `drop` |
 | `limit-bandwidth` | `limit rate bytes over N/second` on the egress chain, then `drop` |
-| `limit-req-rate` | nothing — **declined** with a reason (application-layer intent), logged and counted |
+| `limit-req-rate` | nothing - **declined** with a reason (application-layer intent), logged and counted |
 
 The direction split: one **ingress** chain at the configured hook
 carries `drop`, `reject` and `limit-pkt-rate`, matched on source ∈
 Target; one **egress** chain carries `limit-bandwidth` meters matched on
-destination ∈ Target — the response direction the Penalty's unit names
+destination ∈ Target - the response direction the Penalty's unit names
 (response-payload bytes). In input mode the egress chain attaches at
 output and the ingress chain at input (filter priority 0); in
 prerouting mode the egress chain attaches at forward and the ingress
 chain at prerouting (raw priority −300, so ingress ban rules run
 before conntrack). The placement labels in the dry-run plan name the same
-split — `ingress@input` and `egress@output` in input mode,
+split - `ingress@input` and `egress@output` in input mode,
 `ingress@prerouting` and `egress@forward` in prerouting mode.
 `limit-req-rate` is application-layer intent and is never faked at the
 packet layer: the driver declines it with a reason and the engine logs
@@ -554,8 +554,8 @@ Every limit is an aggregate over the Report's whole Target prefix, not
 each host inside it. Rate limits carry a derived burst of one second's
 worth of the rate (floored), so legitimate micro-bursts survive
 enforcement. Every ban rule carries a packet/byte counter on the
-traffic the rule matches — never the traffic the enforcement scope or
-Target match lets past; nonzero hits are logged at each install — "since the
+traffic the rule matches - never the traffic the enforcement scope or
+Target match lets past; nonzero hits are logged at each install - "since the
 last change" (see the cycle logs below).
 
 #### Known limitation: first-match meter stances
@@ -564,7 +564,7 @@ A rate meter matches only once its rate is exceeded: the drop applies
 to the excess while in-rate traffic falls through to the next rule. So
 when a meter stance carves an exception under a broader ban rule (the
 merge policy puts the more specific Target first), the in-rate traffic
-of that Target is **not** exempted — it falls through the meter rule
+of that Target is **not** exempted - it falls through the meter rule
 and the broader ban rule below still drops it. This first-match nuance
 is a known limitation of the nftables driver; fixing it is a
 driver-policy question, not part of this tool's contract.
@@ -573,10 +573,10 @@ driver-policy question, not part of this tool's contract.
 
 - **Kernel floor: reject at prerouting needs roughly Linux 5.9.** On
   older kernels pick `--nft-hook input`; the startup test install is
-  the guard — an unsupported hook fails at deploy time, not at ban
+  the guard - an unsupported hook fails at deploy time, not at ban
   time.
 - **An unreachable enforcement point only warns.** A wrong
-  `--nft-netns` path is warned and skipped every cycle — including at
+  `--nft-netns` path is warned and skipped every cycle - including at
   the startup test install, which can still report `ok` (as captured,
   excerpt):
 
@@ -613,22 +613,22 @@ $ journalctl -u splint -f
 
 `systemctl start` performs the startup test install; the journal shows
 `startup test install ok` when the endpoint, flags and kernel all
-check out. Installing nftables rules needs `CAP_NET_ADMIN` — the sample
+check out. Installing nftables rules needs `CAP_NET_ADMIN` - the sample
 unit runs as root by default and carries a commented block for a
 dedicated user instead: the `useradd` step to create it, and the
 capability grants (the only thing splint needs from root) once it
 exists. A startup test install that keeps failing
 (broken flags, endpoint or kernel) stops retrying and leaves the unit
-failed — `systemctl status splint` says why.
+failed - `systemctl status splint` says why.
 
 `systemctl stop` is SIGTERM: the owned ruleset is reset before exit, so
 stopping the service removes its ban rules. (A *crashed* installer
-cannot reset — see the caveats.)
+cannot reset - see the caveats.)
 
 ### The cycle logs
 
 A full session as captured against a scratch endpoint (timestamps
-omitted; the hash and counter values are that run's — yours follow
+omitted; the hash and counter values are that run's - yours follow
 your own document and traffic; the document held a `drop` Report and
 a `limit-req-rate` Report, ten packets arrived from the ban rule's
 Target between installs, the endpoint went down before one cycle and
@@ -655,9 +655,9 @@ group into one ban rule, hence `reports=3 rules=2`); `installed ban
 rules` a changed install with its ruleset hash and its `declined`
 count; `declined ban rule feature` the lost enforcement of every
 declined feature, logged each cycle; `ban rule hit in the replaced
-ruleset` the nonzero counters of the rules the install replaced —
+ruleset` the nonzero counters of the rules the install replaced -
 `rule=` indexes that replaced ruleset (the previous install's ban
-rules), not the ruleset just installed — the ten packets the ban rule
+rules), not the ruleset just installed - the ten packets the ban rule
 dropped since the last change; `update failed; keeping last installed
 rules` a failed fetch (the `error` field carries the cause);
 `ban rules unchanged; skipping install` the skip-if-unchanged path;

@@ -9,7 +9,7 @@ import (
 )
 
 // Wire-contract tests (ADR 0014): response bytes from New with a fixed
-// injected snapshot — no daemon, no renderer-internals assertions.
+// injected snapshot - no daemon, no renderer-internals assertions.
 
 // The whole renderer input in one value, so the golden bytes are exactly
 // renderMetrics(metricsFixture); values chosen for unambiguous rendering.

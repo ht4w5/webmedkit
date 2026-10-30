@@ -8,7 +8,7 @@ import (
 )
 
 // /metrics (ADR 0006's promised endpoint, ADR 0014): Prometheus text
-// exposition 0.0.4 hand-rendered — no client library, no live renderer reads.
+// exposition 0.0.4 hand-rendered - no client library, no live renderer reads.
 
 // The response states its format version rather than negotiating one.
 const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
@@ -33,7 +33,7 @@ const (
 )
 
 // One row of the machine-contract family table (ADR 0014). Rows render in
-// table order — the fixed exposition order — so a new series is one new row.
+// table order - the fixed exposition order - so a new series is one new row.
 type metricFamily struct {
 	name   string
 	kind   metricKind
@@ -182,7 +182,7 @@ var metricFamilies = []metricFamily{
 }
 
 // Both sources read at scrape time: one response, one point-in-time snapshot.
-// Explicit method check — ServeMux matches HEAD against GET patterns.
+// Explicit method check - ServeMux matches HEAD against GET patterns.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -238,7 +238,7 @@ func escapeHelp(v string) string {
 }
 
 // Shared exposition escaping (0.0.4): backslash and newline everywhere;
-// quote only in label values — it is legal unescaped in HELP text.
+// quote only in label values - it is legal unescaped in HELP text.
 func escapeText(v string, escapeQuote bool) string {
 	var b strings.Builder
 	b.Grow(len(v))

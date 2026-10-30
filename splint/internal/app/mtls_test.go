@@ -23,7 +23,7 @@ import (
 	"github.com/HT4w5/webmedkit/splint/internal/firewall/firewalltest"
 )
 
-// Primary seam: the transport — the update cycle over mutual TLS.
+// Primary seam: the transport - the update cycle over mutual TLS.
 // There is no insecure mode: verification failures refuse the cycle.
 
 // testPKI is the throwaway PKI: one CA the endpoint and the fetcher

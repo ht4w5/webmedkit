@@ -1,10 +1,10 @@
-# 03: Escalation rungs — the ladder end to end (routing actions)
+# 03: Escalation rungs - the ladder end to end (routing actions)
 
 **What to build:** A rule author replaces the tracker's `volume` with an
 `escalations` ladder: two or more rungs, each a threshold in the tracker's
 quantity (`50MB`, `500`, …) plus its own ordered action list. On every
 matching Event, every rung the accumulated value stands above fires,
-lowest first — so a `jump`/`goto` handoff rung keeps feeding its
+lowest first - so a `jump`/`goto` handoff rung keeps feeding its
 downstream chain per Event while the value stays above its threshold,
 instead of flickering on and off. Terminality is decided per *fired* rung:
 the chain ends after the rule only when a fired rung carried

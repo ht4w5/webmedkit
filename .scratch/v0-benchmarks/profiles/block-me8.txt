@@ -1,4 +1,4 @@
-# block-me8.out — go tool pprof -top then -traces
+# block-me8.out - go tool pprof -top then -traces
 File: app.test
 Build ID: 8e91155ddfe4fb40ade4e74b4ed31adf460284bb
 Type: delay

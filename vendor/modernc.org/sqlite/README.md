@@ -110,9 +110,9 @@ Generated sources (deduplication)
 
 The transpiled SQLite C amalgamation in `lib/` and the `sqlite-vec` extension in
 `vec/` ship one generated Go file per `GOOS`/`GOARCH`. Declarations that are
-byte-identical across targets are folded into build-tagged shared files —
+byte-identical across targets are folded into build-tagged shared files -
 `lib/sqlite.go` plus `lib/sqlite_g_<hex>.go` (and `vec/vec.go` plus
-`vec/vec_g_<hex>.go`) — by [`modernc.org/undup`](https://gitlab.com/cznic/undup),
+`vec/vec_g_<hex>.go`) - by [`modernc.org/undup`](https://gitlab.com/cznic/undup),
 wired into `make vendor`. Go's build constraints make every target compile exactly
 the same set of declarations as before, so this is purely a packaging change: it
 keeps each tag's module download well under Go's 500&nbsp;MB cap and does not
@@ -127,7 +127,7 @@ go run modernc.org/undup@v0.0.5 -expand -dir vec   # writes full vec/vec_<goos>_
 ```
 
 This removes the shared `*_g_*.go` files and rewrites each
-`*_<goos>_<goarch>.go` as a standalone file — convenient for grepping, reading, or
+`*_<goos>_<goarch>.go` as a standalone file - convenient for grepping, reading, or
 stepping through one platform's code. Restore the committed, deduplicated form
 with `git checkout -- lib vec`, or re-fold in place with
 `go run modernc.org/undup@v0.0.5 -dir lib` (and `-dir vec`). Hand-written platform

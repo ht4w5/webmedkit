@@ -1,11 +1,11 @@
-# Report reasons carry a producer namespace — spec
+# Report reasons carry a producer namespace - spec
 
 Status: ready-for-agent
 
 ## Problem Statement
 
 A report's Reason is the machine-readable trigger code that feeds the ban
-rules downstream tooling generates from reports — the one field of the report
+rules downstream tooling generates from reports - the one field of the report
 that exists to cross tool boundaries. Today it is the bare code the rule author
 wrote (`egress-overflow`, `ua-trip`). Those codes live in a shared, unnamespaced
 vocabulary: when a consumer sees `ua-trip` in a ban rule, it can tell neither
@@ -18,7 +18,7 @@ for attribution.
 
 A report's Reason is **namespaced**: on the wire it is `<prefix>.<code>`,
 matching `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`. The contract constrains
-the shape — any prefix matching `^[a-z0-9][a-z0-9_-]*\.` is legal — and not any
+the shape - any prefix matching `^[a-z0-9][a-z0-9_-]*\.` is legal - and not any
 producer's naming choice. bandage composes its prefix from its own program name
 plus a dot, so the namespace follows the tool automatically through any rename,
 and adds it at the moment a report is created. Rule authors keep writing bare
@@ -47,7 +47,7 @@ the reason's second label.
 6. As a report consumer, I want the canonical example in the contract to show
    a namespaced reason, so that the byte-pinned example demonstrates the form
    I must accept.
-7. As a report consumer, I want the reason's other properties preserved — it
+7. As a report consumer, I want the reason's other properties preserved - it
    is still non-unique, and several rules may still share one code so multiple
    signals feed a single ban reason, so that namespacing changes only the
    code's form.
@@ -101,8 +101,8 @@ the reason's second label.
   prefix (with its dot) and the code each match the single-label slug pattern
   `^[a-z0-9][a-z0-9_-]*$`; the full wire pattern is
   `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$` (ADR 0016).
-- The prefix is composed where the report is created — the report action
-  being the only write path to the report table — and nowhere else: not at
+- The prefix is composed where the report is created - the report action
+  being the only write path to the report table - and nowhere else: not at
   rules load, not at serialization. The report action keeps carrying the
   author's bare code; the created report carries the namespaced form.
 - Composition is a plain join of the injected namespace and the code; no
@@ -139,7 +139,7 @@ the reason's second label.
 ## Testing Decisions
 
 A good test here asserts only external behavior at the highest seams: what a
-served report carries and what the plan prints — never where the composition
+served report carries and what the plan prints - never where the composition
 happens or what helper does it. The feature is specified at three existing
 seams; no new seams are introduced:
 
@@ -149,26 +149,26 @@ seams; no new seams are introduced:
   reproduces the canonical example byte for byte. Prior art: the end-to-end
   suite's report assertions and the report-document byte-pin test.
 - **The same seam, one derivation case:** a daemon driven with a different
-  build name serves `<other>.<code>` reasons — pinning ADR 0017's
+  build name serves `<other>.<code>` reasons - pinning ADR 0017's
   program-name derivation behaviorally. Prior art: the rules suite's existing
   canary build identity.
 - **The `bandage -t` plan seam:** the plan prints the namespaced reason; the
   loader's validation at the same seam keeps its convention of a failing and a
-  passing case — bare codes pass, dotted codes are refused. Prior art: the
+  passing case - bare codes pass, dotted codes are refused. Prior art: the
   shipped-rules plan assertions and the rules suite.
 - **The command's testable run seam:** one guard test asserting the program
   name is slug-shaped, per the ADR 0017 constraint (the constant is visible
   only here). This is the first test on this seam; the seam itself is
   pre-designed in the command.
 - Existing domain, evaluation and persistence suites are updated only where
-  they assert reason strings — expectation fallout, not feature specification.
+  they assert reason strings - expectation fallout, not feature specification.
 
 ## Out of Scope
 
 - Any change to the consumer binary's compilation or an ingest-time
   validation of the reason pattern there (triaged as wontfix: the field is
   read-through only).
-- Hand-maintained site configuration under the manually managed directory —
+- Hand-maintained site configuration under the manually managed directory -
   untouched, including its reason codes.
 - Legacy-row migration or read-path normalization: there is no production
   data to carry forward.

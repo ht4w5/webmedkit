@@ -7,15 +7,15 @@ install replaces the table's contents atomically; reset deletes the table.
 Running without the needed privileges fails loudly at the startup install
 rather than silently not banning.
 
-**Blocked by:** 01 — Walking skeleton
+**Blocked by:** 01 - Walking skeleton
 
 **Status:** resolved
 
 - [x] Install creates the owned `splint` inet table and an ingress chain at `--hook input` (default) or `--hook prerouting`, with each ban rule matching source ∈ its Target set and dropping
-- [x] Each install rebuilds the whole table in a single atomic batch — no delete-then-rebuild window
+- [x] Each install rebuilds the whole table in a single atomic batch - no delete-then-rebuild window
 - [x] Reset removes the owned table and tolerates it being already absent
 - [x] Missing netlink privileges surface as a loud startup failure
-- [x] The real driver is verified by one root-gated integration test — install, read the kernel state back, reset — skipped where privileges are absent
+- [x] The real driver is verified by one root-gated integration test - install, read the kernel state back, reset - skipped where privileges are absent
 - [x] The stub driver remains the test surface; nothing at the update-cycle seam requires privileges
 - [x] `--dry-run` still works unprivileged and unchanged
 

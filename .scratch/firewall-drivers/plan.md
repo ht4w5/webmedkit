@@ -1,14 +1,14 @@
-# splint firewall-driver refactor — plan
+# splint firewall-driver refactor - plan
 
 **Status:** superseded by `spec.md` in this directory (the grilling
-session reshaped targeting and enforcement scope as driver-owned — see
+session reshaped targeting and enforcement scope as driver-owned - see
 `spec.md`, which is authoritative). Kept as the design-session record.
 
 **Base:** on top of `feat/splint-nft` (the splint work it refactors is not yet on `main`)
 
 ## Requirements (what this plan must deliver)
 
-1. `internal/identity` refactored so bandage and splint use it equally —
+1. `internal/identity` refactored so bandage and splint use it equally -
    today splint is the "more external" consumer (`identity.Summary(progName)`
    bolted on beside `const Name = "bandage"` and the `String()`/`Header()`
    path the daemon uses).
@@ -66,7 +66,7 @@ func (b Build) Name() string
 
 ### 2. The firewall module: a deep driver seam
 
-New package **`splint/internal/firewall`** — the port. Adapters:
+New package **`splint/internal/firewall`** - the port. Adapters:
 **`splint/internal/firewall/nft`** (the nftables implementation) and
 **`splint/internal/firewall/firewalltest`** (the recording stub, test surface of the
 engine). Dependency direction: the engine (`splint/internal/app`) and every
@@ -98,16 +98,16 @@ Note the naming: the compiled artifact's stance vocabulary becomes identical
 to the report's closed penalty vocabulary (all five values; today the compiler
 already folds into `Stance`, which the GLOSSARY keeps distinct from the
 reserved term *Action*). The `Chain` type (`ingress`/`egress`) leaves the
-engine entirely — chain/direction placement is nft's own shape.
+engine entirely - chain/direction placement is nft's own shape.
 
-The **interface** (three methods — all the encoding, identity, probing and
+The **interface** (three methods - all the encoding, identity, probing and
 counting behaviour hides behind them):
 
 ```go
 // Driver is one firewall backend bound to one Target. The engine calls
 // it serially; implementations must be safe to Apply repeatedly.
 type Driver interface {
-    // Plan reports what Apply would do — pure: no I/O, no privileges.
+    // Plan reports what Apply would do - pure: no I/O, no privileges.
     // --dry-run prints exactly this.
     Plan(rules []BanRule) (Plan, error)
 
@@ -150,7 +150,7 @@ seam's contract: the engine warns-and-skips one dead namespace per cycle and
 tolerates vanished namespaces on reset).
 
 Depth check (why this is a deep module): the engine learns three methods and
-gets — nftables family/interval encoding, hook→chain/priority mapping
+gets - nftables family/interval encoding, hook→chain/priority mapping
 (input→filter/0, prerouting→raw/−300), the egress direction split, the
 derived burst, per-family reachability of the prefilter, atomic batch with
 the delete-probe subtlety, the rolling hash, skip-if-unchanged, the
@@ -163,20 +163,20 @@ driver would scatter all of that back across the engine.
   `map[string]firewall.Factory`. Unknown value → usage error listing the
   known drivers.
 - `firewall.Factory` is a small interface: `Name()`, `BindFlags(*pflag.FlagSet)`,
-  `Validate() error`, `Open(Target) (Driver, error)` (`Open` is lazy — no
+  `Validate() error`, `Open(Target) (Driver, error)` (`Open` is lazy - no
   I/O until `Apply`, which is what keeps `--dry-run` unprivileged).
-- **Grouped driver flags**: each factory binds its own prefixed flags —
+- **Grouped driver flags**: each factory binds its own prefixed flags -
   today `--hook` becomes **`--nft-hook=input|prerouting`** (the only
   driver-specific flag that exists). The usage printer groups flags by owner
   ("engine options" / "nftables driver options"). Validation rejects flags
   belonging to an unselected driver when explicitly set (pflag `Changed`),
   so `--nft-hook` with `--firewall=pf` is a usage error, not silence.
-- **`--netns` stays an engine flag** (target selection — WHERE to enforce),
+- **`--netns` stays an engine flag** (target selection - WHERE to enforce),
   flowing into `firewall.Target`; a driver that cannot target a namespace
   fails its `Open`/startup install loudly. Rationale: nsfs paths are the
   Linux target mechanism, not an nft mechanism (iptables/eBPF drivers need
   the same targeting). Alternative considered: grouping it under `--nft-*`
-  because `WithNetNSFd` is netlink plumbing — rejected: that leaks the
+  because `WithNetNSFd` is netlink plumbing - rejected: that leaks the
   adapter's mechanism into the operator surface. *(open decision A)*
 
 ### 4. All report features preserved; the driver decides
@@ -188,13 +188,13 @@ driver would scatter all of that back across the engine.
   Target → `Skip`, logged and counted).
 - Merge policy is unchanged as *policy* (most specific wins both ways;
   `drop` > `reject` > limits; smaller rate stricter within one action;
-  incomparable limit dimensions combine) — it is expressed over the five
+  incomparable limit dimensions combine) - it is expressed over the five
   values now, with `limit-req-rate` a third limit dimension that combines
   like the others and never "loses to an invented ordering".
 - The **nft adapter** applies `drop`, `reject`, `limit-pkt-rate`,
   `limit-bandwidth` (as today) and **declines `limit-req-rate`** with
   `Skipped{Feature: "limit-req-rate", Reason: "application-layer intent;
-  not applied at the packet layer (ADR 0011)"}` — the skip moves from the
+  not applied at the packet layer (ADR 0011)"}` - the skip moves from the
   compiler to the driver, and the engine logs/counts it from `Outcome`.
 - **Behaviour on nft is preserved** (analysis worth keeping): because the
   merge encodes exceptions by first-match rule order and a declined group
@@ -212,7 +212,7 @@ driver would scatter all of that back across the engine.
   folded is the adapter's **effective** rules (post-decline, post-family
   reachability, in install order). `splint/hash.go` is deleted.
 - Skip-if-unchanged and the existence probe move inside `Apply`: the skip
-  state is per driver instance (per namespace — today's `nsState` bookkeeping
+  state is per driver instance (per namespace - today's `nsState` bookkeeping
   disappears from `updater.go`), and the probe is the adapter's own. The
   documented limit stays (existence, not rule bodies).
 - Counters: read inside `Apply` (only the adapter knows the kernel-rule ↔
@@ -244,7 +244,7 @@ stands in for the kernel, it doesn't wrap the real one.
   and per cycle: fetch → parse → compile → `Apply` on each → log
   `Outcome` (applied / unchanged-skip + hash / hits / declined features).
   Startup test install, keep-last-on-failed-fetch, SIGINT/SIGTERM reset
-  tolerating vanished namespaces — all unchanged behaviour.
+  tolerating vanished namespaces - all unchanged behaviour.
 - `DryRun`: fetch → compile → `Plan` on one driver → print (no netlink).
 
 ## CLI surface after
@@ -279,32 +279,32 @@ no compatibility shim; the sample unit and docs ship renamed.
   application, (4) hash/skip/counters living in the driver because only it
   knows the effective rules. ADR 0011 gains a superseded-in-part note (same
   pattern ADR 0004 uses).
-- The original `.scratch/nft-installer/spec.md` is a record of that effort —
+- The original `.scratch/nft-installer/spec.md` is a record of that effort -
   its "no user-facing `--firewall-driver` in v0" decision is what ADR 0012
   supersedes; leave the spec as history.
 
 ## Work breakdown (suggested tickets)
 
-1. **Identity refactor** — `identity.For(name)` API, both commands equal;
+1. **Identity refactor** - `identity.For(name)` API, both commands equal;
    output for bandage byte-identical (pinned tests). Independent, small.
-2. **Firewall port + type move** — `splint/internal/firewall` with `BanRule`/
+2. **Firewall port + type move** - `splint/internal/firewall` with `BanRule`/
    `Penalty`/`Target`/`Driver`; engine produces `firewall.BanRule`;
    `splint/internal/firewall/nft` + `firewalltest.Stub` moved behind the port;
    `deps_test.go` rule. Behaviour unchanged (hash still engine-side here or
-   moved in 3 — prefer doing 2 and 3 as one ticket if the diff stays
+   moved in 3 - prefer doing 2 and 3 as one ticket if the diff stays
    reviewable).
-3. **Driver-owned identity** — hash/skip/probe/counters into `Apply`/`Plan`;
+3. **Driver-owned identity** - hash/skip/probe/counters into `Apply`/`Plan`;
    `updater` slims; dry-run prints the driver's `Plan`; nft internal seam
    (fake kernel) with the skip matrix (identical twice / changed / missing
    ruleset / counter reads) moved here unprivileged.
-4. **Penalty pass-through** — compiler keeps all five actions; merge policy
+4. **Penalty pass-through** - compiler keeps all five actions; merge policy
    over five values; `limit-req-rate` decline becomes the nft adapter's
    `Skipped` (engine logs/counts); new merge cases (req-rate participation,
    combination at ties).
-5. **CLI + rename** — `--firewall`, grouped `--nft-*` flags + validation,
+5. **CLI + rename** - `--firewall`, grouped `--nft-*` flags + validation,
    `cmd/splint`, `bin/splint`, `configs/splint.service`, docs rename and the
    mapping-table restructure.
-6. **Domain docs** — ADR 0012 + ADR 0011 note + GLOSSARY entry (follow
+6. **Domain docs** - ADR 0012 + ADR 0011 note + GLOSSARY entry (follow
    `docs/agents/domain.md` / domain-modeling conventions).
 
 Order 1 → 2 → 3 → 4 → 5 → 6; 4 and 5 can be parallel after 3.
@@ -334,19 +334,19 @@ Order 1 → 2 → 3 → 4 → 5 → 6; 4 and 5 can be parallel after 3.
   reserves *Action*) with its vocabulary grown to five [`Stance`], or rename
   the field to `Penalty` for symmetry with the report.
 - **C. Hash helpers in the port vs per-adapter folds** [shared construction
-  helpers in `firewall`, per-adapter folding — keeps the bandaid-familiar
+  helpers in `firewall`, per-adapter folding - keeps the bandaid-familiar
   construction without leaking engine state].
 - **D.** The known first-match fall-through nuance (a *meter* exception under
   a broader ban doesn't exempt in-rate traffic) is unchanged by this refactor;
   if ever operationally needed it becomes an adapter policy (e.g. a terminal
   within-rate verdict). Keep out of scope [yes].
 - **E.** `PlannedRule.Placement` label wording for dry-run/logs (opaque to
-  the engine) — pick during implementation.
+  the engine) - pick during implementation.
 
 ## Out of scope
 
 - Any new firewall backend (the abstraction makes room; nothing but nft
   ships).
 - Changing the merge policy, exclusion defaults or prefilter semantics.
-- In-kernel self-expiry, rule-body tampering detection, metrics export —
+- In-kernel self-expiry, rule-body tampering detection, metrics export -
   unchanged from the original spec's out-of-scope list.

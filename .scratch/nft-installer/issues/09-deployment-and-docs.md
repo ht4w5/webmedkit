@@ -3,12 +3,12 @@
 **What to build:** an operator deploys and verifies `splint-nft` without
 reading code: a shipped sample systemd unit, a dry-run audit recipe, and one
 consumer document carrying the flags, the penalty-to-nftables mapping table,
-the merge policy, the exclusion defaults, and the caveats — kernel floor for
+the merge policy, the exclusion defaults, and the caveats - kernel floor for
 reject at prerouting, TLS termination being a deployment concern, ban
 staleness bounded by the update interval, one instance per namespace.
 
-**Blocked by:** 03 — Safety; 04 — Penalty mapping; 05 — Merge policy;
-06 — Ruleset identity; 07 — Netns targeting; 08 — mTLS fetch
+**Blocked by:** 03 - Safety; 04 - Penalty mapping; 05 - Merge policy;
+06 - Ruleset identity; 07 - Netns targeting; 08 - mTLS fetch
 
 **Status:** resolved
 

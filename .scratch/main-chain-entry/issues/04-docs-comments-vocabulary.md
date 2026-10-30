@@ -31,7 +31,7 @@ excerpts verbatim-coupled to `configs/rules.yml` by
 `TestShippedRulesCarryTheGuideDispatcher` /
 `TestShippedRulesCarryTheGuideLadder`; `PLAN.md`'s pipeline, actions
 and validation wording describes main-chain entry; the shipped site
-config's "every chain runs on every event" comment is corrected —
+config's "every chain runs on every event" comment is corrected -
 replay inspection runs only on handoff and takes each handoff event
 once. The glossary's *Entry chain* and *Chain* terms (plus *Dispatch*)
 and ADR 0015 are checked against the shipped behaviour; the coupling

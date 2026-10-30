@@ -1,7 +1,7 @@
 # 01: Namespaced reasons on reports, end to end
 
 **What to build:** A report written by a triggered report action carries the
-authored code namespaced under the daemon's program name — `bandage.<code>` —
+authored code namespaced under the daemon's program name - `bandage.<code>` -
 composed from the build identity the daemon already receives, at the moment
 the report is created. The namespaced form is what the report table stores and
 what `GET /reports` serves. An escalation override keeps its in-place
@@ -18,8 +18,8 @@ lands green.
 
 - [x] A created report's reason is `<program name>.<code>`; the report action
       keeps carrying the bare authored code
-- [x] The prefix is composed from the build identity at report creation only —
-      not at rules load, not at serialization — as a plain join (no
+- [x] The prefix is composed from the build identity at report creation only -
+      not at rules load, not at serialization - as a plain join (no
       re-prefixing)
 - [x] A daemon driven under another program name serves reasons under that
       name (ADR 0017's derivation, pinned behaviorally)

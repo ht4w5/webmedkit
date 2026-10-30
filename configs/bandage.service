@@ -25,7 +25,7 @@
 # paths configs/bandage.yml ships with: /run/bandage (the ingest
 # socket) and /var/lib/bandage (the report store). Move either in the
 # unit and the config together. The report API serves on
-# api.listen (127.0.0.1:8080 by default) — point splint's --url at it
+# api.listen (127.0.0.1:8080 by default) - point splint's --url at it
 # (configs/splint.service).
 #
 # A clean stop (systemctl stop) is SIGTERM: the daemon drains
@@ -57,7 +57,7 @@ StateDirectory=bandage
 #Group=bandage
 #NoNewPrivileges=true
 # The log sender must be able to write the unixgram socket at
-# /run/bandage/log.sock — under a dedicated user it is owned by that
+# /run/bandage/log.sock - under a dedicated user it is owned by that
 # user, so give the sender's group write access (or run the sender as
 # the same group).
 

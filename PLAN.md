@@ -1,4 +1,4 @@
-# webmedkit — plan
+# webmedkit - plan
 
 A programmable **realtime** web log analyzer, written in Go (module
 `github.com/HT4w5/webmedkit`), that consumes access logs over syslog as they
@@ -13,13 +13,13 @@ Reference DNA:
 | Source | What we take |
 |---|---|
 | **flux** | Chain-shaped YAML rules (chains → rules → match → action, with `goto`/`jump`/`stop` control flow); explicit leaky-**tracker** config (`leak`, `volume`); bucket math and overflow semantics; realtime pipeline (syslog → parser → workers); nginx JSON log format and parser |
-| **webjail** | Domain-driven design (`internal/domain` in webjail, `bandage/internal/domain` here — one subpackage per concern, tiny `Update(ctx, key, fn)` ports, derived `Event` fields); the **filter expression language** (`src 10.0.0.0/8 and path prefix "/api"`) including `Parse`/`ParseError{Line,Col}` style; the **file size enrichment** (per-path EWMA + `minSamples` gate → `event.SizeBytes`); the **ubiquitous language** (`Event`, `Filter`, `Enrich`, `Track`/tracker, `Evaluation`, `leak`, `volume`) |
+| **webjail** | Domain-driven design (`internal/domain` in webjail, `bandage/internal/domain` here - one subpackage per concern, tiny `Update(ctx, key, fn)` ports, derived `Event` fields); the **filter expression language** (`src 10.0.0.0/8 and path prefix "/api"`) including `Parse`/`ParseError{Line,Col}` style; the **file size enrichment** (per-path EWMA + `minSamples` gate → `event.SizeBytes`); the **ubiquitous language** (`Event`, `Filter`, `Enrich`, `Track`/tracker, `Evaluation`, `leak`, `volume`) |
 | **A batch log analyzer** (YAML rules compiled to trusted SQL over a log warehouse, one-shot runs) | Rule `id` + `reason` provenance on findings. The YAML and JSON formats are **not** borrowed from it. |
 
 ## 1. DSL: flux chains + webjail filter syntax + explicit trackers
 
 Rules are YAML chains like flux; per event, evaluation enters one
-chain — the entry chain named `main` — and every other chain runs only
+chain - the entry chain named `main` - and every other chain runs only
 when a `goto`/`jump` action names it (docs/rules.md). Filters use
 webjail's expression syntax;
 a tracker (leaky bucket) is an explicit config block with flux's
@@ -86,47 +86,47 @@ chains:
 
 ### Rule anatomy
 
-- `id` — unique rule ID; also namespaces the rule's tracker state.
-- `filter` — webjail expression, default `any`. **v0 primitive set (webjail's,
+- `id` - unique rule ID; also namespaces the rule's tracker state.
+- `filter` - webjail expression, default `any`. **v0 primitive set (webjail's,
   unchanged):** `any`, `none`, `src (addr|prefix)`, `method word`,
   `path [prefix|suffix|keyword] string`, `agent [keyword] string`,
   `status (number | class number)`, `sent (>= | <=) size`, combined with
   `and` / `or` / `not` and parentheses. No regex, no host/duration filters
   in v0.
-- `tracker` — optional single leaky-bucket tracker, explicit config:
+- `tracker` - optional single leaky-bucket tracker, explicit config:
   - `track`: `rate` | `bandwidth` | `replay` (webjail's tracker names;
     flux's `freq` | `byte` | `file-ratio` respectively)
   - `leak` / `volume`: human byte strings (`1MB`), rates (`10/s`, `1MB/s`),
     numbers. Volume methods (`constant`, `clamped-linear`, `inverse-square`,
     `step`) apply to `replay` only; `rate`/`bandwidth` use constant volume.
-  - `target_prefix: {ipv4, ipv6}` — the tracker's target aggregation,
+  - `target_prefix: {ipv4, ipv6}` - the tracker's target aggregation,
     declared per tracker (default `{32, 64}`; IPv6 never finer than /64).
     The target is the event's source address aggregated to this prefix;
     `replay` is keyed by `(target, path)` like webjail's ReplayTracker. No
     other target kinds in v0.
-- `actions` — lowercase names; the full list always runs in order when the
+- `actions` - lowercase names; the full list always runs in order when the
   rule matches:
-  - `report` — the **only write path** into the report table: upserts a
+  - `report` - the **only write path** into the report table: upserts a
     report for the tracker's target. Requires `reason` (a slug matching
     `^[a-z0-9][a-z0-9_-]*$`; it populates the downstream ban rules and may
-    be shared across rules — the rule ID is internal provenance), `ttl`
+    be shared across rules - the rule ID is internal provenance), `ttl`
     (expiry since the trigger; each `report` action sets its own) and a
     `penalty` (`drop` | `reject` | `limit-pkt-rate` | `limit-bandwidth` |
-    `limit-req-rate`) with a `rate` on the limit penalties — plain counts
+    `limit-req-rate`) with a `rate` on the limit penalties - plain counts
     or decimal human sizes (`1MB` = 1e6) in the unit the penalty name
     states. The penalty is advisory (ADR 0010): validated for
     well-formedness only, never against the tracker or reason.
-  - `log` — debug logging in flux's shape (`log: "debug,ROUTE:"`), logging
+  - `log` - debug logging in flux's shape (`log: "debug,ROUTE:"`), logging
     the rule, its Target, the event and the rule's tracker reading at
-    that point (ADR 0005: the four level words only — a rule can never
+    that point (ADR 0005: the four level words only - a rule can never
     exit the process).
-  - `goto` — run the target chain, then end this chain.
-  - `jump` — run the target chain, then resume this chain.
-  - `stop` — end traversal of this chain (in the entry chain `main`,
+  - `goto` - run the target chain, then end this chain.
+  - `jump` - run the target chain, then resume this chain.
+  - `stop` - end traversal of this chain (in the entry chain `main`,
     that ends processing for the event).
-- `escalations` — alternative to `actions` and `tracker.volume`: an
+- `escalations` - alternative to `actions` and `tracker.volume`: an
   **escalation ladder** (GLOSSARY, ADR 0013) of two or more rungs, each
-  an `at` threshold in the tracker's quantity (scalar only — volume
+  an `at` threshold in the tracker's quantity (scalar only - volume
   methods stay exclusive to the single-volume form) and its own ordered
   action list; thresholds strictly ascending at load. Every rung the
   accumulated value stands above fires on a match, lowest first; the
@@ -140,7 +140,7 @@ chains:
   unfired rung's actions end nothing. Dispatch is the only way to
   enter any chain but the entry chain `main`; the `goto`/`jump` graph
   must be **acyclic**, validated at rule build time (shared target
-  chains are allowed — a DAG, not a forest), `main` cannot be a
+  chains are allowed - a DAG, not a forest), `main` cannot be a
   dispatch target, and chains unreachable from `main` are legal and
   never run.
 
@@ -148,12 +148,12 @@ Tracker semantics are flux's, unchanged: `value += inc`; on `Δt > 0`,
 `value = max(0, value − leak·Δt)`; overflow when `value > volume`; in-memory
 cache entries with TTL `volume/leak` (the top rung's `at` stands in for
 `volume` on a ladder; default 1h when leak is 0). `rate`
-increments by 1, `bandwidth` by `sent`, `replay` by `min(sent/size, 1)` —
+increments by 1, `bandwidth` by `sent`, `replay` by `min(sent/size, 1)` -
 skipped when `event.SizeBytes` is `FilesizeUnknown`. Decay uses **event
 time** (the log timestamp, flux parity); out-of-order events do not decay.
 Rules without a tracker match on filter alone (flux `ALL` rule analogue)
 and carry routing actions; `report` on them is legal (the tracker-less
-tripwire — one report per (rule, Target) while it is alive,
+tripwire - one report per (rule, Target) while it is alive,
 docs/rules.md).
 
 ## 2. Ingress event fields (v0)
@@ -173,7 +173,7 @@ nginx log format (flux-compatible)
 | `status` | `$status` | number | `Status` | `int` | required, 100–599 |
 | `sent` | `$body_bytes_sent` | number | `SentBytes` | `int64` | required, ≥ 0 |
 | `agent` | `$http_user_agent` | string | `Agent` | `string` | optional, `""` when absent |
-| — | — | — | `SizeBytes` | `int64` | derived (enrichment), `FilesizeUnknown` = 0 until warm |
+| - | - | - | `SizeBytes` | `int64` | derived (enrichment), `FilesizeUnknown` = 0 until warm |
 
 - Reserved for later versions, accepted but ignored in v0: `host`
   (`$host`), `server` (`$server_addr`), `duration` (`$request_time`).
@@ -184,16 +184,16 @@ nginx log format (flux-compatible)
 ## 3. Domain model (webjail DDD, webjail language)
 
 ```
-bandage/                      the analyzer — and nothing of splint's (ADR 0011)
+bandage/                      the analyzer - and nothing of splint's (ADR 0011)
   cmd/bandage/                run(args) seam: pflag CLI with shorthands
                               (-c config, -r rules, -t test, -l log level,
                               -w workers, -v version, -h help)
   internal/domain/            package domain: Event (§2), Report, Rule/Chain
                               value types, log `Level` enum (ADR 0005)
   internal/domain/filter/     webjail filter language: Parse,
-                              Filter.Match(*Event), ParseError{Line, Col} — ported as-is
+                              Filter.Match(*Event), ParseError{Line, Col} - ported as-is
   internal/domain/enrichment/ FilesizeEnricher (EWMA,
-                              minSamples) + FilesizeCache port — ported from webjail
+                              minSamples) + FilesizeCache port - ported from webjail
   internal/domain/track/      RateTracker, BandwidthTracker,
                               ReplayTracker (flux bucket math + replay volume methods)
                               + TrackerCache port
@@ -208,14 +208,14 @@ bandage/                      the analyzer — and nothing of splint's (ADR 0011
                               ported from flux); db drivers (v0: sqlite report repository);
                               in-memory tracker cache (sharded, TTL + LRU); HTTP API
   internal/bench/             benchmark corpus for the analyzer's hot path
-splint/                       the enforcer — a strict wire consumer of
+splint/                       the enforcer - a strict wire consumer of
                               docs/reports.md (ADR 0011)
   cmd/splint/                 flags + wiring: --url, --firewall, --interval,
                               --dry-run, -v version
   internal/domain/            package domain: the report document it consumes
                               (docs/reports.md) + ban-rule compilation under an
                               exclusion policy
-  internal/app/               package app: the update cycle — fetch (mTLS) →
+  internal/app/               package app: the update cycle - fetch (mTLS) →
                               compile → install through the driver, interval clamp,
                               dry-run plan
   internal/firewall/          driver seam (ADR 0012) + nftables driver + test stub
@@ -226,7 +226,7 @@ configs/                      bandage.yml + rules.yml examples
 ```
 
 The trees are walled: `bandage/internal/…` is importable only under
-`bandage/`, `splint/internal/…` only under `splint/` (Go's `internal` rule —
+`bandage/`, `splint/internal/…` only under `splint/` (Go's `internal` rule -
 the ADR 0011 wall is a build error); `internal/identity` is the one thing
 both products share.
 
@@ -270,32 +270,32 @@ log:
 
 ## 4. Pipeline
 
-1. **Ingest** — ingest driver (v0: syslog over tcp/udp/unixgram) → raw
+1. **Ingest** - ingest driver (v0: syslog over tcp/udp/unixgram) → raw
    messages.
-2. **Parse** — parser driver (v0: nginx-JSON, ported from flux) →
+2. **Parse** - parser driver (v0: nginx-JSON, ported from flux) →
    `domain.Event` per §2.
-3. **Enrich** — `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA,
+3. **Enrich** - `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA,
    warm-up gated by `minSamples`); `replay` trackers read it.
-4. **Evaluate** — per event: enter the entry chain `main`; every other
+4. **Evaluate** - per event: enter the entry chain `main`; every other
    chain runs only when a `goto`/`jump` action names it (dispatch runs
-   the target chain inline — `jump` resumes, `goto` ends the current
+   the target chain inline - `jump` resumes, `goto` ends the current
    chain). Within a chain, rules run in order: a rule updates its
    tracker (only when its filter matches); a single-volume rule then
    checks overflow, a ladder instead fires the rungs it crosses, and on
-   match runs its actions — the rule's action list, or the fired rungs'
+   match runs its actions - the rule's action list, or the fired rungs'
    action lists, lowest first.
-5. **Report** — the `report` action upserts through the `ReportRepository`
+5. **Report** - the `report` action upserts through the `ReportRepository`
    (keyed by (rule, target)): insert or overwrite the record with the current
    tracker reading and sample. Report time is **wall clock**: `created_at`
    is set once on insert; `updated_at` and `expires_at = now + ttl` are
    recomputed unconditionally on every write (a suppressed Trigger writes
-   nothing; a Trigger from a strictly higher rung overrides in place —
+   nothing; a Trigger from a strictly higher rung overrides in place -
    ADR 0013). This is the **only writer**
    to the table.
-6. **Expire** — a periodic sweeper (internal cadence) deletes rows whose
+6. **Expire** - a periodic sweeper (internal cadence) deletes rows whose
    `expires_at` has passed; `GET /reports` also excludes expired rows as a
    safety net.
-7. **Serve** — HTTP **only reads** reports from the repository on request
+7. **Serve** - HTTP **only reads** reports from the repository on request
    (plus explicit deletion, §7). No on-demand compilation from live tracker
    state.
 
@@ -308,7 +308,7 @@ minimum 1, values below 1 rejected at config load) and `-w/--workers`
 overrides it (flag > config > default). Every received line is
 processed exactly once across the workers; per-key tracker updates stay
 atomic (the cache's per-key update callback) and a duplicate concurrent
-trigger just refreshes the same (rule, target) report — the sqlite
+trigger just refreshes the same (rule, target) report - the sqlite
 store keeps a single connection, so writes are deterministic under
 concurrency. Event ordering is relaxed under N workers (ADR 0007):
 replaying a log *in order* reproduces results, and
@@ -317,23 +317,23 @@ reproducible runs (live and replayed runs with N workers may differ
 marginally in accumulated tracker values).
 
 The daemon-lifetime context (from SIGINT/SIGTERM) is threaded through
-the pipeline and the sweeper. Shutdown drains first — the ingest stops,
+the pipeline and the sweeper. Shutdown drains first - the ingest stops,
 the line channel closes, the workers finish the events already in
-flight and their report upserts complete — then closes resources; it is
+flight and their report upserts complete - then closes resources; it is
 bounded by the caller's deadline, and only when that expires does the
 daemon cancel the lifetime context to abort stragglers.
 
 ## 5. Tracker cache (in-memory, v0)
 
 Tracker and enrichment state lives **entirely in memory**. A restart resets
-buckets and file-size EWMA — accepted for v0 in exchange for simplicity.
+buckets and file-size EWMA - accepted for v0 in exchange for simplicity.
 The `TrackerCache` port below is the seam where a write-back persistence
 layer can slot in later (hybrid memory + disk: dirty-set flush to the
 reports sqlite DB, read-through on miss).
 
 ### Port (`Record` is a core value type in `bandage/internal/domain`; the tiny
-### `TrackerCache` interfaces are declared beside each consumer —
-### `bandage/internal/domain/track`, `bandage/internal/domain/evaluation` — and satisfied
+### `TrackerCache` interfaces are declared beside each consumer -
+### `bandage/internal/domain/track`, `bandage/internal/domain/evaluation` - and satisfied
 ### structurally by the store)
 
 ```go
@@ -361,20 +361,20 @@ no TTL). TTL is flux's `volume/leak`, passed by the tracker on each update
 
 ### Store (v0: in-memory)
 
-- **Sharded map** — per-shard mutex, `map[string]entry` (record +
+- **Sharded map** - per-shard mutex, `map[string]entry` (record +
   expiry); `Update` hashes the key to a shard and runs `fn` under the lock
-  (`fn` stays O(1), no I/O — webjail's contract).
-- **TTL** — flux's `volume/leak`, passed per update (0 = no expiry, e.g.
+  (`fn` stays O(1), no I/O - webjail's contract).
+- **TTL** - flux's `volume/leak`, passed per update (0 = no expiry, e.g.
   the `filesize` namespace; a positive `volume/leak` clamps to a 1s
   minimum so it always yields a real expiry); enforced lazily on access
   plus a periodic sweep with an internal cadence.
-- **Memory bound** — `cache.max_entries` (default 65536) across all
+- **Memory bound** - `cache.max_entries` (default 65536) across all
   shards/namespaces, enforced by per-shard LRU under pressure (flux's ccache
   `MaxSize` precedent, hand-rolled to keep deps small). Removing an entry
   resets that key's bucket, so **every eviction is logged** (its tracker
-  namespace and its key — the Target for tracker entries, the path for
+  namespace and its key - the Target for tracker entries, the path for
   filesize entries, which are keyed by paths) and counted in stats.
-- **Statistics** — gets/sets/misses/evictions, current size and the
+- **Statistics** - gets/sets/misses/evictions, current size and the
   entry cap, logged periodically via the program-wide zerolog logger
   (ADR 0005; flux's `Statistics` precedent) and served in `GET /stats`'s
   tracker cache block (§7).
@@ -383,7 +383,7 @@ no TTL). TTL is flux's `volume/leak`, passed by the tracker on each update
 
 - A restart is a free pass for abusers: all buckets start empty, and every
   path's file-size EWMA re-warms after `minSamples` observations (`replay`
-  trackers are blind until then). Reports are unaffected — they live in
+  trackers are blind until then). Reports are unaffected - they live in
   sqlite.
 
 ## 6. Reports
@@ -402,7 +402,7 @@ type Repository interface {
 `Query` filters by rule and/or target. Only `report` actions write
 (`Upsert`); the API reads (`List`) and deletes (`Delete`); the sweeper calls
 `DeleteExpired`. sqlite adapter in `bandage/internal/infra` (persistence survives
-restarts; tracker state does not — that is accepted). Schema: one row per
+restarts; tracker state does not - that is accepted). Schema: one row per
 (rule, target) with indexed columns `rule`, `target`, `expires_at` and a JSON
 column for the record body.
 
@@ -410,16 +410,16 @@ column for the record body.
 
 The record is deliberately small: provenance, expiry, the tracker reading
 that justified it, the triggering sample, and the advisory penalty. No
-history counters. The canonical shape — envelope, record fields
+history counters. The canonical shape - envelope, record fields
 (including the penalty), timestamp rules, ordering, canonical
-serialization and a byte-exact example — is the consumer contract in
+serialization and a byte-exact example - is the consumer contract in
 [docs/reports.md](docs/reports.md), which supersedes the example
 formerly given here.
 
 One entry per (rule, target). `tracker` and `sample` are the snapshot from
 the rung that last wrote it; timestamps RFC 3339 UTC. `created_at` is fixed
 at the write that created the row; `updated_at` and `expires_at` (`now + ttl`,
-recomputed regardless of any previous value) reflect the latest write — a
+recomputed regardless of any previous value) reflect the latest write - a
 Trigger from a strictly higher rung overrides the row in place (ADR 0013),
 a suppressed Trigger writes nothing.
 Reports are sorted by `created_at` descending, then `rule` and `target`
@@ -427,14 +427,14 @@ ascending.
 
 ## 7. HTTP API
 
-- `GET /reports` — the report list (§6), read-only. Query params:
+- `GET /reports` - the report list (§6), read-only. Query params:
   `?rule=`, `?target=`. Expired rows are never returned.
-- `DELETE /reports` — explicit deletion; requires `?rule=` and/or `?target=`
+- `DELETE /reports` - explicit deletion; requires `?rule=` and/or `?target=`
   (no accidental delete-all); returns the number of deleted rows. Deleting
   reports does not touch tracker state, so a Target that still overflows is
   reported again on the next trigger.
-- `GET /ping` — liveness.
-- `GET /stats` — the human-facing ops snapshot (ADR 0006): indented JSON
+- `GET /ping` - liveness.
+- `GET /stats` - the human-facing ops snapshot (ADR 0006): indented JSON
   with a generation timestamp, uptime, the build block (name, version,
   commit, build date, dirty, Go version, platform), the pipeline block
   (workers, received, parsed, dropped) and the tracker cache block (gets,
@@ -442,11 +442,11 @@ ascending.
   carries no format version and is explicitly not a stable machine
   contract; machine-readable metric gathering would be a separate
   Prometheus-format endpoint.
-- `GET /metrics` — the machine-contract **Metrics** (ADR 0014): Prometheus
+- `GET /metrics` - the machine-contract **Metrics** (ADR 0014): Prometheus
   text exposition 0.0.4, hand-rendered from the same snapshot `/stats`
   serves plus a scrape-time Go runtime sample, cumulative since start.
-  Metric names and types are a stable machine contract — series added
-  freely, never renamed or removed without a new ADR — documented with a
+  Metric names and types are a stable machine contract - series added
+  freely, never renamed or removed without a new ADR - documented with a
   scrape config and example alert rules in `docs/metrics.md`. GET only,
   always registered, on the same unauthenticated listener.
 
@@ -465,20 +465,20 @@ No `/v1` prefix, no debug endpoints. The API never writes reports; only
   `main`, a `goto`/`jump` action targeting `main` (the entry chain has
   in-degree 0), dangling `goto`/`jump` targets, cyclic `goto`/`jump`
   graphs (the chain graph must be acyclic; chains unreachable from
-  `main` are legal and inert — no reachability check), duplicate
+  `main` are legal and inert - no reachability check), duplicate
   rule IDs, `report` actions missing `reason`/`ttl`/`penalty`, `reason`
   not a slug (`^[a-z0-9][a-z0-9_-]*$`), non-positive `ttl`, unknown
   `penalty` values, `rate` with `drop`/`reject`, missing or non-positive
   `rate` on `limit-*` penalties, out-of-range `target_prefix`
   (ipv4 ≤ 32, ipv6 ≤ 64). Escalation ladders add: `escalations` beside
   `actions` or `tracker.volume` (a volume-method block gets its own
-  refusal — methods are exclusive to the single-volume form), a ladder
+  refusal - methods are exclusive to the single-volume form), a ladder
   without a tracker, fewer than two rungs, non-strictly-ascending rung
   `at` thresholds, and a rung `at` unparseable in the tracker kind's
   quantity; each rung's actions reuse the same action validation.
 - The report document served by `GET /reports` is the canonical contract
-  in [docs/reports.md](docs/reports.md) — envelope, record fields
-  (including the penalty), timestamps, ordering, evolution policy —
+  in [docs/reports.md](docs/reports.md) - envelope, record fields
+  (including the penalty), timestamps, ordering, evolution policy -
   pinned byte-for-byte by a test that reproduces the doc's example from
   a driven daemon run.
 - No hot reload in v0: config and rules changes take effect on restart.
@@ -490,20 +490,20 @@ No `/v1` prefix, no debug endpoints. The API never writes reports; only
 
 ## 9. Milestones
 
-- **M0** — Skeleton: domain types, strict config load, flags, `--test` stub.
-- **M1** — Filter port + rule validation + chain/action model; golden tests
+- **M0** - Skeleton: domain types, strict config load, flags, `--test` stub.
+- **M1** - Filter port + rule validation + chain/action model; golden tests
   over `configs/rules.yml`.
-- **M2** — Realtime core: syslog ingest + nginx parser (ported from flux),
+- **M2** - Realtime core: syslog ingest + nginx parser (ported from flux),
   `FilesizeEnricher` (ported tests from webjail), trackers with flux bucket
   math (ported tests from flux `testdata/bucket.yaml`), evaluation service,
   in-memory store behind the `TrackerCache` port.
-- **M3** — ReportService + sqlite repository + `GET /reports`,
+- **M3** - ReportService + sqlite repository + `GET /reports`,
   `DELETE /reports`, `GET /ping`.
-- **M4** — Hardening: worker pool, backpressure, tracker cache eviction,
+- **M4** - Hardening: worker pool, backpressure, tracker cache eviction,
   drop counters, replay-based integration tests, docs.
 
 ## 10. Open items
 
-None — v0 scope is closed. Decided along the way: `cache.max_entries` is
+None - v0 scope is closed. Decided along the way: `cache.max_entries` is
 configurable (default 65536) with evictions logged; restart-cold tracker
 and file-size state is accepted for v0.

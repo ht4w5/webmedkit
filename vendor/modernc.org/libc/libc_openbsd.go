@@ -1391,7 +1391,7 @@ func Xabort(t *TLS) {
 	if dmesgs {
 		dmesg("%v:", origin(1))
 	}
-	// OpenBSD's Xabort was a stub, so C abort(3) didn't terminate by signal —
+	// OpenBSD's Xabort was a stub, so C abort(3) didn't terminate by signal -
 	// callers such as SQLite's crash tests (writecrash.test) require the process to be
 	// killed BY A SIGNAL, so Tcl's exec reports "child killed: ..." rather than a Go
 	// panic's "child process exited abnormally".
@@ -1402,7 +1402,7 @@ func Xabort(t *TLS) {
 	//     through the generic indirect syscall path (only libc.so's pinned call sites
 	//     may issue them; verified: sigaction -> errno 78). So SIGABRT's disposition
 	//     cannot be reset to SIG_DFL, which means the Go runtime always catches a
-	//     delivered SIGABRT, prints a crash trace, and exits status 2 — again reported
+	//     delivered SIGABRT, prints a crash trace, and exits status 2 - again reported
 	//     as "exited abnormally", not "child killed".
 	//   - The only signal that cannot be caught, blocked or ignored is SIGKILL. It
 	//     terminates the process immediately and unconditionally by signal (no race, no

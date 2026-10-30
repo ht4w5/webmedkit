@@ -114,7 +114,7 @@ func TestShippedRulesCarryTheGuideDispatcher(t *testing.T) {
 
 // The shipped example's front door: the main dispatcher chain, pinned to
 // the pattern the rules guide and the shipped comment document ("Entry
-// chains and dispatch" in docs/rules.md — the rationale lives there, not
+// chains and dispatch" in docs/rules.md - the rationale lives there, not
 // here).
 func TestShippedRulesMainDispatchesEveryTopicalChain(t *testing.T) {
 	chains, err := LoadRules(shippedRulesPath)

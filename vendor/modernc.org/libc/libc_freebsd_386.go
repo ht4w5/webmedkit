@@ -729,7 +729,7 @@ func Xchflags(t *TLS, path uintptr, flags uint32) int32 {
 // setTmGmtoff stores off into tm.Ftm_gmtoff at the platform-native width.
 func setTmGmtoff(tm *time.Tm, off int) { tm.Ftm_gmtoff = int32(off) }
 
-// Xmmap — see libc_freebsd.go. freebsd/386: the 64-bit off_t spans two argument
+// Xmmap - see libc_freebsd.go. freebsd/386: the 64-bit off_t spans two argument
 // words, no PAD (matches golang.org/x/sys/unix's freebsd/386 mmap).
 func Xmmap(t *TLS, addr uintptr, length types.Size_t, prot, flags, fd int32, offset types.Off_t) uintptr {
 	if __ccgo_strace {

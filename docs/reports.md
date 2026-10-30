@@ -2,7 +2,7 @@
 
 `GET /reports` serves the canonical, versioned **report document**: the
 contract a report consumer integrates against instead of reverse-engineering
-the code. This document defines version 0 — the envelope, every record
+the code. This document defines version 0 - the envelope, every record
 field including the penalty, the timestamp rules, the canonical
 serialization, and the evolution policy. Its example is reproduced
 byte-for-byte by the daemon and pinned by a test
@@ -49,7 +49,7 @@ The `tracker` reading:
 | field | type | meaning |
 |---|---|---|
 | `track` | string | tracker kind: `rate`, `bandwidth`, or `replay` |
-| `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents — the tracker kind's quantity) |
+| `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents - the tracker kind's quantity) |
 | `leak` | number | the per-second decay applied to `value` |
 | `volume` | number | the overflow threshold `value` exceeded |
 
@@ -68,8 +68,8 @@ The `sample`:
 
 One report lives per (rule, target). A Trigger writes it when no report
 for the pair is alive. While one is alive, a Trigger at or below the
-volume recorded in the report's `tracker` reading — the threshold of
-the rung that last wrote it — writes nothing: no downgrade and no
+volume recorded in the report's `tracker` reading - the threshold of
+the rung that last wrote it - writes nothing: no downgrade and no
 rewrite. A rule without a ladder never overrides its live report: one
 write per report lifetime. A Trigger from a strictly higher rung
 overrides the report in
@@ -83,7 +83,7 @@ the evidence always backs the penalty the report carries.
 
 The report dies at its `expires_at` or when `DELETE /reports` removes
 it; the next matching event then writes a fresh report at the
-accumulation's current stance — a dead report's stance is not
+accumulation's current stance - a dead report's stance is not
 remembered, and one event's writes climb the crossed rungs, each
 overriding the last. The tracker's record is never emptied by a Trigger
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)), so
@@ -101,12 +101,12 @@ and `expires_at` are wall-clock write times.
 ### The reason
 
 The `reason` is **namespaced**: on the wire it is `<prefix>.<code>`,
-matching `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$` — each label is a
+matching `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$` - each label is a
 lowercase slug `^[a-z0-9][a-z0-9_-]*$`, and the authored code is
 recoverable as the reason's second label
 ([ADR 0016](adr/0016-report-reasons-are-namespaced.md)). The contract
 constrains the shape only: any prefix matching `^[a-z0-9][a-z0-9_-]*\.`
-is legal for a report, and never any producer's naming choice — what a
+is legal for a report, and never any producer's naming choice - what a
 producer's literal prefix is (bandage's is its program name plus a dot)
 is a producer-side decision outside this contract
 ([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md)) that a
@@ -139,19 +139,19 @@ The intent of each action:
 | `drop` | discard the Target's traffic silently (no `rate`) |
 | `reject` | refuse the Target's traffic with an error signal (no `rate`) |
 | `limit-pkt-rate` | throttle the Target to `rate` packets per second |
-| `limit-bandwidth` | throttle the Target to `rate` response-payload bytes per second — the bytes the sample's `sent` counts |
+| `limit-bandwidth` | throttle the Target to `rate` response-payload bytes per second - the bytes the sample's `sent` counts |
 | `limit-req-rate` | throttle the Target to `rate` requests per second |
 
 Every limit is an aggregate over the report's `target`: the number governs
 the whole prefix, not each host inside it. The units are the intent, not
-mechanics — `limit-pkt-rate` counts packets at whatever enforcement layer
+mechanics - `limit-pkt-rate` counts packets at whatever enforcement layer
 the consumer applies.
 
 ### The penalty is advice
 
 Applying the penalty is the consumer's decision. Bandage advises and
 never enforces: it does not drop, refuse, or throttle anything itself,
-and it validates the penalty for well-formedness only — never against the
+and it validates the penalty for well-formedness only - never against the
 rule's tracker or reason. A consumer may apply the penalty as stated, as
 part of a stricter policy, or not at all.
 
@@ -159,14 +159,14 @@ The penalty is written with its report and moves with an override: a
 higher rung's Trigger replaces it together with the sample and the
 tracker reading, so the stance always matches the sample that justified
 it ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). A
-replacement report — after deletion or expiry — carries the penalty of
+replacement report - after deletion or expiry - carries the penalty of
 the rules loaded at its write time.
 
 ## Evolution policy
 
 The version stays `0` across additive changes: new optional fields (at
 the record's end or inside its objects) do not bump `version`, so a
-consumer must ignore unknown fields. Breaking changes do bump it —
+consumer must ignore unknown fields. Breaking changes do bump it -
 including new `penalty.action` values: the enum is closed per version, so
 a consumer's switch over the five values is total for version 0.
 
@@ -184,7 +184,7 @@ returns (one trailing newline included), and the test compares the bytes.
 
 ## Example
 
-The canonical example, from a driven run of the idiomatic pairing — a
+The canonical example, from a driven run of the idiomatic pairing - a
 bandwidth tracker recommending `limit-bandwidth` and its rate, over a
 client that downloaded two 6000-byte files within one leak second:
 

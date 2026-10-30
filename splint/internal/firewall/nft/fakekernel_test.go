@@ -34,7 +34,7 @@ type fakeKernel struct {
 	pendingRules []*nftables.Rule            // the batch's rules, flushed together
 }
 
-// kernelOp records one batch operation — the shape flushed, never
+// kernelOp records one batch operation - the shape flushed, never
 // its encoding.
 type kernelOp struct {
 	kind  string // del-table, add-table, add-chain, add-set or add-rule
@@ -86,7 +86,7 @@ func (k *fakeKernel) DelTable(t *nftables.Table) {
 }
 
 // Flush applies the buffered batch to the fake kernel's state and
-// records it — the same atomicity as the real flush: all at once or
+// records it - the same atomicity as the real flush: all at once or
 // not at all.
 func (k *fakeKernel) Flush() error {
 	k.mu.Lock()
@@ -156,7 +156,7 @@ func (k *fakeKernel) seed(rules map[string][]*nftables.Rule) {
 	}
 }
 
-// vanish removes the owned table behind the driver's back — an
+// vanish removes the owned table behind the driver's back - an
 // external reset or a recreated container.
 func (k *fakeKernel) vanish() {
 	k.mu.Lock()
@@ -202,7 +202,7 @@ func counterRule(setName string, packets, bytes uint64) *nftables.Rule {
 }
 
 // newFakeDriver builds a driver whose enforcement point is the fake
-// kernel — the same constructor the command uses, with the netlink
+// kernel - the same constructor the command uses, with the netlink
 // open swapped for the stand-in.
 func newFakeDriver(t *testing.T, hook Hook, kernel *fakeKernel) *Driver {
 	t.Helper()
@@ -432,7 +432,7 @@ func TestPlanDerivesTheEffectiveRules(t *testing.T) {
 	})
 }
 
-// The plan carries each direction's scope as one pre-formatted line —
+// The plan carries each direction's scope as one pre-formatted line -
 // the --dry-run surface, opaque above the driver.
 func TestPlanReportsTheEnforcementScopes(t *testing.T) {
 	kernel := newFakeKernel()
@@ -766,7 +766,7 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 			t.Fatalf("Apply: %v", err)
 		}
 		if n := kernel.flushCount(); n != 1 {
-			t.Fatalf("flushed %d batches, want 1 — there must be no delete-then-rebuild window", n)
+			t.Fatalf("flushed %d batches, want 1 - there must be no delete-then-rebuild window", n)
 		}
 		flush := kernel.lastFlush()
 		var kinds []string

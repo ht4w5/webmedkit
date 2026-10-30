@@ -1,4 +1,4 @@
-# splint-nft: nftables rule installer — spec
+# splint-nft: nftables rule installer - spec
 
 Status: ready-for-agent
 
@@ -8,7 +8,7 @@ Bandage publishes reports and never enforces (ADR 0004; the GLOSSARY's
 Ban rule entry): every report states a Target and the advisory Penalty
 its rule author recommends for it, and then stops there. The operator
 who wants those recommendations enforced has to write the consumer
-themselves — fetch the report document, decide what overlapping reports
+themselves - fetch the report document, decide what overlapping reports
 with different penalties mean, translate five penalty actions into
 firewall constructs, and keep the result current as reports expire.
 That is real work with real foot-guns: a naive consumer bans the
@@ -20,7 +20,7 @@ belongs to, or leaves stale bans behind when it dies.
 `splint-nft`, a companion binary shipped in this repo: it pulls the
 report document from bandage on a fixed interval, compiles the reports
 into ban rules, and installs them into a dedicated nftables table in the
-host's — or a chosen container's — network namespace. The compiled rules
+host's - or a chosen container's - network namespace. The compiled rules
 resolve overlapping reports by most specific Target first and strictest
 Penalty on ties, apply each Penalty as stated, and are protected by a
 service prefilter and default exclusions so enforcement can never reach
@@ -57,12 +57,12 @@ sample systemd unit.
 22. As an operator, I want the ruleset hash logged every cycle and printed by `--dry-run`, so that I can correlate installs across runs.
 23. As an operator, I want a shipped sample systemd unit and dry-run audit recipe, so that deployment is copy-paste.
 24. As an operator, I want one instance per namespace documented, so that I never run two instances fighting over one table.
-25. As a rule author, I want my report action's penalty applied as stated — drop, reject, limit-pkt-rate, limit-bandwidth — so that my enforcement stance reaches the wire.
+25. As a rule author, I want my report action's penalty applied as stated - drop, reject, limit-pkt-rate, limit-bandwidth - so that my enforcement stance reaches the wire.
 26. As a rule author, I want `limit-bandwidth` metered on the response direction, so that it throttles response-payload bytes exactly as the contract defines them.
 27. As a rule author, I want `limit-req-rate` reports deliberately not applied, logged and counted instead, so that application-layer intent is never faked at the packet layer.
 28. As a rule author, I want the most specific target to win even when its stance is weaker, so that a fine-grained report can carve an exception under a broader ban.
 29. As a rule author, I want reports over the same specificity resolved by the strictest penalty, so that conflicting advice resolves deterministically.
-30. As a rule author, I want tied limits of incomparable dimensions combined — both meters enforced — so that no recommendation is lost to an invented ordering.
+30. As a rule author, I want tied limits of incomparable dimensions combined - both meters enforced - so that no recommendation is lost to an invented ordering.
 31. As a rule author, I want `reject` rendered as an inet-family-neutral reject, so that TCP peers get a reset and the rest an error signal.
 32. As a rule author, I want rate limits to carry a sensible derived burst, so that legitimate micro-bursts survive enforcement.
 33. As a report consumer, I want records with a missing or unknown penalty or an unparseable target skipped with a log and a counter, so that one pre-release record never blocks enforcement of the rest.
@@ -74,7 +74,7 @@ sample systemd unit.
 39. As an operator, I want the kernel floor for reject-in-prerouting documented, so that I can pick a hook knowingly on older kernels.
 40. As a developer, I want the whole fetch-compile-install cycle exercised at the firewall-driver boundary with fixture documents, so that every policy is tested without netlink.
 41. As a developer, I want the report document's canonical example reused as a fixture, so that the contract and its consumer cannot drift.
-42. As a developer, I want a stub firewall driver, so that lifecycle behavior — skip-if-unchanged, keep-on-failure, reset-on-exit — is testable unprivileged.
+42. As a developer, I want a stub firewall driver, so that lifecycle behavior - skip-if-unchanged, keep-on-failure, reset-on-exit - is testable unprivileged.
 43. As a developer, I want a root-gated netlink integration test for the real driver, so that the kernel surface is verified wherever privileges exist.
 44. As a developer, I want the tests to assert only which ban rules would be installed, so that the compiler's internals stay refactorable.
 45. As a developer, I want the rolling-hash construction mirrored from bandaid, so that the skip behavior is deterministic and familiar across both tools.
@@ -94,7 +94,7 @@ sample systemd unit.
   sufficient.
 - **Module shape**: a fetch loop (fluxc's lifecycle: startup test
   install, ticker, signal context), a pure compiler (reports to ban
-  rules), and a tiny firewall-driver port — install and reset — with
+  rules), and a tiny firewall-driver port - install and reset - with
   nftables and stub implementations.
 - **nftables library**: `github.com/google/nftables` via netlink (flux's
   choice), including its network-namespace option; no shelling out to
@@ -106,7 +106,7 @@ sample systemd unit.
   hook (input by default, prerouting for routing boxes) carrying drop,
   reject and packet-rate stances, and an **egress** chain (output in
   input mode, forward in prerouting mode) carrying bandwidth limits
-  matched on destination ∈ target — the direction its unit names.
+  matched on destination ∈ target - the direction its unit names.
 - **Penalty mapping** (total over the closed v0 vocabulary):
 
   | penalty | nftables construct |
@@ -115,13 +115,13 @@ sample systemd unit.
   | `reject` | `reject with icmpx admin-prohibited` (TCP gets a reset automatically) |
   | `limit-pkt-rate` | `limit rate over N/second`, then `drop` |
   | `limit-bandwidth` | `limit rate bytes over N/second` on the egress chain, then `drop` |
-  | `limit-req-rate` | **not applied** — skipped, logged, counted |
+  | `limit-req-rate` | **not applied** - skipped, logged, counted |
 
 - **Merge policy**: most specific Target wins (longest-prefix semantics:
   a `/32` report can carve an exception under a `/16` ban even with a
   weaker stance); ties on specificity resolve strictest-first (`drop` >
   `reject` > limits; smaller `rate` stricter within one action);
-  dimensionally incomparable limits at a tie are combined — one meter
+  dimensionally incomparable limits at a tie are combined - one meter
   per direction, both enforced.
 - **Compilation**: reports group by (family, prefix length, penalty)
   into one ban rule per group with an equal-length prefix set (equal
@@ -129,7 +129,7 @@ sample systemd unit.
   ban rules order by prefix length descending, then strictness, so
   nftables first-match reproduces the merge policy. Each rule first
   matches the service prefilter (destination-port and destination-address
-  sets; either may be empty — empty means all).
+  sets; either may be empty - empty means all).
 - **Exclusions**: loopback and link-local are always excluded;
   RFC1918 and ULA are excluded by default with an opt-out flag;
   operator exclusion prefixes (repeatable) add to the list. Exclusions
@@ -137,7 +137,7 @@ sample systemd unit.
   unifies what bandaid calls its whitelist and fluxc its exclude
   prefixes into one flag.
 - **Rate-limit burst**: derived from the rate (one second's worth,
-  floored) — no burst flag in v0. Arbitrary rates with nft's tiny
+  floored) - no burst flag in v0. Arbitrary rates with nft's tiny
   default burst would drop legitimate micro-bursts.
 - **Counters**: every compiled rule carries a packet/byte counter;
   nonzero hits are logged at each install, so the reported period is
@@ -148,7 +148,7 @@ sample systemd unit.
   the hash matches the last installed hash for that namespace **and**
   the table exists (a cheap probe each cycle); otherwise it installs.
   Known limit: tampering with rules under a surviving table is not
-  detected — the probe is existence, not rule bodies. The hash appears
+  detected - the probe is existence, not rule bodies. The hash appears
   in cycle logs and `--dry-run` output.
 - **Lifecycle**: startup test install (exit non-zero on failure); fetch
   every cycle (default interval 5m, floor 1m, fetch timeout bandaid's
@@ -163,14 +163,14 @@ sample systemd unit.
   namespace. Documented: namespace names via an `ip netns attach`-style
   stable handle, Docker's per-pid namespace path, one instance per
   namespace.
-- **Transport**: HTTP and HTTPS with mutual TLS — CA to verify the
+- **Transport**: HTTP and HTTPS with mutual TLS - CA to verify the
   server, optional client certificate and key (bandaid's flag surface).
   Bandage itself serves plain HTTP, so TLS terminates at whatever fronts
   it; that deployment note goes in the docs. No insecure-skip-verify.
 - **Ops artifacts**: a sample systemd unit and a dry-run audit recipe in
   the consumer documentation, alongside the flags, the mapping table,
   the merge policy, and the kernel floor (~5.9) for reject-in-prerouting
-  — the startup test install is what catches older kernels.
+  - the startup test install is what catches older kernels.
 - **Domain docs**: the GLOSSARY's Ban rule entry names splint-nft as the
   downstream tool; ADR 0011 records the daemon/splint split, the merge
   policy, and the `limit-req-rate` skip; ADR 0004 carries a
@@ -178,12 +178,12 @@ sample systemd unit.
 
 ## Testing Decisions
 
-- **What makes a good test here**: only external behavior — given a
+- **What makes a good test here**: only external behavior - given a
   report document, which ban rules would be installed, and when. No
   assertions on compiler internals, hash internals, or netlink encoding;
   the skip-if-unchanged behavior is asserted observably (a second
   identical document produces no install; a changed one does).
-- **One seam — the update cycle at the firewall-driver boundary**: fetch
+- **One seam - the update cycle at the firewall-driver boundary**: fetch
   from a fake report endpoint, compile, and observe the stub driver's
   install calls. Everything lives at this seam: the merge-policy matrix
   (most-specific exceptions, strictest ties, combined limits), the
@@ -195,8 +195,8 @@ sample systemd unit.
   document's canonical example as the base fixture and following the
   suite's convention of a failing and a passing case per validation.
 - **Root-gated verification (not a second seam)**: the nftables driver
-  gets one integration test — install, read the kernel rules back,
-  reset — skipped where privileges are absent. It verifies the driver's
+  gets one integration test - install, read the kernel rules back,
+  reset - skipped where privileges are absent. It verifies the driver's
   own encoding, nothing else.
 - **Prior art**: the daemon's end-to-end tests drive a full pipeline
   against fakes; bandaid tests its fetch-and-generate loop against a
@@ -208,7 +208,7 @@ sample systemd unit.
 
 - Any change to the bandage daemon: it keeps advising and never
   enforcing; the report API needs no new endpoint or field.
-- In-kernel self-expiry of ban rules (set-element timeouts) —
+- In-kernel self-expiry of ban rules (set-element timeouts) -
   deliberately deferred; consequence accepted: a *crashed* installer
   leaves its table installed until reboot or manual reset, because
   expiry is rebuilt-based and only a clean exit resets.
@@ -219,7 +219,7 @@ sample systemd unit.
   install is a full atomic rebuild.
 - TLS support inside bandage itself.
 - Per-reason enforcement policy, a policy map, or a configurable merge
-  policy — the merge policy is fixed in v0.
+  policy - the merge policy is fixed in v0.
 - Detection of rule-level tampering beneath a surviving table.
 - Multiple splint-nft instances per namespace, or multiple tables per
   instance beyond the per-namespace table.

@@ -1336,20 +1336,20 @@ func Xabort(t *TLS) {
 	if dmesgs {
 		dmesg("%v:", origin(1))
 	}
-	// NetBSD's Xabort was a stub, so C abort(3) didn't terminate by signal — callers
+	// NetBSD's Xabort was a stub, so C abort(3) didn't terminate by signal - callers
 	// such as SQLite's crash tests (writecrash.test) require the process to be killed
 	// BY SIGABRT. Three things are needed on netbsd:
-	//  1. Reset SIGABRT to SIG_DFL — the Go runtime otherwise intercepts a delivered
+	//  1. Reset SIGABRT to SIG_DFL - the Go runtime otherwise intercepts a delivered
 	//     SIGABRT and exit(2)s instead of dying by signal. Done via the raw
 	//     __sigaction_sigtramp(2) syscall (an all-zero struct sigaction = SIG_DFL; the
 	//     trampoline/version args are unused for SIG_DFL). x/sys/unix has no high-level
 	//     Sigaction on netbsd and Xsigaction is unimplemented here.
 	//  2. Unblock SIGABRT on the calling thread so a blocked mask can't defeat abort().
-	//     __sigprocmask14(SIG_UNBLOCK, {SIGABRT}, NULL) — syscall 293, not exported by
+	//     __sigprocmask14(SIG_UNBLOCK, {SIGABRT}, NULL) - syscall 293, not exported by
 	//     x/sys/unix for netbsd.
 	//  3. Deliver SIGABRT SYNCHRONOUSLY and thread-directed via _lwp_kill(_lwp_self())
 	//     (the primitive the Go runtime's raise() uses). A process-directed kill(2) is
-	//     async — the calling thread can race ahead and exit the wrong way before the
+	//     async - the calling thread can race ahead and exit the wrong way before the
 	//     signal lands (observed as a rare writecrash failure). With SIG_DFL the kernel
 	//     terminates the process here; the kill(2) and panic below are unreachable
 	//     fallbacks.

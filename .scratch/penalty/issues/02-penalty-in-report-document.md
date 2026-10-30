@@ -1,6 +1,6 @@
 # 02: Penalty flows into the report document
 
-**What to build:** A report consumer sees the recommended penalty on every report they read from `GET /reports`, in the nested shape `"penalty": {"action": …, "rate": …}` — `rate` present exactly when the action is a limit, an integer ≥ 1 in the unit the action name states. The stance is written by the Trigger that creates the report and travels with it: it persists across a daemon restart, it freezes with the report while the report is alive (always matching the Sample that justified it), and a re-armed write after deletion or expiry carries the penalty of the rules loaded at write time.
+**What to build:** A report consumer sees the recommended penalty on every report they read from `GET /reports`, in the nested shape `"penalty": {"action": …, "rate": …}` - `rate` present exactly when the action is a limit, an integer ≥ 1 in the unit the action name states. The stance is written by the Trigger that creates the report and travels with it: it persists across a daemon restart, it freezes with the report while the report is alive (always matching the Sample that justified it), and a re-armed write after deletion or expiry carries the penalty of the rules loaded at write time.
 
 **Blocked by:** 01
 

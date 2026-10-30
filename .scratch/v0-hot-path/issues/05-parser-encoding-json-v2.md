@@ -3,7 +3,7 @@
 **What to build:** The nginx JSON parser decodes on `encoding/json/v2`
 (stdlib in Go 1.27; no third-party codec) with a byte-identical behavior
 contract: identical Events for identical lines, identical field-level
-errors, identical drop accounting — operators notice only that the
+errors, identical drop accounting - operators notice only that the
 analyzer keeps up better. The existing parser fixture tests are the
 oracle for the rewrite.
 
@@ -33,7 +33,7 @@ all fixtures pass.
 members implement `json.UnmarshalerFrom`: JSON strings decode once at
 capture (`Decoder.ReadToken().String()`); every other kind keeps its
 exact raw bytes as a zero-copy view of the line (`Decoder.ReadValue()`;
-buffered decode never copies or compacts the input —
+buffered decode never copies or compacts the input -
 `jsontext/pools.go` `getBufferedDecoder` resets onto the caller's
 slice). Required-field validation order, `FieldError` identity (field +
 message), drop accounting and the Event mapping are unchanged,
@@ -45,10 +45,10 @@ unquoted JSON integers (`1e2`, `1.5` ⇒ "must be an integer").
 **Contract traps found by characterization against the old decoder**
 (before/after verified identical on a 19-line edge battery):
 
-- `jsontext.AllowDuplicateNames(true)` — plain v2 *rejects* duplicate
+- `jsontext.AllowDuplicateNames(true)` - plain v2 *rejects* duplicate
   member names; the old map decoder resolved them last-wins
   (`{"time":"1","time":"2"}` parses with time=2).
-- `jsontext.AllowInvalidUTF8(true)` — nginx escape=json passes raw
+- `jsontext.AllowInvalidUTF8(true)` - nginx escape=json passes raw
   non-UTF-8 bytes through unescaped; plain v2 drops such lines as
   malformed. They keep parsing, invalid bytes kept as U+FFFD (matching
   the historic decoder, incl. lone-surrogate escapes like `\ud800`).
@@ -69,7 +69,7 @@ decode target, and v1's whole-line syntax-before-type precedence so
 `00` reports the trailing garbage like the old scanner).
 `TestParseMalformedLineErrorText` pins the restored text. The error is
 still a plain non-FieldError wrapped as `parse nginx json: %w`, so the
-same lines drop for the same reason — story 26's letter holds.
+same lines drop for the same reason - story 26's letter holds.
 Field-level error strings are byte-identical.
 
 **Allocations** (`go test -run=^$ -bench=BenchmarkParse -benchmem

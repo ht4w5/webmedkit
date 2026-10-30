@@ -41,7 +41,7 @@ _Avoid_: call, invoke
 
 **Rule**:
 A named condition-action pairing: a filter, at most one tracker, and one
-ordered action list — or an escalation ladder of them.
+ordered action list - or an escalation ladder of them.
 _Avoid_: detector, query
 
 **Action**:
@@ -50,15 +50,15 @@ _Avoid_: statement, command
 
 **Match**:
 When a rule's filter accepts an event and its tracker (if any) stands
-above volume; the actions of the rule — or of every crossed rung,
-lowest first — then run.
+above volume; the actions of the rule - or of every crossed rung,
+lowest first - then run.
 _Avoid_: fire, hit
 
 **Trigger**:
 A match that ran a report action; when it writes, its event becomes the
 report's sample and its wall-clock time stamps the report. While the
 report for (rule, Target) is alive, further Triggers write nothing (the
-rule's other actions still run) — except one from a higher escalation,
+rule's other actions still run) - except one from a higher escalation,
 which overrides the report in place: reason, penalty, sample and expiry
 move to the higher rung's. A Trigger never empties the tracker; a failed
 write is not a Trigger outcome: the next matching event retries the
@@ -91,8 +91,8 @@ The aggregated source prefix that a tracker keys on and a report is about.
 _Avoid_: key, addr, client
 
 **Volume method**:
-A replay tracker's tolerated volume as a function of file size —
-`constant`, `clamped-linear`, `inverse-square`, or `step` — in tolerated
+A replay tracker's tolerated volume as a function of file size -
+`constant`, `clamped-linear`, `inverse-square`, or `step` - in tolerated
 download equivalents. Only replay configures one.
 _Avoid_: threshold formula, scaling curve
 
@@ -110,14 +110,14 @@ _Avoid_: finding, record, ban
 
 **Reason**:
 The machine-readable trigger code a report carries into downstream ban
-rules — the code of the escalation that last wrote it, carried in
+rules - the code of the escalation that last wrote it, carried in
 namespaced form rather than the unqualified code the rules author
 wrote; distinct from the rule ID, which is internal.
 _Avoid_: blame, cause
 
 **Penalty**:
-The enforcement stance a report carries — drop, reject, or a limit at a
-packet, bandwidth, or request rate — declared by the report action that
+The enforcement stance a report carries - drop, reject, or a limit at a
+packet, bandwidth, or request rate - declared by the report action that
 wrote it; advisory, a report consumer
 decides how to apply it.
 _Avoid_: sanction, remedy, enforcement action
@@ -151,24 +151,24 @@ _Avoid_: ban
 
 **Enforcement scope**:
 The protected service's traffic surface a ban rule reaches beyond its
-Target: transport protocols, ports, and addresses — one scope per
+Target: transport protocols, ports, and addresses - one scope per
 direction, the ingress scope and the egress scope.
 _Avoid_: prefilter, service filter, filter
 
 **Ingress**:
 The direction of traffic a ban rule's Target sends toward the
-protected service, matched by the Target as source — a direction, not
+protected service, matched by the Target as source - a direction, not
 a rules Chain.
 _Avoid_: inbound
 
 **Egress**:
 The response direction: traffic sent back to a ban rule's Target,
-matched by the Target as destination — a direction, not a rules
+matched by the Target as destination - a direction, not a rules
 Chain.
 _Avoid_: outbound
 
 **Firewall driver**:
 The pluggable backend that enforces ban rules at its enforcement
-surface — a kernel firewall like nftables, or another surface such as a
+surface - a kernel firewall like nftables, or another surface such as a
 web server or a WAF; it applies each Penalty as stated or declines it.
 _Avoid_: backend, adapter

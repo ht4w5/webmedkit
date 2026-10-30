@@ -20,7 +20,7 @@ that bumps only the patch or the minor number can still change the contract
 between generated code and this package, which by semver's own rules it must
 not. Read every libc version as though it were a major one.
 
-None of this is new — it has been documented for as long as this package has
+None of this is new - it has been documented for as long as this package has
 carried ccgo's runtime, and it holds for every release. **What is new is how it
 fails.**
 

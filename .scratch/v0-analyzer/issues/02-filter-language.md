@@ -2,7 +2,7 @@
 
 **What to build:** a rule author writes `filter` expressions in the webjail language so rules select exactly the Events they care about; a typo in an expression is caught by `-check` with a precise position instead of silently mis-selecting at runtime.
 
-**Blocked by:** 01: Walking skeleton — Event to Report list
+**Blocked by:** 01: Walking skeleton - Event to Report list
 
 **Status:** resolved
 
@@ -19,7 +19,7 @@ exact-match semantics, positioned `ParseError{Line, Col}` per
 `porting-notes.md` §F, binary size units per §E); filters gate trackers at
 the evaluation seam; `-check` reports `filter: L:C: message` and the plan
 prints each rule's filter source. Test suites (parse trees, error
-positions, matching semantics) were authored fresh — webjail has none
+positions, matching semantics) were authored fresh - webjail has none
 (DECISIONS §2).
 
 Context: `/home/user2/Devel/bandage-impl-notes/{webjail-map,porting-notes,DECISIONS}.md`.

@@ -900,7 +900,7 @@ func Xclock(t *TLS) time.Clock_t {
 // setTmGmtoff stores off into tm.Ftm_gmtoff at the platform-native width.
 func setTmGmtoff(tm *time.Tm, off int) { tm.Ftm_gmtoff = int64(off) }
 
-// Xmmap — see libc_freebsd.go. 64-bit: off_t fits in one argument word.
+// Xmmap - see libc_freebsd.go. 64-bit: off_t fits in one argument word.
 func Xmmap(t *TLS, addr uintptr, length types.Size_t, prot, flags, fd int32, offset types.Off_t) uintptr {
 	if __ccgo_strace {
 		trc("t=%v addr=%v length=%v fd=%v offset=%v, (%v:)", t, addr, length, fd, offset, origin(2))

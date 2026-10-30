@@ -7,7 +7,7 @@ Status: ready-for-agent
 A Rule today pairs one Filter, at most one Tracker, and one ordered
 action list: the rule either Matches and runs everything, or nothing.
 Operators who watch traffic abuse want a *staged* response on a single
-accumulation — for example a bandwidth Tracker leaking at 1MB/s where
+accumulation - for example a bandwidth Tracker leaking at 1MB/s where
 50MB of accumulation should hand the Target's Events to a replay chain,
 5GB should recommend a bandwidth limit, and 40GB should recommend a ban.
 Writing three rules does not work: each rule namespaces its own tracker
@@ -24,11 +24,11 @@ they take, the worse it gets" on one Tracker.
 An **Escalation** ladder on one Tracker: rungs with strictly ascending
 volume thresholds in the Tracker's quantity, each with its own ordered
 action list. On a Match, every rung the accumulated value is above
-fires, lowest first — a handoff rung keeps feeding a downstream chain
+fires, lowest first - a handoff rung keeps feeding a downstream chain
 per Event as long as the value stays above its threshold, and report
 rungs write one Report per (rule, Target) whose stance escalates **in
 place**: a Trigger from a strictly higher rung overrides the live
-Report — reason, penalty, rate, sample and expiry move to the higher
+Report - reason, penalty, rate, sample and expiry move to the higher
 rung's values. Nothing ever empties the tracker record: a Trigger only
 suppresses while a live Report exists below it, so the gate stays open
 and the ladder keeps climbing; leak is the only thing that de-escalates.
@@ -41,7 +41,7 @@ accumulation's current stance.
    with its own action list, so that abuse escalates through stronger
    responses without me writing one rule per threshold.
 2. As a rule author, I want each rung's threshold expressed in the
-   Tracker's own quantity — requests, bytes or download equivalents —
+   Tracker's own quantity - requests, bytes or download equivalents -
    so that ladders read the same way as `volume` does today.
 3. As a rule author, I want bandwidth rungs in human byte sizes
    (`50MB`, `5GB`), so that the ladder reads like traffic accounting.
@@ -114,7 +114,7 @@ accumulation's current stance.
     stance escalates in place, so that I always apply the strongest
     response the ladder has reached.
 28. As a report consumer, I want a higher rung to override a live
-    Report completely — reason, penalty, rate, sample and expiry — so
+    Report completely - reason, penalty, rate, sample and expiry - so
     that the row always describes the abuse as it stands.
 29. As a report consumer, I want a lower rung to never override a live
     Report, so that a ban cannot silently soften back into a throttle.
@@ -157,17 +157,17 @@ accumulation's current stance.
   Tracker's quantity plus its own ordered action list. A rule carries an
   action list **or** an escalation ladder, never both; the ladder's
   thresholds stand in for the rule's `volume`. Naming: *Escalation*
-  (glossary term; avoid tier, stage, level — `Level` stays the log level
+  (glossary term; avoid tier, stage, level - `Level` stays the log level
   enum); the config key is `escalations` at rule level.
 - Developer decisions locked in design review (grilling rounds):
-  1. **Escalate in place** — one Report per (rule, Target) whose stance
+  1. **Escalate in place** - one Report per (rule, Target) whose stance
      escalates; per-reason rows were considered and rejected for now.
      Rung reasons are unconstrained: distinct or shared, author's call;
      the Reason of the live Report follows the rung that last wrote it.
-  2. **Terminality per fired rung** — the chain ends after the Rule iff a
+  2. **Terminality per fired rung** - the chain ends after the Rule iff a
      rung that fired carried `report`/`goto`/`stop`; rung terminality is
      a static property of the rung's action list.
-  3. **Scalar rungs only** — a rung is one quantity in the Tracker's
+  3. **Scalar rungs only** - a rung is one quantity in the Tracker's
      kind; volume methods (`constant`, `clamped-linear`,
      `inverse-square`, `step`) stay exclusive to the single-volume form.
      Replay ladders use download equivalents, already normalized by
@@ -181,7 +181,7 @@ accumulation's current stance.
      once the stance moves, freezing the sample would break that
      invariant, so the Sample is redefined as the event that justified
      the report's *current* stance.
-  6. **Nothing ever resets the tracker** — a Trigger suppresses or
+  6. **Nothing ever resets the tracker** - a Trigger suppresses or
      overrides, never empties the record (this retires ADR 0008's
      Trigger reset everywhere, not just in ladders: a single-volume rule
      can be a threshold gate too). The "one Trigger per accumulation
@@ -193,11 +193,11 @@ accumulation's current stance.
      threshold is strictly above that recorded volume, and the write
      overrides the row in place. Rejected alternatives: an explicit
      escalation field on the report record (contract change for a value
-     already present), keying on Reason (slugs have no order — a lower
+     already present), keying on Reason (slugs have no order - a lower
      rung could retitle a ban downward), no guard (per-event rewrite
      churn). The guard survives restarts because the live set is rebuilt
      from the report table.
-  8. **Post-death behaviour** — when a Report dies and the value is
+  8. **Post-death behaviour** - when a Report dies and the value is
      still above thresholds, the next matching Event writes fresh at the
      lowest crossed rung and overrides in place up the crossed rungs
      within that same Event; the fresh Report reflects the accumulation
@@ -205,7 +205,7 @@ accumulation's current stance.
 - Firing: the fired rungs are computed **once** from the post-
   accumulation value, before any action runs; every rung with `at` below
   the value fires, in ascending order. Strictly ascending thresholds mean
-  the fired rungs are always a **prefix** of the ladder — the invariant
+  the fired rungs are always a **prefix** of the ladder - the invariant
   behind per-Event terminality and the guard's ordering. Rungs are
   level-triggered: they fire on every Event while the value stays above
   them, and stop as leak decays it below.
@@ -215,8 +215,8 @@ accumulation's current stance.
   top rung.
 - The report document's canonical serialization, envelope and record
   fields are unchanged; only its lifecycle prose gains the escalation
-  wording. That wording — like the rules guide, plan and glossary-facing
-  behavior descriptions — lands with the implementation, so the contract
+  wording. That wording - like the rules guide, plan and glossary-facing
+  behavior descriptions - lands with the implementation, so the contract
   never describes unshipped behaviour; the wording decisions are pinned
   here and in ADR 0013.
 - Modules touched: the rules loader (new `escalations` key plus the
@@ -246,7 +246,7 @@ accumulation's current stance.
   rejected, Events ingested, the served report document, chain traversal
   as seen in the log actions, and tracker state as seen through what
   fires. Internal helpers (rung selection, the override guard comparison,
-  TTL derivation) are never asserted on directly — they are covered
+  TTL derivation) are never asserted on directly - they are covered
   through the two seams below.
 - **The daemon seam** (primary): the full daemon driven over its ingest
   surface with a real report store and tracker cache, observed through
@@ -292,7 +292,7 @@ accumulation's current stance.
 - Persisting tracker state across restarts; Eviction of tracker state
   behaves as today (and still starts that target over empty).
 - Hot reload of rules; renumbering rung thresholds under live reports
-  changes what counts as "higher" until those reports die — acceptable
+  changes what counts as "higher" until those reports die - acceptable
   for a no-hot-reload daemon.
 - Downstream enforcement: splint and ban-rule derivation are unchanged;
   how a consumer applies an escalated Penalty stays the consumer's
@@ -304,7 +304,7 @@ accumulation's current stance.
   0008: the reset retires everywhere, and a live Report's freeze
   narrows to `created_at` alone.
 - With no reset there is no cadence governor left: while the value stays
-  above rungs, their actions run per Event — handoff and log rungs run
+  above rungs, their actions run per Event - handoff and log rungs run
   every Event (which is the point of a gate), and report rungs attempt a
   suppressed write per Event (an in-memory live-set check, no I/O).
 - The prefix invariant (fired rungs are always a prefix of the ladder)

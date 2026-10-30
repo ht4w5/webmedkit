@@ -3,7 +3,7 @@
 **What to build:** A Trigger (a match that ran the rule's report action)
 empties the matched rule's tracker for that Target, so a flagged Target
 must accumulate a full volume of abuse again before it can Trigger
-again — actions run once per accumulation episode instead of per event
+again - actions run once per accumulation episode instead of per event
 while a Target keeps overflowing. A failed report write leaves the
 tracker intact, so the next matching event retries the report instead
 of losing the detection. (Semantics of record: GLOSSARY **Trigger**, ADR
@@ -14,7 +14,7 @@ of losing the detection. (Semantics of record: GLOSSARY **Trigger**, ADR
 **Status:** resolved
 
 - [x] A Trigger clears the matched rule's tracker record for the
-      match's key — the Target, per (Target, path) for replay trackers —
+      match's key - the Target, per (Target, path) for replay trackers -
       once the report action completes without error
 - [x] A failed report write leaves the tracker record untouched, and
       the next matching event retries the report
@@ -35,13 +35,13 @@ A Trigger now empties the matched rule's tracker record for the match's
 key, once the report write completes without error. Changed:
 
 - `bandage/internal/domain/evaluation/evaluation.go`: `trigger` (the report
-  action) clears the record after `ReportSink.Trigger` returns nil —
+  action) clears the record after `ReportSink.Trigger` returns nil -
   the one traversal change (matching, action dispatch and terminality
   untouched). Key derivation is unified in `matchKey` (Target; per
   (Target, path) for replay) shared by `updateTracker` and the reset.
   A failed write returns before the reset, so the record survives and
   the next matching event retries; tracker-less rules skip the reset.
-  Actions keep the pre-reset reading — `matchContext.reading` is
+  Actions keep the pre-reset reading - `matchContext.reading` is
   captured before dispatch.
 - The `TrackerCache` port gains `Clear(ctx, ns, key)` beside `Update`
   (documented as the Trigger reset, no-op for absent records),
@@ -52,7 +52,7 @@ key, once the report write completes without error. Changed:
   action reading); memory-store `Clear` contract; daemon seam
   (`bandage/internal/app/trigger_test.go`: once per volume of traffic vs per
   event; 24 concurrent overflowing events under 4 workers leaving a
-  cleared bucket — the probe of exactly the volume cannot overflow over
+  cleared bucket - the probe of exactly the volume cannot overflow over
   a cleared bucket, per ADR 0007). Tests encoding the old
   accumulate-forever semantics re-modeled to episode semantics keeping
   their intent (`TestE2EReportUpsertIdentity`,
@@ -65,7 +65,7 @@ key, once the report write completes without error. Changed:
   reset does not perturb update accounting under 3 workers), and the two
   worker-pool tests in `workerpool_test.go`).
 
-Key facts for later tickets: suppression is NOT here — every Trigger
+Key facts for later tickets: suppression is NOT here - every Trigger
 still writes (row refreshed per episode); ticket 03 gates tracker-less
 `report` at the rules loader (left alone) and adds the live-report set,
 which must treat a suppressed write as a completed report action (the

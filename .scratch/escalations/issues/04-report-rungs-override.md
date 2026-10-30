@@ -1,16 +1,16 @@
 # 04: Report rungs and in-place override
 
 **What to build:** A rung's report action carries its own `reason`,
-`penalty`, `rate` and `ttl` — the ladder's responses escalate from a
+`penalty`, `rate` and `ttl` - the ladder's responses escalate from a
 throttle recommendation to a ban under whatever codes the author chooses
 (distinct or shared across rungs). A Trigger from a strictly higher rung
 **overrides the live Report in place**: reason, penalty, rate, Sample,
 tracker reading, `updated_at` and `expires_at` all move to the overriding
-rung's values, so a report consumer always sees the abuse as it stands —
+rung's values, so a report consumer always sees the abuse as it stands -
 a `reject` ban backed by the event that justified the ban, living for the
 ban rung's `ttl`. `created_at` alone stays frozen at first flagged. A
 Trigger from a rung at or below the threshold recorded on the live Report
-is suppressed — a ban can never soften back into a throttle. When a
+is suppressed - a ban can never soften back into a throttle. When a
 Report dies and the accumulation still stands above several rungs, the
 next matching event writes at the lowest crossed rung and overrides up the
 crossed rungs within that same event.
@@ -27,7 +27,7 @@ crossed rungs within that same event.
       values
 - [x] `created_at` never moves across writes
 - [x] A Trigger from a rung at or below the recorded threshold is
-      suppressed — no downgrade and no rewrite, ever
+      suppressed - no downgrade and no rewrite, ever
 - [x] The guard is the volume recorded in the Report's tracker reading
       (the writing rung's threshold) and holds across a daemon restart
       (the live set is rebuilt from the report table)
@@ -40,9 +40,9 @@ crossed rungs within that same event.
 Implemented on integration branch `feat/escalations` (commit `4577e17`;
 cross-ticket code-review fix pass through `129c5ea`). A Trigger from a
 rung strictly above the threshold recorded in the live Report's tracker
-reading overrides the row in place — reason, penalty, rate, Sample,
+reading overrides the row in place - reason, penalty, rate, Sample,
 reading, `updated_at` and `expires_at` move to the rung's values,
-`created_at` stays frozen — while a rung at or below is suppressed, so a
+`created_at` stays frozen - while a rung at or below is suppressed, so a
 ban never softens. The guard rides the recorded `tracker.volume` and
 survives the live-set rebuild at startup; a dead Report's next event
 writes at the lowest crossed rung and overrides up within that event.

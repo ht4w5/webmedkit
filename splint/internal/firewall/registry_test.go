@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Coverage: the command-run seam is deliberately untested — what would
+// Coverage: the command-run seam is deliberately untested - what would
 // be asserted through the command is verified here, at the module
 // that owns it.
 

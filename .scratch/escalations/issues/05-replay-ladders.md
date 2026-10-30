@@ -1,8 +1,8 @@
 # 05: Replay ladders
 
 **What to build:** A ladder on a replay tracker: thresholds in download
-equivalents — already normalized by Filesize, so `2` means two full
-downloads of that path whether it is a 1MB or a 10GB file — with the same
+equivalents - already normalized by Filesize, so `2` means two full
+downloads of that path whether it is a 1MB or a 10GB file - with the same
 firing, terminality and override semantics as rate and bandwidth ladders.
 Warm-up blindness is preserved: events whose Filesize is unknown skip the
 tracker entirely (no increment, no decay). The cache-entry TTL re-derives

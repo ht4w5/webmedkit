@@ -6,7 +6,7 @@ a malformed name fails the test suite instead of yielding non-conforming
 reasons at runtime. The constraint is documented as a producer-side
 requirement (ADR 0017): the report contract constrains each label's shape, so
 the name the prefix is built from must satisfy it. No startup validation of a
-compile-time constant — the test is the guard.
+compile-time constant - the test is the guard.
 
 **Blocked by:** None (can start immediately)
 

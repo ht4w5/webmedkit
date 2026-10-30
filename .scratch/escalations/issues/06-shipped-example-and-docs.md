@@ -1,7 +1,7 @@
 # 06: Shipped ladder example and reference docs
 
 **What to build:** The shipped rules config gains a worked escalation
-ladder — handoff rung, throttle recommendation, ban — that validates,
+ladder - handoff rung, throttle recommendation, ban - that validates,
 prints its whole climb in `bandage -t`, and stands as the reference
 example operators copy. The rules guide's escalation section completes
 (worked example, per-kind quantities, per-fired-rung terminality, the
@@ -39,5 +39,5 @@ sections describe the ladder and the full load-time matrix; a drift
 audit across the rules guide, report contract, PLAN.md and GLOSSARY.md
 closed every divergence in both directions.
 
-Context: spec `../spec.md` (Modules touched — documentation set);
+Context: spec `../spec.md` (Modules touched - documentation set);
 completes the sections tickets 03-05 opened.

@@ -1,4 +1,4 @@
-# 06: Operator docs — ingest transport and the tripwire pattern
+# 06: Operator docs - ingest transport and the tripwire pattern
 
 **What to build:** Operators can deploy and configure the cheap path
 from the docs alone. Ingest guidance recommends udp/unixgram for
@@ -12,8 +12,8 @@ file. All of it speaks the glossary's language and matches ADR 0008 and
 ADR 0009.
 
 **Blocked by:** 02 (Trigger empties the rule's tracker), 03 (Suppress
-the report write while a report is alive), 04 (Report store — cheap
-upserts, WAL, split read path) — docs describe shipped behavior
+the report write while a report is alive), 04 (Report store - cheap
+upserts, WAL, split read path) - docs describe shipped behavior
 
 **Status:** resolved
 
@@ -30,21 +30,21 @@ upserts, WAL, split read path) — docs describe shipped behavior
 ## Answer
 
 Operator docs are born here, as `docs/*.md` with a root `README.md`
-pointer (the repo had none — PLAN.md §7/8 and config comments were the
+pointer (the repo had none - PLAN.md §7/8 and config comments were the
 only prose). Written against the shipped behavior pinned by the tests
 in `bandage/internal/app` (suppress/trigger semantics), `bandage/internal/domain/report`
 and `bandage/internal/infra/persistence/sqlite` (WAL, read split):
 
-- `docs/ingest.md` — ingest transport guidance: udp/unixgram recommended
+- `docs/ingest.md` - ingest transport guidance: udp/unixgram recommended
   at high rate (one datagram is one message, no framing, no per-sender
   state); the tcp cost spelled out (per-connection goroutine + scanner,
   newline/RFC-6587 framing per message, head-of-line blocking, a
-  >64 KiB message ends the connection's stream — verified against
+  >64 KiB message ends the connection's stream - verified against
   go-syslog.v2's scan loop and bufio.Scanner's token limit); the UDP
   kernel-buffer caveat (64 KiB read buffer request, `net.core.rmem_max`
   clamps, silent kernel drops invisible to `received`/`dropped`, watch
   `UdpRcvbufErrors`, unixgram pushes back on the sender instead).
-- `docs/rules.md` — the rules documentation (rule anatomy, Match/Trigger
+- `docs/rules.md` - the rules documentation (rule anatomy, Match/Trigger
   recap per GLOSSARY and ADR 0008, `bandage -t` validation) with the
   tracker-less tripwire pattern beside it: `agent keyword "curl"` filter
   + report action, no tracker. Its Trigger semantics: every matching
@@ -53,20 +53,20 @@ and `bandage/internal/infra/persistence/sqlite` (WAL, read split):
   running); delete/expiry re-arms (next matching event writes
   immediately for tracker-less rules, fresh accumulation episode for
   tracker rules); restart re-derives suppression from the report table;
-  Target is the default aggregation (per address IPv4 / per /64 IPv6 —
+  Target is the default aggregation (per address IPv4 / per /64 IPv6 -
   `TrackerConfig.TargetString` nil-falls-back, `bandage/internal/domain/target.go`);
   reason slug contract per ADR 0004.
-- `docs/storage.md` — the WAL backup note: `reports.db-wal`/`-shm` beside
+- `docs/storage.md` - the WAL backup note: `reports.db-wal`/`-shm` beside
   `reports.db`, stale-copy hazard of backing up the main file alone,
   checkpoint (`PRAGMA wal_checkpoint(TRUNCATE)`), stop-and-copy or
   sqlite `.backup`/`VACUUM INTO`, restore the files together,
   `synchronous=NORMAL` durability and the network-filesystem ban (ADR
   0009).
-- `README.md` — root pointer to the three docs plus configs/, GLOSSARY,
+- `README.md` - root pointer to the three docs plus configs/, GLOSSARY,
   PLAN, ADR 0008/0009.
 
 No new terms (all prose is glossary vocabulary: Match, Trigger, Report,
-Target, Sample, Reason, Ban rule) and no config surface — only the
+Target, Sample, Reason, Ban rule) and no config surface - only the
 existing keys in `configs/bandage.yml` are documented. No test suites
 added for prose; `make test` (race detector) stays green.
 
@@ -80,7 +80,7 @@ and Implementation Decisions 'Docs'; oracle tests
 
 Follow-up (out of scope here): PLAN.md §8 still lists "`report` on a
 tracker-less rule" as a load-time rejection, which ticket 03 removed
-(loader accepts it now, `rules_test.go:169`) — the plan predates the
+(loader accepts it now, `rules_test.go:169`) - the plan predates the
 suppression decision and could use a correction note.
 
 Implemented on integration branch `feat/v0-hot-path` (merge commit

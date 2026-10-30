@@ -1,18 +1,18 @@
-# splint: per-chain enforcement scopes — spec
+# splint: per-chain enforcement scopes - spec
 
 Status: ready-for-agent
 
 ## Problem Statement
 
 The nftables driver scopes every ban to "service traffic" with one
-shared pair of destination-only sets — the `"service prefilter"` of
+shared pair of destination-only sets - the `"service prefilter"` of
 destination ports and addresses. But the two ban directions see one
 service as *different packet fields*: the ingress (the traffic a ban
 rule's Target sends) carries the service at its destination fields,
 while the egress (the response direction) carries the same service at
 its source fields. Where NAT translates the service's on-the-wire
-identity between hooks — a port-forwarded service is the everyday case
-— the shared prefilter can only describe one side. The other side
+identity between hooks - a port-forwarded service is the everyday case
+- the shared prefilter can only describe one side. The other side
 matches nothing, silently: reject bans never fire, or bandwidth meters
 never fire, and the counters stay at zero with nothing in the logs to
 explain it.
@@ -21,13 +21,13 @@ Around that, the flag surface is clumsy: values are repeat-only (no
 comma lists), the transport protocol set is hard-coded to tcp and udp
 with no way to narrow it, duplicate values can fail a kernel batch, and
 a ban rule the scope cannot reach at all simply vanishes from the plan
-— `--dry-run` never mentions it, so "why isn't this banned?" has no
+- `--dry-run` never mentions it, so "why isn't this banned?" has no
 answer.
 
 ## Solution
 
-Two **enforcement scopes** — the *ingress scope* and the *egress
-scope* — each named by the packet fields its direction matches:
+Two **enforcement scopes** - the *ingress scope* and the *egress
+scope* - each named by the packet fields its direction matches:
 `--nft-ingress-daddr/-dport/-l4proto` and
 `--nft-egress-saddr/-sport/-l4proto`. The operator states exactly what
 each hook sees; a NAT'd service configures its pre-translation view on
@@ -120,7 +120,7 @@ self-contained. The old shared-scope flags are removed outright.
 ## Implementation Decisions
 
 - The nftables firewall driver's configuration carries two enforcement
-  scopes — one per direction — each a protocol set, a port set and an
+  scopes - one per direction - each a protocol set, a port set and an
   address set. The shared "service prefilter" is removed; ADR 0018
   records the change and supersedes ADR 0012's phrasing in part.
 - The driver's flag surface grows to six flags, named by the packet
@@ -141,7 +141,7 @@ self-contained. The old shared-scope flags are removed outright.
 - Rule encoding order: the direction's scope matches first (protocol
   gate, port, address), then the Target match (source on ingress,
   destination on egress), then the counter and the verdict. The scope
-  matches the service end of the conversation — destination fields on
+  matches the service end of the conversation - destination fields on
   ingress, source fields on egress.
 - Per-ban-rule sets keep their ban-rule index in their names, so
   counter read-back mapping survives restarts; the scope address sets
@@ -166,7 +166,7 @@ self-contained. The old shared-scope flags are removed outright.
 
 - Good tests assert external behavior only: what the flag surface
   accepts and refuses, what the plan and outcomes say, and what the
-  kernel ruleset looks like — never internal helpers or call shapes.
+  kernel ruleset looks like - never internal helpers or call shapes.
 - Seams (all existing, none new): the driver factory's
   bind/validate/open surface for parsing and validation; the firewall
   driver port (plan/apply/reset) over the fake kernel for behavior; the
@@ -192,7 +192,7 @@ self-contained. The old shared-scope flags are removed outright.
 
 - Port ranges in the port scope.
 - Per-enforcement-point (per-namespace) scope overrides.
-- Protocol values beyond `tcp` and `udp` — no `any`, no `icmp`.
+- Protocol values beyond `tcp` and `udp` - no `any`, no `icmp`.
 - Silently merging overlapping address prefixes.
 - Deprecated aliases for the removed shared-scope flags.
 - Any change to Penalty semantics (the `limit-req-rate` decline stands)

@@ -1,4 +1,4 @@
-# 01: Walking skeleton — Event to Report list
+# 01: Walking skeleton - Event to Report list
 
 **What to build:** bandage runs end to end. An operator starts the daemon with a config and a rules file, feeds it access-log Events over syslog, and sees a Report in the JSON report list served over HTTP once a rule's Tracker overflows. Everything is minimal but real: `filter: any`, `rate`/`bandwidth` trackers with explicit leak and volume, one `report` action.
 

@@ -771,7 +771,7 @@ chains:
 }
 
 // TestStatsBuildMirrorsThePassedBuild: the daemon renders the build
-// identity it was assembled with — the command constructs the per-name
+// identity it was assembled with - the command constructs the per-name
 // build; the daemon only mirrors it.
 func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	chains, err := ParseRules([]byte(bandwidthRules))
@@ -1049,7 +1049,7 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	}
 }
 
-// Shape only — real values are non-deterministic point-in-time samples:
+// Shape only - real values are non-deterministic point-in-time samples:
 // HELP/TYPE present and a plausible value per runtime family.
 func TestE2EAPIRuntimeMetricsByShape(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -1646,7 +1646,7 @@ chains:
 }
 
 // assertTopicRanOnce asserts the topic chain took the event exactly once:
-// one tracker feed and one MARK:TOPIC mark (one increment — volume 0.5
+// one tracker feed and one MARK:TOPIC mark (one increment - volume 0.5
 // matches on any event). ran names the expected run for the failure
 // messages.
 func assertTopicRanOnce(t *testing.T, d *testDaemon, value float64, ran string) {
@@ -1739,7 +1739,7 @@ chains:
 }
 
 // TestE2EStopInTheEntryChainGatesEverythingBelow: stop ends processing for
-// the event — later rules and later dispatch alike. A chain dispatched
+// the event - later rules and later dispatch alike. A chain dispatched
 // before the stop has already run.
 func TestE2EStopInTheEntryChainGatesEverythingBelow(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))

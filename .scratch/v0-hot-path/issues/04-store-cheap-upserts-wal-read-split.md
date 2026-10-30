@@ -1,11 +1,11 @@
-# 04: Report store — cheap upserts, WAL, split read path
+# 04: Report store - cheap upserts, WAL, split read path
 
 **What to build:** The report store stops wasting work per Trigger and
 stops letting reads fight writes. Upserts no longer read the row before
 writing it (the upsert statement itself preserves created_at; statements
 are prepared once and reused), file databases run in `journal_mode=WAL`
-with `synchronous=NORMAL` — commits survive process crashes, losing only
-the final moments on power failure (ADR 0009) — writes keep flowing
+with `synchronous=NORMAL` - commits survive process crashes, losing only
+the final moments on power failure (ADR 0009) - writes keep flowing
 through the single write connection so ordering stays deterministic
 (ADR 0007), and `GET /reports` is served on its own connections so
 queries never queue behind upserts.
@@ -36,7 +36,7 @@ queries never queue behind upserts.
 rewritten; tests in `sqlite_test.go`, `bandage/internal/app/readpath_test.go`):
 
 - **Cheap upserts**: `Upsert` is now one prepared statement
-  (`upsertSQL`, prepared once in `Open`, reused via `*sql.Stmt`) — the
+  (`upsertSQL`, prepared once in `Open`, reused via `*sql.Stmt`) - the
   pre-read `SELECT created_at` and the surrounding transaction are
   gone; created_at is preserved by its absence from the `ON CONFLICT …
   DO UPDATE` set. Guard: `TestUpsertPreservesCreatedAtOnUpdate`.
@@ -44,7 +44,7 @@ rewritten; tests in `sqlite_test.go`, `bandage/internal/app/readpath_test.go`):
   `PRAGMA synchronous=NORMAL` on the write connection (ADR 0009).
   Guards: `TestFileDatabaseRunsInWALSynchronousNormal`,
   `TestWrittenReportSurvivesReopen` (close + reopen the database).
-- **Split read path**: `ReportRepository{write, read, upsert}` — writes
+- **Split read path**: `ReportRepository{write, read, upsert}` - writes
   (Upsert/Delete/DeleteExpired) keep `write` with `SetMaxOpenConns(1)`
   (ADR 0007; `TestConcurrentUpsertsAreDeterministic` unchanged and
   green), `List` runs on `read`, its own pool. `:memory:` uses the
@@ -89,7 +89,7 @@ read path itself and is unchanged in shape, as expected.
 - The pre-read removal is externally behavior-identical (the statement
   preserves created_at exactly as the pre-read did), so "cheap" is
   evidenced by the allocs/op and ns/op table above, not a behavior
-  test — per spec Testing Decisions ("performance claims verified by
+  test - per spec Testing Decisions ("performance claims verified by
   the benchmark suite itself, not by ad-hoc timing in tests").
 - `synchronous` is per connection; only `write` commits, and
   `journal_mode=WAL` is a property of the database file, so the read

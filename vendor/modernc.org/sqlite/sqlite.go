@@ -554,7 +554,7 @@ type FunctionImpl struct {
 	//	saved := append([]byte(nil), args[0].([]byte)...) // []byte
 	//	saved := string(append([]byte(nil), args[0].(string)...)) // string, no aliasing
 	//
-	// When in doubt, leave VolatileArgs at its default (false) — the driver
+	// When in doubt, leave VolatileArgs at its default (false) - the driver
 	// already pools the argument-slice header (issue #226), so the per-row
 	// overhead with VolatileArgs=false is one make([]byte) per BLOB column
 	// and one libc.GoString per TEXT column, not a fresh slice header.
@@ -581,7 +581,7 @@ type AggregateFunction interface {
 	// return of the function. When the aggregate was registered with
 	// [FunctionImpl.VolatileArgs] set to true, string and []byte arguments
 	// in rowArgs are zero-copy views into SQLite-owned memory and retaining
-	// them produces silent data corruption — see [FunctionImpl.VolatileArgs]
+	// them produces silent data corruption - see [FunctionImpl.VolatileArgs]
 	// for the full safety contract.
 	Step(ctx *FunctionContext, rowArgs []driver.Value) error
 

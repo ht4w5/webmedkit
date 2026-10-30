@@ -1,6 +1,6 @@
 # 01: Rename the adapter tree to infra
 
-**What to build:** The internal adapter tree — the memory tracker cache, syslog ingest, nginx parser, sqlite report repository and HTTP API — carries the name the team uses for it (`infra`), with subpackage names and behavior untouched. Nothing operator-visible changes; the point is that the code layout matches how we talk about the code before further work lands on it.
+**What to build:** The internal adapter tree - the memory tracker cache, syslog ingest, nginx parser, sqlite report repository and HTTP API - carries the name the team uses for it (`infra`), with subpackage names and behavior untouched. Nothing operator-visible changes; the point is that the code layout matches how we talk about the code before further work lands on it.
 
 **Blocked by:** None (can start immediately)
 

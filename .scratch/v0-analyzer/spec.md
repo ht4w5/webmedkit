@@ -1,4 +1,4 @@
-# Spec: bandage v0 — realtime web log analyzer with published report list
+# Spec: bandage v0 - realtime web log analyzer with published report list
 
 Status: ready-for-agent
 
@@ -32,7 +32,7 @@ can be dismissed over the API. Each report carries a machine-readable
 2. As a rule author, I want to define rules as named YAML chains with filter expressions and actions, so that detection logic is compact, reviewable, and composable.
 3. As a rule author, I want filters in the webjail expression language (`src`, `method`, `path`, `agent`, `status`, `sent` combined with `and`/`or`/`not`), so that I select events without writing SQL.
 4. As a rule author, I want each rule to declare at most one leaky-bucket tracker with explicit `leak` and `volume`, so that thresholds are visible configuration rather than derived magic.
-5. As a rule author, I want to choose the tracker kind — `rate` (requests), `bandwidth` (bytes), or `replay` (transferred fraction of file size) — so that I can detect different abuse shapes.
+5. As a rule author, I want to choose the tracker kind - `rate` (requests), `bandwidth` (bytes), or `replay` (transferred fraction of file size) - so that I can detect different abuse shapes.
 6. As a rule author, I want the `replay` tracker's volume to be configurable as `constant`, `clamped-linear`, `inverse-square`, or `step` in file size, so that tolerance can scale with object size.
 7. As a rule author, I want to set the tracker's target aggregation (`target_prefix` with separate IPv4 and IPv6 prefix lengths, e.g. /32 and /64), so that related clients can be grouped and individual IPv6 addresses are never reported finer than /64.
 8. As a rule author, I want tracker state keyed per target (and per target+path for `replay`), so that abuse by one client network does not smear onto others.
@@ -64,7 +64,7 @@ can be dismissed over the API. Each report carries a machine-readable
 34. As a report consumer, I want the tracker reading in each report to show value, leak, and volume at trigger time, so that I can see how far past the threshold the target is.
 35. As a report consumer, I want `GET /ping` for liveness checks and nothing else exposed, so that the API surface stays minimal.
 36. As an operator, I want `DELETE /reports` with required `?rule=`/`?target=` filters that reports a deleted-row count, so that I can dismiss false positives without risk of wiping the list.
-37. As an operator, I understand that deletion is dismiss and not silence — a report whose condition persists returns on the next trigger — so that I am not surprised when dismissed abuse reappears.
+37. As an operator, I understand that deletion is dismiss and not silence - a report whose condition persists returns on the next trigger - so that I am not surprised when dismissed abuse reappears.
 38. As an operator, I want reports to survive daemon restarts (sqlite persistence), so that review history is never lost.
 39. As an operator, I accept that tracker state and file-size estimates are memory-only and cold after restart, so that v0 stays simple; I want that trade-off documented.
 40. As an operator, I want tracker state bounded by a configurable entry cap with a sane default, so that memory use is predictable.
@@ -77,11 +77,11 @@ can be dismissed over the API. Each report carries a machine-readable
 
 ## Implementation Decisions
 
-**Architecture.** Go, following the webjail domain-driven layout: a domain core holding the `Event` value type (ingress fields plus derived file size), with one domain module per concern — filter, enrichment, track, evaluation, report — plus adapters for ingest, parsing, storage, and HTTP. Domain modules depend only on the domain core and the standard library. Ports are tiny interfaces declared beside their consumer, with atomic per-key update callbacks that must never perform I/O.
+**Architecture.** Go, following the webjail domain-driven layout: a domain core holding the `Event` value type (ingress fields plus derived file size), with one domain module per concern - filter, enrichment, track, evaluation, report - plus adapters for ingest, parsing, storage, and HTTP. Domain modules depend only on the domain core and the standard library. Ports are tiny interfaces declared beside their consumer, with atomic per-key update callbacks that must never perform I/O.
 
 **DSL (per ADR 0001).** Flux-shaped YAML chains of rules; filters in webjail's expression language with its v0 primitive set unchanged (no regex, host, or duration filters); lowercase action names. The rules document declares format version 0. No SQL anywhere.
 
-**Rule model (per ADR 0003).** A rule has an ID (namespaces tracker state), a filter defaulting to `any`, at most one tracker, and an ordered action list. A rule matches when its filter accepts the event and its tracker overflows; tracker-less rules match on filter alone and may carry only routing/logging actions — `report` requires a tracker.
+**Rule model (per ADR 0003).** A rule has an ID (namespaces tracker state), a filter defaulting to `any`, at most one tracker, and an ordered action list. A rule matches when its filter accepts the event and its tracker overflows; tracker-less rules match on filter alone and may carry only routing/logging actions - `report` requires a tracker.
 
 **Tracker semantics.** Ported leaky-bucket math from flux: value accumulates an increment, decays by `leak × Δt` between events (floor zero), and overflows above `volume`. `rate` increments by one, `bandwidth` by sent bytes, `replay` by the transferred fraction of the estimated file size (skipped while the estimate is unknown). Volume methods apply to `replay` only. TTL of cache entries is `volume/leak` (default one hour when leak is zero). Decay uses event time.
 
@@ -93,7 +93,7 @@ can be dismissed over the API. Each report carries a machine-readable
 
 **Repository.** Port with upsert, list (filter by rule and target), delete by query returning a count, and delete-expired by timestamp. sqlite adapter; one row per (rule, target) with indexed rule, target, and expiry columns plus a record body. A periodic sweeper deletes expired rows; queries exclude expired rows as a safety net.
 
-**HTTP API.** `GET /reports` (read-only; query params `?rule=`, `?target=`; never returns expired rows; sorted by `created_at` descending), `DELETE /reports` (requires `?rule=` and/or `?target=`; returns deleted count; dismiss semantics — tracker state untouched, so reports can return on the next trigger), `GET /ping`. No URL version prefix, no debug endpoints. The API never writes reports.
+**HTTP API.** `GET /reports` (read-only; query params `?rule=`, `?target=`; never returns expired rows; sorted by `created_at` descending), `DELETE /reports` (requires `?rule=` and/or `?target=`; returns deleted count; dismiss semantics - tracker state untouched, so reports can return on the next trigger), `GET /ping`. No URL version prefix, no debug endpoints. The API never writes reports.
 
 **Report document.** Format version 0: a top-level document with generation timestamp and a reports array whose entries are the report records above; RFC 3339 UTC timestamps.
 
@@ -105,8 +105,8 @@ can be dismissed over the API. Each report carries a machine-readable
 
 ## Testing Decisions
 
-- **What makes a good test:** assert only external behavior — feed log messages in, read the report list out. Never assert internal bucket values except as surfaced in report evidence; never assert log text except where logging is the contract (capped drops). Time-dependent behavior (decay, expiry, timestamps) is driven through the injected clock and event timestamps, never `sleep`.
-- **Primary seam (one):** the assembled daemon — real rule loader, parser, enrichment, evaluation, report service, and sqlite in-memory repository behind the HTTP API — driven by raw nginx-JSON syslog messages at the ingest port and asserted through `GET /reports` JSON. Everything in the user stories is observable here: filters, overflow and decay, chain traversal and terminality, target aggregation, report timestamps and evidence, sort order, expiry exclusion, and delete-dismiss behavior.
+- **What makes a good test:** assert only external behavior - feed log messages in, read the report list out. Never assert internal bucket values except as surfaced in report evidence; never assert log text except where logging is the contract (capped drops). Time-dependent behavior (decay, expiry, timestamps) is driven through the injected clock and event timestamps, never `sleep`.
+- **Primary seam (one):** the assembled daemon - real rule loader, parser, enrichment, evaluation, report service, and sqlite in-memory repository behind the HTTP API - driven by raw nginx-JSON syslog messages at the ingest port and asserted through `GET /reports` JSON. Everything in the user stories is observable here: filters, overflow and decay, chain traversal and terminality, target aggregation, report timestamps and evidence, sort order, expiry exclusion, and delete-dismiss behavior.
 - **CLI validation surface:** the `-check` command tested directly against a matrix of malformed configs and rules (each load-time validation rule gets at least one failing and one passing case).
 - **Unit tests at existing ports only (no new seams):** filter parser (table-driven parse and error-position tests), nginx JSON parser (field mapping and drop cases), tracker math (accumulation, decay, overflow, volume methods, TTL derivation), file-size enrichment (EWMA warm-up gating). Each of these ports already exists in the reference projects.
 - **Prior art:** webjail's table-driven domain tests (filter parsing with positioned errors, tracker and enrichment semantics) and flux's engine tests, including its bucket-semantics scenario fixtures; those suites are ported alongside the code they cover rather than rewritten from scratch.
@@ -127,5 +127,5 @@ can be dismissed over the API. Each report carries a machine-readable
 ## Further Notes
 
 - The design is fully recorded in the plan document at the repository root, with terminology in the root glossary and the load-bearing decisions in the ADR directory (four ADRs: DSL lineage, durable reports with volatile trackers, one tracker per rule, reports feed ban rules).
-- Milestone hardening work — worker pool tuning, backpressure policy, eviction statistics surfacing — is part of implementation but has no distinct behavioral contract beyond what this spec already states (bounded memory, counted drops).
+- Milestone hardening work - worker pool tuning, backpressure policy, eviction statistics surfacing - is part of implementation but has no distinct behavioral contract beyond what this spec already states (bounded memory, counted drops).
 - The deliberate asymmetry worth re-reading before changing anything: reports are the product and durable; everything upstream of them (trackers, file-size estimates) is disposable warm state.

@@ -1,6 +1,6 @@
 # The metrics contract
 
-`GET /metrics` serves the daemon's machine-contract **Metrics** — the
+`GET /metrics` serves the daemon's machine-contract **Metrics** - the
 endpoint [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
 reserved, realized under
 [ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md).
@@ -22,7 +22,7 @@ both.
 
 ## Exposition format
 
-The response is classic Prometheus text exposition 0.0.4 — not
+The response is classic Prometheus text exposition 0.0.4 - not
 OpenMetrics, deferred per
 [ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)
 until exemplars or native histograms are needed. The content type
@@ -33,7 +33,7 @@ Every family is preceded by `# HELP` and `# TYPE` lines; label values
 are escaped per the exposition format (backslash, double quote,
 newline); every line is newline-terminated; families appear in a fixed
 deterministic order. The exposition is rendered by hand from a plain
-snapshot — no Prometheus client library
+snapshot - no Prometheus client library
 ([ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)).
 Each response is one point-in-time snapshot: the `/stats` snapshot block and
 the runtime block are alike read at scrape time, so families within a
@@ -68,15 +68,15 @@ gauges are bare.
 | `go_memstats_gc_cpu_fraction` | gauge | The fraction of this program's available CPU time used by the GC since the program started. |
 
 Two families carry labels. `bandage_build_info` carries the build
-identity as labels — `name`, `version`, `commit`, `build_date`,
-`dirty`, `go_version`, `platform` — so panels can join version, commit
+identity as labels - `name`, `version`, `commit`, `build_date`,
+`dirty`, `go_version`, `platform` - so panels can join version, commit
 and platform into every series and incidents can be bisected by build;
 its value is always `1`. `go_info` carries one label, `version`.
 Cardinality is fixed for every family: no family's series count is ever
 a function of traffic.
 
 The `bandage_` families mirror their **Statistic** counterparts field
-for field — a dropped line is the same event on both surfaces. The
+for field - a dropped line is the same event on both surfaces. The
 `go_` families are a curated subset of Go runtime state under the
 conventional `go_` names, so generic Go dashboards work unchanged; the
 full memstats surface is deliberately not exposed.
@@ -84,8 +84,8 @@ full memstats surface is deliberately not exposed.
 ## Counters and restarts
 
 Counters are cumulative since daemon start. A daemon restart resets
-them — expected Prometheus behavior, handled transparently by `rate()`
-and `increase()` — so a counter reset always means "the daemon
+them - expected Prometheus behavior, handled transparently by `rate()`
+and `increase()` - so a counter reset always means "the daemon
 restarted", and `bandage_start_time_seconds` says exactly when. Gauges
 are instantaneous readings at scrape time.
 
@@ -94,7 +94,7 @@ are instantaneous readings at scrape time.
 Metric names and types are a stable machine contract
 ([ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)):
 a series may be added freely, but a family is never silently renamed or
-removed — scrapers fail silently on renames. A rename or removal is a
+removed - scrapers fail silently on renames. A rename or removal is a
 breaking change and requires a new ADR plus a deprecation note in this
 document. Consumers must therefore tolerate unknown families; dashboards
 and alert rules that name families from this contract survive upgrades.
@@ -106,10 +106,10 @@ listener as `/ping`, `/stats` and the report API: no authentication, no
 TLS, no configuration knob, always registered. This is the exposure
 stance [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
 already accepted, carried over unchanged. The endpoint is GET only:
-HEAD — which some scrapers and proxies send in place of GET — and
+HEAD - which some scrapers and proxies send in place of GET - and
 every other method are rejected with `405 Method Not Allowed` and an
 `Allow: GET` header. The daemon serves the endpoint; deciding who may reach it is the operator's network-layer
-job — firewall the listener so only the monitoring network can scrape
+job - firewall the listener so only the monitoring network can scrape
 it, as with the rest of the ops surface.
 
 ## Scraping
@@ -129,7 +129,7 @@ scrape_configs:
 
 ### Example alert rules
 
-The rules below are documentation examples — the daemon ships no alert
+The rules below are documentation examples - the daemon ships no alert
 rule files. Two starting points: dropped-line growth (the pipeline
 losing events) and tracker-cache eviction pressure (entries approaching
 the entry cap). Both use exactly the metric names contracted above.
@@ -156,7 +156,7 @@ groups:
 ```
 
 `BandageDroppedLogLines` fires on the first scrape that shows the
-dropped counter growing — the moment the pipeline starts losing events;
+dropped counter growing - the moment the pipeline starts losing events;
 `increase()` accounts for the counter resets described above, so a
 restart does not fire it. `BandageTrackerCacheEvictionPressure` fires
 when `bandage_tracker_cache_entries` sits within 10% of
@@ -166,7 +166,7 @@ the severities to taste.
 
 ## Example
 
-A complete `GET /metrics` response over a fixed sample snapshot —
+A complete `GET /metrics` response over a fixed sample snapshot -
 family order and every byte:
 
 ```text

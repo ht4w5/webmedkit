@@ -2,8 +2,8 @@
 
 **What to build:** "Why isn't this banned?" is answerable from the
 plan and the logs alone. A ban rule the scopes cannot reach at all is
-declined loudly — logged and counted with its reason, like every other
-decline — instead of vanishing; a ban rule that only partially fits a
+declined loudly - logged and counted with its reason, like every other
+decline - instead of vanishing; a ban rule that only partially fits a
 scope installs its reachable families with visibly narrowed Targets and
 produces no decline; and `--dry-run` prints one scope line per
 direction alongside the placement lines, so a pasted plan shows the
@@ -28,12 +28,12 @@ the installing direction's enforcement scope cannot reach at all is
 now a `firewall.Decline` (feature = the stance, reason naming the
 direction's scope, e.g. "the ingress enforcement scope cannot reach
 any target address family") instead of a silent skip in
-`nft.Driver.Plan` — it flows through the engine's existing warn log
+`nft.Driver.Plan` - it flows through the engine's existing warn log
 and the `declined=N` count with zero engine changes; partial narrowing
 keeps installing the reachable families with narrowed Targets and is
 never declined (pinned in the plan-visible fake-kernel tests); and the
 dry-run plan prints one already-formatted scope line per direction
-next to the placement lines — `firewall.Plan` gained the opaque
+next to the placement lines - `firewall.Plan` gained the opaque
 `Scopes []string` surface (like `Placement`: printed and never
 parsed), `firewalltest.Stub` gained `Scopes`, and the driver formats
 `scope=ingress l4proto=… dport=… daddr=…` /

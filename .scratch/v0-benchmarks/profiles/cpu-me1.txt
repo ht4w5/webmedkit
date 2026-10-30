@@ -1,4 +1,4 @@
-# cpu-me1.out — go tool pprof -top -cum -nodecount=25
+# cpu-me1.out - go tool pprof -top -cum -nodecount=25
 # (cpu profile, run: go test -bench ... -benchtime=5s -cpuprofile; see findings.md)
 File: app.test
 Build ID: 8e91155ddfe4fb40ade4e74b4ed31adf460284bb

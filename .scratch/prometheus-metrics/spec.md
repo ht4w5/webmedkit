@@ -1,4 +1,4 @@
-# Prometheus metrics for service health — spec
+# Prometheus metrics for service health - spec
 
 Status: ready-for-agent
 
@@ -6,12 +6,12 @@ Status: ready-for-agent
 
 Operators running bandage cannot monitor service health with standard
 tooling. The only ops surfaces are `GET /ping` (liveness) and `GET /stats`
-— the human-facing **Statistic** snapshot, indented JSON with no format
+- the human-facing **Statistic** snapshot, indented JSON with no format
 contract (ADR 0006), explicitly not scrapeable. Alerting on dropped
 lines, tracker-cache eviction pressure, or a stalled pipeline means
 reverse-engineering that JSON shape and breaking on every field addition.
 ADR 0006 promised a separate Prometheus-format endpoint "if
-machine-readable metric gathering is ever needed" — it is: without
+machine-readable metric gathering is ever needed" - it is: without
 **Metrics**, bandage is the one service in the fleet an operator cannot
 dashboard or alert on.
 
@@ -23,7 +23,7 @@ in the same cumulative-since-start snapshot `GET /stats` serves, plus a
 scrape-time Go runtime sample. Metric names and types are a stable
 machine contract (ADR 0014): series may be added, never silently renamed
 or removed. The exposition text is rendered by hand from a plain snapshot
-— no client library — and `/stats` stays exactly as it is for human eyes.
+- no client library - and `/stats` stays exactly as it is for human eyes.
 
 ## User Stories
 
@@ -80,8 +80,8 @@ or removed. The exposition text is rendered by hand from a plain snapshot
     snapshot, so that families within a single response never mix
     sampling times.
 20. As an operator, I want metric names and types to be a stable machine
-    contract — series added freely, never renamed or removed (ADR 0014)
-    — so that dashboards and alert rules survive upgrades.
+    contract - series added freely, never renamed or removed (ADR 0014)
+    - so that dashboards and alert rules survive upgrades.
 21. As an operator, I want Go runtime series for goroutines, threads,
     allocation, heap in use, system memory, GC CPU fraction and Go
     version, so that I can diagnose resource problems without attaching a
@@ -112,7 +112,7 @@ or removed. The exposition text is rendered by hand from a plain snapshot
     so that the suite survives renderer refactors.
 31. As a metrics consumer, I want the metrics contract document to carry
     a byte-exact example pinned by a test, so that document and
-    implementation cannot drift — the same guarantee the report contract
+    implementation cannot drift - the same guarantee the report contract
     gives.
 32. As an operator, I want the metrics document to ship a scrape config
     and example alert rules, so that I wire monitoring without reading
@@ -123,8 +123,8 @@ or removed. The exposition text is rendered by hand from a plain snapshot
 - **Endpoint**: `GET /metrics` on the existing read-only HTTP surface,
   registered beside `/ping` and `/stats`; no URL version; GET only;
   always registered.
-- **Rendering model**: the handler assembles one metrics snapshot — the
-  statistics block `/stats` already serves plus a runtime block — and
+- **Rendering model**: the handler assembles one metrics snapshot - the
+  statistics block `/stats` already serves plus a runtime block - and
   renders it through a pure snapshot-to-text renderer. The renderer never
   reads live state; determinism is what makes the output golden-testable.
 - **Format**: classic Prometheus text exposition 0.0.4, not OpenMetrics
@@ -133,14 +133,14 @@ or removed. The exposition text is rendered by hand from a plain snapshot
   family preceded by `# HELP` and `# TYPE`; label values escaped per the
   exposition spec (backslash, quote, newline); lines newline-terminated;
   families in a fixed deterministic order.
-- **Naming**: `bandage_` prefix — the binary is what gets scraped, not
+- **Naming**: `bandage_` prefix - the binary is what gets scraped, not
   the repository name. `_total` suffix on counters; gauges bare. Metric
   names and types are the stable contract of ADR 0014.
 - **Metric families** (stats mirror; every value already in the snapshot
   `/stats` serves):
-  - `bandage_start_time_seconds` (gauge) — daemon start time, for
+  - `bandage_start_time_seconds` (gauge) - daemon start time, for
     uptime as `time() - start`.
-  - `bandage_build_info` (gauge, value 1) — labels carry the full build
+  - `bandage_build_info` (gauge, value 1) - labels carry the full build
     identity: name, version, commit, build date, dirty, Go version,
     platform. Cardinality is 1; labels are for joining and bisection.
   - `bandage_pipeline_events_received_total`,
@@ -161,8 +161,8 @@ or removed. The exposition text is rendered by hand from a plain snapshot
   narrow runtime source port sits beside its consumer in the same style
   (ports beside consumers, per ADR 0005's discipline), satisfied by a
   standard-library-backed adapter. One behavior seam total.
-- **Sampling**: everything is read at scrape time — atomic counter reads
-  and the runtime memory sample alike — so the response is one
+- **Sampling**: everything is read at scrape time - atomic counter reads
+  and the runtime memory sample alike - so the response is one
   point-in-time snapshot; the brief stop-the-world of the memory sample
   is accepted at normal scrape intervals. No background sampler, no
   caching between scrapes.
@@ -181,13 +181,13 @@ or removed. The exposition text is rendered by hand from a plain snapshot
 
 - A good test asserts external behavior only: the bytes a `GET /metrics`
   response carries. No renderer-internals assertions, no registry-style
-  introspection — the renderer is a pure function precisely so the wire
+  introspection - the renderer is a pure function precisely so the wire
   bytes are the whole observable surface.
 - **Seams**: the highest seam is the HTTP endpoint itself, driven with
   injected fixed snapshots. The existing stats source port is preferred
   and reused (already the daemon's structural seam); the one new seam is
-  the runtime source port, proposed at the highest point possible — the
-  same handler constructor — so tests pin runtime values too. No seams
+  the runtime source port, proposed at the highest point possible - the
+  same handler constructor - so tests pin runtime values too. No seams
   below the handler.
 - Prior art: the report-document test that reproduces the contract's own
   example byte-for-byte; the shipped-format tests that pin the shipped
@@ -202,18 +202,18 @@ or removed. The exposition text is rendered by hand from a plain snapshot
 ## Out of Scope
 
 - New domain counters (reports written, trigger suppressions, sweep
-  deletions, escalation overrides, parse errors) — the stats mirror only;
+  deletions, escalation overrides, parse errors) - the stats mirror only;
   the contract makes later additions free.
 - OpenMetrics, exemplars, histograms, a push gateway, remote write.
 - A Prometheus client library, registry, or collectors.
-- A separate listener, authentication, or TLS for the endpoint — the
+- A separate listener, authentication, or TLS for the endpoint - the
   unauthenticated-listener stance of ADR 0006 carries over unchanged.
 - Any configuration knob (enable/disable, path, label sets).
 - Any change to `/stats`, its shape, or its non-contract status.
 - The full `go_memstats` surface, pprof endpoints, or per-Target /
   per-rule labeled series (cardinality is deliberately never a function
   of traffic).
-- Shipped alert-rule files exercised in CI — the docs carry example alert
+- Shipped alert-rule files exercised in CI - the docs carry example alert
   rules as documentation only.
 
 ## Further Notes

@@ -1,6 +1,6 @@
 # Sample systemd unit for splint, the ban-rule installer: it pulls
 # bandage's report document and installs ban rules through the selected
-# firewall driver — nftables by default, into the splint nftables
+# firewall driver - nftables by default, into the splint nftables
 # table (docs/splint.md).
 #
 # Install and enable:
@@ -15,7 +15,7 @@
 #
 # One instance per enforcement point (nftables: per network
 # namespace). A clean stop (systemctl stop) is SIGTERM, which resets
-# the owned ruleset before exit — stopping the service removes its ban
+# the owned ruleset before exit - stopping the service removes its ban
 # rules.
 
 [Unit]
@@ -32,7 +32,7 @@ Type=simple
 ExecStart=/usr/local/bin/splint --url http://127.0.0.1:8080/reports
 Restart=on-failure
 RestartSec=10s
-# Installing nftables rules needs CAP_NET_ADMIN — the only thing splint
+# Installing nftables rules needs CAP_NET_ADMIN - the only thing splint
 # needs from root (the stop-time ruleset reset needs nothing more). With
 # the default User=root it is already there; for a dedicated user,
 # create it and uncomment:

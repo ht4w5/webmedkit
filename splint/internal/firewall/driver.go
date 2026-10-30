@@ -3,12 +3,12 @@ package firewall
 import "errors"
 
 // ErrUnreachable marks a driver failure caused by the target
-// enforcement point being unreachable — its handle cannot be opened.
+// enforcement point being unreachable - its handle cannot be opened.
 // The update cycle warns and skips that point for the cycle and
 // tolerates it on reset; failures past the open stay loud.
 var ErrUnreachable = errors.New("enforcement point unreachable")
 
-// Point is one enforcement point — where one driver instance enforces.
+// Point is one enforcement point - where one driver instance enforces.
 // Label names the point in the engine's logs and --dry-run output; the
 // engine never parses it.
 type Point struct {
@@ -37,7 +37,7 @@ type Decline struct {
 }
 
 // PlannedRule is one effective rule: one ban rule as this driver would
-// enforce it — after the planning step's declines and drops, carrying
+// enforce it - after the planning step's declines and drops, carrying
 // only the targets that reach its enforcement surface. Placement names
 // where the driver puts it; the engine prints it and never parses it.
 type PlannedRule struct {

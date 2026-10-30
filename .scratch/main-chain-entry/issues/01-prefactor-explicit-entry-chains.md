@@ -1,11 +1,11 @@
-# 01: Prefactor — test rules documents name their entry chain
+# 01: Prefactor - test rules documents name their entry chain
 
 **What to build:** No behaviour change, no production code touched.
 Every rules document in the test suites declares its front door
 explicitly: a document with one chain names that chain `main`, and a
 document with several chains names its first-declared chain `main` (file
 order is execution order today, so every expectation is preserved).
-Assertions that quote a chain name — for example a report's chain field —
+Assertions that quote a chain name - for example a report's chain field -
 move with the rename. This is the mechanical batch that makes the
 semantics flip easy before the easy change.
 
@@ -22,7 +22,7 @@ semantics flip easy before the easy change.
 Implemented on integration branch `feat/main-chain-entry` (commit
 `b3a65cb`, merge `65a4364`; cross-ticket code-review fixes `4849142` +
 `5d8c1d3`, merge `8f10038`). Behaviour-neutral test-suite migration:
-every rules document in the test suites carries a chain named `main` —
+every rules document in the test suites carries a chain named `main` -
 single-chain documents rename that chain, multi-chain documents rename
 their first-declared chain (file order is execution order at this
 point, so every expectation is preserved). Covers the YAML fixtures in
@@ -39,7 +39,7 @@ Context: spec `../spec.md`, `bandage/internal/app/*_test.go`,
 Notes:
 - `docs/reports.md`'s canonical example moved too: its `"chain"` value
   rides the golden document `TestE2EReportsDocumentMatchesDocsExample`
-  pins byte-exact, so it carries its fixture's chain name — a
+  pins byte-exact, so it carries its fixture's chain name - a
   one-token rename (`"download-abuse"` → `"main"`), not prose.
 - Later refusal fixtures (ticket 03's loader table) deliberately omit
   `main` to test rejection; every document the suites accept carries

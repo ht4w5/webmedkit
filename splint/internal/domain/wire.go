@@ -1,7 +1,7 @@
 // Package domain is splint's domain: the version-0 report document it
 // consumes, and the ban rules it derives from those reports under an
 // exclusion policy. It is a strict consumer of the contract in
-// docs/reports.md — the published document is the integration surface.
+// docs/reports.md - the published document is the integration surface.
 package domain
 
 import (
@@ -97,7 +97,7 @@ func (a PenaltyAction) IsLimit() bool {
 
 // ParseDocument decodes a report document as the published contract,
 // ignoring unknown fields (its evolution policy). A missing envelope
-// field, unknown version or type mismatch refuses the whole cycle —
+// field, unknown version or type mismatch refuses the whole cycle -
 // unlike Compile's per-record skips; an empty reports array is valid.
 func ParseDocument(data []byte) (Document, error) {
 	var envelope struct {

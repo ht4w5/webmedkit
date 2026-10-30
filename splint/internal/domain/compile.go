@@ -17,8 +17,8 @@ type Skip struct {
 }
 
 // Compile maps a version-0 report document's live reports to ban rules
-// under policy p. The Penalty as stated reaches the firewall driver —
-// the compiler drops none — and records with an invalid Penalty or
+// under policy p. The Penalty as stated reaches the firewall driver -
+// the compiler drops none - and records with an invalid Penalty or
 // Target or a fully excluded Target land in the returned skips; the
 // remaining records still compile.
 func Compile(doc Document, p Policy) ([]firewall.BanRule, []Skip) {
@@ -69,8 +69,8 @@ func compileReport(r Report, p Policy) (entry, string) {
 // merge resolves each residual prefix to the deepest covering reports
 // (specificity ties go to the strictest Penalty) and groups the winners
 // by (family, prefix length, penalty). The rules order by prefix length
-// descending, then strictness — nftables first-match reproduces the
-// resolution — and the result is canonical across report orderings.
+// descending, then strictness - nftables first-match reproduces the
+// resolution - and the result is canonical across report orderings.
 func merge(entries []entry) []firewall.BanRule {
 	var values []netip.Prefix
 	seen := map[netip.Prefix]bool{}
@@ -141,7 +141,7 @@ type stanceRate struct {
 
 // strictest resolves a specificity tie to the strictest Penalty: drop
 // beats reject beats the limits (smallest rate within one action).
-// Limits of different actions combine — one meter per dimension —
+// Limits of different actions combine - one meter per dimension -
 // instead of ordering.
 func strictest(atLevel []entry) []stanceRate {
 	drop, reject := false, false
@@ -184,7 +184,7 @@ type groupKey struct {
 
 // compareGroups orders ban rules by prefix length descending (the
 // first-match lever behind most-specific-wins), then strictness. The
-// limit stances' fixed serialization order is determinism only — the
+// limit stances' fixed serialization order is determinism only - the
 // equal-length sets are disjoint, so nftables never observes it.
 func compareGroups(a, b groupKey) int {
 	if a.bits != b.bits {

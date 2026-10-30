@@ -2,7 +2,7 @@
 
 **What to build:** A live Report is the only thing that bounds report
 writes (ADR 0013, amending ADR 0008). Repeated overflow while the Report
-is alive writes nothing **and empties nothing** — the tracker keeps
+is alive writes nothing **and empties nothing** - the tracker keeps
 accumulating, so a Tracker used as a threshold gate never flickers shut
 on a write. When the Report dies (expiry or deletion), the next matching
 event writes a fresh Report at the accumulation's current stance: its

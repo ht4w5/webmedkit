@@ -1,12 +1,12 @@
 # 03: Entry-chain evaluation
 
 **What to build:** A rules document is evaluated from its `main` chain
-only — the entry chain. Every other chain runs only when a `goto`/`jump`
+only - the entry chain. Every other chain runs only when a `goto`/`jump`
 action dispatches to it: `jump` runs the target and resumes the caller,
 `goto` runs it and ends the caller; a chain reached twice by different
 dispatch paths runs twice for one event (plain subroutine semantics, the
 pitfall documented rather than deduplicated). A handoff event now feeds
-the target chain's tracker once — the target's own top-level pass is
+the target chain's tracker once - the target's own top-level pass is
 gone. The loader refuses a document with no chain named `main` and any
 `goto`/`jump` targeting `main`, both with clear errors; unreachable
 chains stay legal and inert. The behavioural tests are rewritten to the
@@ -31,8 +31,8 @@ Implemented on integration branch `feat/main-chain-entry` (commit
 `ea43e28`, merge `4e7a86e`; cross-ticket code-review fixes `4849142` +
 `5d8c1d3`, merge `8f10038`). Evaluation enters only the chain named
 `main` per event (`domain.EntryChain`); every other chain runs only
-when a `goto`/`jump` dispatches to it — `jump` runs the target and
-resumes the caller, `goto` runs it and ends the caller — through the
+when a `goto`/`jump` dispatches to it - `jump` runs the target and
+resumes the caller, `goto` runs it and ends the caller - through the
 same per-chain traversal named dispatch already used. A handoff event
 feeds the target chain's tracker once: the target's own top-level pass
 is gone (the goto e2e's former double-feed assertion is now
@@ -58,14 +58,14 @@ Context: spec `../spec.md`,
 
 Notes:
 - One judgement call: a stub-seam test pins "evaluation errors when the
-  entry chain is absent" (`TestEvaluateWithoutTheEntryChainErrors`) —
+  entry chain is absent" (`TestEvaluateWithoutTheEntryChainErrors`) -
   a case invisible above the daemon seam, since the loader normally
   guarantees `main` exists.
 - The goto/jump fixtures use `volume: 0.5` so the single feed is
   observable on one event (any event matches; the tracker value pins
   1).
 - Bench: measured work is constant in tracker terms, but the dispatcher
-  adds a few filter-less rule visits per event — inherent to the
+  adds a few filter-less rule visits per event - inherent to the
   pattern, confirmed in code review.
 - Glossary and ADR 0015 were pre-landed on `main` in commit `596bdd4`
   and verified against the shipped behaviour here.

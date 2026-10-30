@@ -1,7 +1,7 @@
 # Report reasons are namespaced
 
-A report's `reason` — the machine-readable trigger code feeding the ban
-rules downstream tooling generates from reports (ADR 0004) — is
+A report's `reason` - the machine-readable trigger code feeding the ban
+rules downstream tooling generates from reports (ADR 0004) - is
 **namespaced**. On the wire it is `<prefix>.<code>`, matching
 `^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`: any prefix matching
 `^[a-z0-9][a-z0-9_-]*\.` is legal for the report, and how a producer
@@ -21,7 +21,7 @@ vocabulary, where two producers' codes collide and a consumer cannot
 attribute them); making the prefix a rule-author concern, written in the
 rules file (rejected: the namespace belongs to the producer, not to each
 rules file); pinning one producer's prefix in the contract (rejected:
-the contract constrains the shape, not the label choice — bandage's own
+the contract constrains the shape, not the label choice - bandage's own
 choice is ADR 0017). Recorded because a dotted prefix on exactly one
 field looks arbitrary until you see the collisions it prevents.
 

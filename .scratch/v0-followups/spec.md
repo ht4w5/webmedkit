@@ -1,4 +1,4 @@
-# Spec: v0 follow-ups — build identity, CLI, logging, worker pool, stats
+# Spec: v0 follow-ups - build identity, CLI, logging, worker pool, stats
 
 Status: ready-for-agent
 
@@ -93,7 +93,7 @@ wiring; documentation layout sections follow the rename.
 holds the name plus four linker-injected values: version, commit, build
 date, dirty flag. All derived strings (the one-line summary and the short
 header) are computed once at init; accessors expose the raw values. There
-is deliberately no user-agent helper — bandage makes no outbound HTTP
+is deliberately no user-agent helper - bandage makes no outbound HTTP
 requests. The identity surfaces in exactly four places: `-v` output, the
 startup log record's fields, the `/stats` build block, and the `--test`
 plan header. No HTTP `Server` header.
@@ -112,8 +112,8 @@ bin directory.
 `-h` prints usage (headed by the short identity header) and exits 0;
 unknown flags exit 2 with usage. Precedence for `log-level` and `workers`
 is explicit flag > config > default, decided by whether the flag was set.
-The former "check" surface is renamed to "test" everywhere — Go names,
-plan output, and documentation — except archived issue-tracker history,
+The former "check" surface is renamed to "test" everywhere - Go names,
+plan output, and documentation - except archived issue-tracker history,
 which stays as written. Flag parsing sits behind a `run(args)` seam in the
 command entry point.
 
@@ -126,7 +126,7 @@ dedicated logging package "for now"). The domain keeps its dependency
 rule: its own level enum replaces the stdlib level type on the `log`
 action, and a tiny logger interface is declared beside its one consumer
 (the evaluation module's `log` action). The DSL's four level words map to
-zerolog levels; zerolog's `fatal`/`panic` are unreachable from rules — a
+zerolog levels; zerolog's `fatal`/`panic` are unreachable from rules - a
 rule must never be able to exit the process.
 
 **Worker pool (per ADR 0007).** The pipeline body runs on N goroutines
@@ -148,7 +148,7 @@ order (stop ingest, close the line channel, wait for workers) so in-flight
 report upserts complete; only when the caller's shutdown context expires
 does the daemon cancel the lifetime context to abort stragglers. Port
 signatures (enrichment, tracker cache, report sink/repository) are
-unchanged — their context parameters simply become live, which also
+unchanged - their context parameters simply become live, which also
 prepares the future tracker-cache persistence seam (ADR 0002).
 
 **Stats endpoint (per ADR 0006).** `GET /stats` returns indented JSON
@@ -156,7 +156,7 @@ with: a generation timestamp, uptime, a build block (name, version,
 commit, build date, dirty, Go version, platform), a pipeline block
 (worker count, received, parsed, dropped), and a tracker cache block
 (gets, sets, misses, evictions, size, entry cap). Counters are cumulative
-since start. The document carries no format version — it is
+since start. The document carries no format version - it is
 human-facing and explicitly not a stable machine contract; metric
 gathering would arrive later as a separate Prometheus-format endpoint.
 A narrow stats-source interface is declared beside the HTTP API's
@@ -167,9 +167,9 @@ the v0 "nothing else exposed" story.
 
 **Vocabulary alignment.** Log messages, comments, test names and design
 docs say *eviction* (the glossary term, matching the stats counter),
-never "capped drop". Deletion semantics in docs are explained plainly —
+never "capped drop". Deletion semantics in docs are explained plainly -
 deleting reports does not touch tracker state, so a Target that still
-overflows is reported again on the next trigger — without leaning on
+overflows is reported again on the next trigger - without leaning on
 "dismiss"/"silence" as terms.
 
 **Config surface.** Strict decoding covers the new keys: `log.level`
@@ -179,16 +179,16 @@ socket opens. No hot reload; changes take effect on restart.
 
 ## Testing Decisions
 
-- **What makes a good test:** assert only external behavior — feed log
+- **What makes a good test:** assert only external behavior - feed log
   messages in, read the report list and stats out, observe the captured
   log records where logging is the contract. Never assert internal bucket
   values except as surfaced in report evidence. Time-dependent behavior is
   driven through the injected clock and event timestamps, never `sleep`;
   concurrency is proven by the race detector and exact accounting, not by
   timing.
-- **Primary seam (existing, one):** the assembled daemon — real rule
+- **Primary seam (existing, one):** the assembled daemon - real rule
   loader, parser, enrichment, evaluation, report service and sqlite
-  in-memory repository behind the HTTP API — driven by raw nginx-JSON
+  in-memory repository behind the HTTP API - driven by raw nginx-JSON
   messages at a real ingest listener and asserted through the API. It
   carries the worker pool (several workers under `-race` with every line
   accounted for, plus a `workers: 1` determinism case), context threading
@@ -196,11 +196,11 @@ socket opens. No hot reload; changes take effect on restart.
   `/stats` contents (build block, counter flow including evictions),
   eviction wording in captured logs, and the startup identity fields.
 - **Log capture (existing seam, adapted):** the daemon's unexported
-  logger option and the test log-capture helper — the same injection
+  logger option and the test log-capture helper - the same injection
   point, reworked from a stdlib slog handler to a zerolog writer/hook
   capturing level, message and fields.
 - **One new seam:** `run(args)` plus a fresh flag set in the command
-  entry point — flag shorthands, `-v`/`-h` exit behavior, and
+  entry point - flag shorthands, `-v`/`-h` exit behavior, and
   flag-over-config precedence, all unreachable from the daemon seam. No
   other behavior may be tested through it.
 - **Existing unit seams only, unchanged:** strict config parsing (the new
@@ -209,7 +209,7 @@ socket opens. No hot reload; changes take effect on restart.
   rejected words), tracker math and enrichment. Each filter/parser/tracker
   suite keeps its current shape.
 - **Not tested as contract:** the exact `/stats` JSON shape (ADR 0006:
-  human-facing, unversioned — tests assert 200 and the counter values that
+  human-facing, unversioned - tests assert 200 and the counter values that
   must be reflected, not field-for-field equality); the identity module's
   linker-injected strings (verified by `make build` and `bin/bandage -v`).
 - **Prior art:** the existing end-to-end suite in the app package

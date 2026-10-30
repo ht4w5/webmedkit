@@ -32,9 +32,9 @@ each matches (destination fields on ingress, source fields on egress,
 scope first, then the Target match), the value grammar and refusals
 (comma lists/repeats, host prefixes, dedup, overlap refusal with the
 run-captured error line), and the scope-unreachable decline; the
-worked port-forward example is the centerpiece — containerized web
+worked port-forward example is the centerpiece - containerized web
 server on a docker bridge behind firewalld forward-port, docker
-iptables disabled — carrying the pre-translation view at prerouting
+iptables disabled - carrying the pre-translation view at prerouting
 raw on the ingress scope (`203.0.113.10:443`) and the post-translation
 view at forward on the egress scope (`172.17.0.2:8443`), with a
 run-captured dry-run plan (scope lines, placements, hash); the

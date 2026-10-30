@@ -2,10 +2,10 @@
 
 **What to build:** An operator wires monitoring from the docs alone, and
 a maintainer can trust the docs cannot drift: a metrics contract
-document — exposition format, the full family table with types and
+document - exposition format, the full family table with types and
 meanings, counter-reset-on-restart semantics, the ADR 0014 evolution
 policy (additions free, renames/removals breaking), and the
-unauthenticated-listener exposure stance — whose byte-exact example is
+unauthenticated-listener exposure stance - whose byte-exact example is
 pinned by a test against the same fixture the golden test uses (the
 report-contract precedent). The document ships a ready-to-include
 Prometheus scrape config and example alert rules for dropped-line growth
@@ -35,7 +35,7 @@ Implemented on integration branch `feat/prometheus-metrics` (merge
 commit `7277560`; cross-ticket code-review fixes through `7fa5a22`).
 `docs/metrics.md` is the metrics contract beside `docs/reports.md` and
 matching its shape: exposition format, the full family table (every
-family's type, meaning and labels — rows pinned against
+family's type, meaning and labels - rows pinned against
 `metricFamilies` by `TestMetricsDocumentTableMatchesMetricFamilies`),
 counter-reset-on-restart semantics, the ADR 0014 evolution policy, the
 unauthenticated-listener exposure stance (GET-only, 405 otherwise), a
@@ -56,5 +56,5 @@ Notes:
 - The doc carries exactly one fenced `text` block (the pinned example);
   scrape config and alert rules use `yaml` fences, so extraction is
   unambiguous.
-- No alert-rule files shipped and no CI runs them — documentation only,
+- No alert-rule files shipped and no CI runs them - documentation only,
   per the spec's Out of Scope.

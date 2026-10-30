@@ -7,7 +7,7 @@ own `Level` enum (the `log` action's vocabulary stays `debug` | `info` |
 consumer (`bandage/internal/domain/evaluation`'s `log` action). zerolog is the
 sole implementation of that port, built from the `log.level` config key
 and adapted outside the domain. zerolog's `fatal`/`panic` levels are
-deliberately unreachable from the rules DSL — `Logger.Fatal` calls
+deliberately unreachable from the rules DSL - `Logger.Fatal` calls
 `os.Exit`, which a rule must never be able to do.
 
 Considered: using `zerolog.Logger` inside the domain as the literal slog

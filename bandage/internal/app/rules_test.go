@@ -1121,7 +1121,7 @@ chains:
 }
 
 // TestPlanBannerFollowsThePassedBuild: the plan banner carries the
-// header of the build the caller passed — the command constructs the
+// header of the build the caller passed - the command constructs the
 // per-name build; the plan never names the program itself.
 func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 	dir := t.TempDir()

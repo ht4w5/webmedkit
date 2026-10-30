@@ -72,7 +72,7 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 	path, stop := startScratchNetNS(t, unshare)
 
 	// Whatever happens in the scratch namespace, the current one must
-	// come out exactly as it went in — possibly under a live splint.
+	// come out exactly as it went in - possibly under a live splint.
 	conn, err := nftables.New()
 	if err != nil {
 		t.Fatalf("nftables.New: %v", err)
@@ -95,7 +95,7 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 		{Targets: []netip.Prefix{netip.MustParsePrefix("255.255.255.0/24")}, Stance: firewall.StanceDrop},
 	}
 	// The scoped fixture matches assertScopedKernelState's hand-written
-	// wants — the root-gated test's shape, pinned to this install.
+	// wants - the root-gated test's shape, pinned to this install.
 	scopedRules := []firewall.BanRule{
 		{
 			Targets: []netip.Prefix{

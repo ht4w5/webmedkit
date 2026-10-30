@@ -1,4 +1,4 @@
-# splint: pluggable firewall drivers — spec
+# splint: pluggable firewall drivers - spec
 
 Status: ready-for-agent
 
@@ -16,8 +16,8 @@ it. The build-identity package treats bandage as the name and splint as
 a bolted-on parameter. And the name `splint-nft` names the artifact the
 tool manages, not the tool.
 
-The consequence the operator feels: a second enforcement surface —
-nginx, a WAF, anything that can ban a source — means a sibling binary
+The consequence the operator feels: a second enforcement surface -
+nginx, a WAF, anything that can ban a source - means a sibling binary
 re-implementing the fetch, the merge and the lifecycle, or a fork of
 this one. The one thing that varies (how bans become enforcement) is
 the one thing not pluggable.
@@ -25,13 +25,13 @@ the one thing not pluggable.
 ## Solution
 
 One binary, `splint`, whose `--firewall` flag selects a **firewall
-driver** (the nftables driver in v0). The engine — report fetch,
-contract parsing, exclusions, the merge policy, the update lifecycle —
+driver** (the nftables driver in v0). The engine - report fetch,
+contract parsing, exclusions, the merge policy, the update lifecycle -
 speaks only ban rules: Target prefixes plus the Penalty as stated. A
 driver owns everything about its enforcement surface: where to enforce
 (its targeting), what to police (its enforcement scope), how penalties
-become real, and its own identity — the rolling hash, the
-skip-if-unchanged decision and the counters — because only it knows the
+become real, and its own identity - the rolling hash, the
+skip-if-unchanged decision and the counters - because only it knows the
 effective rules. A driver applies each Penalty exactly as stated or
 declines it loudly; what it declines is reported so the operator can see
 lost enforcement in the logs. Driver-specific arguments are grouped
@@ -39,7 +39,7 @@ under the driver's namespace and validated at startup. Both binaries
 draw their build identity from the same API as equals.
 
 For the operator with the nftables driver, nothing changes: the same
-table, the same rules, the same logs, the same behaviour — the seams
+table, the same rules, the same logs, the same behaviour - the seams
 move, the enforcement does not.
 
 ## User Stories
@@ -88,15 +88,15 @@ move, the enforcement does not.
 15. As an operator, I want the update interval to default to five
     minutes with a one-minute floor, so that bans and un-bans track
     report expiry within minutes without timer churn.
-16. As an operator, I want the fetch surface unchanged — plain HTTP
+16. As an operator, I want the fetch surface unchanged - plain HTTP
     locally, mutual TLS remotely, bandaid's certificate flags and fetch
-    timeout, no insecure mode — so that my PKI runbook keeps working.
+    timeout, no insecure mode - so that my PKI runbook keeps working.
 17. As an operator, I want `--dry-run` to print the compiled ban rules
-    and the selected driver's plan — effective rules, placement, what
-    it declines, and the hash — without touching any enforcement
+    and the selected driver's plan - effective rules, placement, what
+    it declines, and the hash - without touching any enforcement
     surface or requiring privileges, so that I can audit anywhere.
-18. As an operator, I want the tool named `splint` — binary, unit and
-    docs — so that the name describes the tool, not the artifact it
+18. As an operator, I want the tool named `splint` - binary, unit and
+    docs - so that the name describes the tool, not the artifact it
     manages.
 19. As an operator, I want bandage and splint to print their build
     identity the same way from the same source, so that neither looks
@@ -108,8 +108,8 @@ move, the enforcement does not.
     stated, so that my enforcement stance reaches the enforcement
     surface faithfully or not at all.
 22. As a rule author, I want `limit-req-rate` applied by drivers whose
-    surface is the application layer and declined — logged and counted
-    — by packet-layer drivers, so that request-rate intent is never
+    surface is the application layer and declined - logged and counted
+    - by packet-layer drivers, so that request-rate intent is never
     faked at the packet layer and never silently lost.
 23. As a rule author, I want overlapping reports resolved unchanged: the
     most specific Target wins even with a weaker stance, ties resolve
@@ -120,7 +120,7 @@ move, the enforcement does not.
     the full rebuild each cycle, so that un-bans happen without manual
     action.
 25. As a developer, I want the report fetch and merge ignorant of the
-    firewall driver — the engine imports no adapter — so that a new
+    firewall driver - the engine imports no adapter - so that a new
     enforcement surface never touches engine code.
 26. As a developer, I want adding a driver to mean implementing the
     firewall seam and registering its factory (its flags, its targets,
@@ -130,7 +130,7 @@ move, the enforcement does not.
     honour and report the rest as declines.
 28. As a firewall-driver author, I want the rolling hash, the
     skip-if-unchanged probe and the counters inside my driver, so that
-    identity reflects my effective rules — what I actually installed,
+    identity reflects my effective rules - what I actually installed,
     after what I dropped.
 29. As a firewall-driver author, I want a generic unreachable-point
     error in the seam contract, so that the engine's warn-and-skip and
@@ -142,7 +142,7 @@ move, the enforcement does not.
     against a fake kernel, so that hash, skip, counters and batch
     construction are verified without privileges.
 32. As a developer, I want the root-gated kernel test kept for encoding
-    only — install, read back, reset, declines-install-nothing — so
+    only - install, read back, reset, declines-install-nothing - so
     that the kernel surface is verified wherever privileges exist.
 33. As a developer, I want tests to assert only which ban rules would be
     installed, when, and what outcomes are reported, so that compilers
@@ -150,7 +150,7 @@ move, the enforcement does not.
 
 ## Implementation Decisions
 
-- **Rename**: the tool is `splint` everywhere operator-facing — binary,
+- **Rename**: the tool is `splint` everywhere operator-facing - binary,
   command, sample systemd unit, consumer doc. No compatibility shims for
   the old name or old flag spellings; the tool is unreleased. The
   compiled artifact keeps the name **Stance** (the GLOSSARY reserves
@@ -172,7 +172,7 @@ move, the enforcement does not.
   stated (all five actions, rate exactly for the limits). Nothing else.
   Exclusions are subtracted engine-side before the seam (they override
   every report); enforcement scope and targeting are deliberately not
-  part of the ban rule — they are driver configuration, because they
+  part of the ban rule - they are driver configuration, because they
   are precisely what differs between enforcement surfaces (a web-server
   driver needs neither nsfs paths nor destination-port prefiltering).
 - **Merge policy**: unchanged as policy, now expressed over the closed
@@ -180,11 +180,11 @@ move, the enforcement does not.
   dimension that combines at ties like the others and never loses to an
   invented ordering. Compilation remains canonical: permuted report
   order yields an identical ruleset.
-- **Firewall-driver interface** (the seam): one method to plan — pure,
-  no I/O, no privileges — returning the effective rules the driver
+- **Firewall-driver interface** (the seam): one method to plan - pure,
+  no I/O, no privileges - returning the effective rules the driver
   would install (with an opaque placement label for logs), the ruleset
   hash, and the features it declines with reasons; one method to apply
-  — replacing the wholly-owned ruleset in a single atomic rebuild,
+  - replacing the wholly-owned ruleset in a single atomic rebuild,
   skipping the install when the plan's hash matches the last hash it
   applied and the owned ruleset still exists (a cheap probe), otherwise
   installing and returning the nonzero counters of the rules it
@@ -207,12 +207,12 @@ move, the enforcement does not.
 - **Identity lives in the driver**: the rolling-hash construction
   (bandaid's: seed 114514, per-item fresh FNV-1a 32-bit, previous hash
   big-endian, fields 0x00-delimited) ships as shared helpers on the
-  seam; each driver folds its own **effective** rules — after declines,
+  seam; each driver folds its own **effective** rules - after declines,
   after whatever it drops. Skip-if-unchanged, the existence probe and
   the counter read-back are driver-internal. Changing driver
   configuration therefore re-enforces (the effective rules changed).
   The known limit stands: the probe is existence, not rule bodies.
-- **nftables driver**: unchanged enforcement — wholly-owned inet table,
+- **nftables driver**: unchanged enforcement - wholly-owned inet table,
   ingress chain at `--nft-hook input|prerouting`, egress chain for
   bandwidth limits matched on destination, reject as inet-neutral
   admin-prohibited, packet/byte meters with the derived one-second
@@ -231,15 +231,15 @@ move, the enforcement does not.
   level, version). A flag set explicitly that belongs to another driver
   is a usage error. The usage output groups flags by owner.
 - **Dry run**: prints the engine's compiled ban rules and the selected
-  driver's plan — effective rules with placement and rate lines,
-  declines, and `hash=<hex>` — from the pure planning step only.
+  driver's plan - effective rules with placement and rate lines,
+  declines, and `hash=<hex>` - from the pure planning step only.
 - **Compatibility**: nftables enforcement is bit-for-bit preserved by
   this refactor; hash values may differ from older builds (the state is
   in-memory only). The known first-match nuance (a meter stance
   exceptioning a broader ban does not exempt in-rate traffic) stays a
-  documented limitation — fixing it is a driver-policy question, not
+  documented limitation - fixing it is a driver-policy question, not
   part of this work.
-- **Consumer doc**: restructured around drivers — a general section
+- **Consumer doc**: restructured around drivers - a general section
   (engine flags, merge policy, lifecycle, dry-run recipe) and one
   section per driver carrying its flags, targeting and scope recipes,
   its Penalty mapping table including its declines, and its caveats
@@ -248,12 +248,12 @@ move, the enforcement does not.
 
 ## Testing Decisions
 
-- **What makes a good test here**: only external behavior — which ban
+- **What makes a good test here**: only external behavior - which ban
   rules reach a driver, what a driver reports installing or declining,
   and what the operator sees in logs and dry-run output. No assertions
   on compiler internals, hash internals, or netlink encoding outside
   the root-gated test.
-- **Seam 1 — the update cycle at the firewall-driver seam** (existing,
+- **Seam 1 - the update cycle at the firewall-driver seam** (existing,
   preferred): fake report endpoint plus the recording stub driver;
   observe the ban rules delivered and the outcomes the engine logs.
   Covers parse tolerances, exclusion subtraction, the merge matrix over
@@ -263,19 +263,19 @@ move, the enforcement does not.
   unreachable-point warn-and-skip), and dry-run text. The report
   document's canonical example remains the base fixture; the suite's
   failing-and-passing-case-per-validation convention holds.
-- **Seam 2 — the nftables driver against a fake kernel** (new; the
+- **Seam 2 - the nftables driver against a fake kernel** (new; the
   highest point at which driver-owned identity is observable without
-  privileges): the driver's planning and apply logic — effective-rule
+  privileges): the driver's planning and apply logic - effective-rule
   derivation, hash folding, the skip matrix (identical twice, changed,
   missing ruleset, probe every cycle), decline reporting, counter
   parsing into hits, and batch construction including the pre-delete
-  probe — driven through a private in-memory kernel stand-in that
+  probe - driven through a private in-memory kernel stand-in that
   records what would be flushed. This replaces, not layers over, the
   real netlink path.
 - **The command run seam is deliberately untested**: command behaviour
   is not frozen by tests. What would be asserted through the command is
-  verified at the module that owns it — fetcher options, policy parsing,
-  driver factories and the registry — and the existing run-seam tests
+  verified at the module that owns it - fetcher options, policy parsing,
+  driver factories and the registry - and the existing run-seam tests
   are removed, not migrated, when the command is rebuilt; each
   validation that deserves one keeps a failing-and-passing pair at its
   owning module's seam.
@@ -289,14 +289,14 @@ move, the enforcement does not.
 
 ## Out of Scope
 
-- Any firewall driver beyond nftables — the seam exists so the next one
+- Any firewall driver beyond nftables - the seam exists so the next one
   is a new module, but nothing but the nftables driver ships here.
 - Per-run mixing of drivers or per-enforcement-point driver selection.
 - Any driver substituting, weakening or tuning a stated Penalty.
 - Fixing the first-match meter exception nuance.
 - In-kernel self-expiry of bans, rule-body tampering detection,
   machine-readable metrics, burst configurability, per-reason
-  enforcement policy — unchanged from the original splint spec's
+  enforcement policy - unchanged from the original splint spec's
   exclusions.
 - Any change to the bandage daemon or the published report document:
   the contract is untouched and stays the integration surface.

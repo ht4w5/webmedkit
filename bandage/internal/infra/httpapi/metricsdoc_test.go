@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Pins docs/metrics.md — the published metrics contract — to the
+// Pins docs/metrics.md - the published metrics contract - to the
 // implementation, following the report doc's precedent (app/reportdoc_test.go).
 
 // Resolved relative to this package's directory.

@@ -3,8 +3,8 @@
 **What to build:** An operator configures the ingress scope
 (`--nft-ingress-daddr`, `--nft-ingress-dport`, `--nft-ingress-l4proto`)
 and the egress scope (`--nft-egress-saddr`, `--nft-egress-sport`,
-`--nft-egress-l4proto`) — comma lists or repeats, bare addresses as
-host prefixes, protocols defaulting to `tcp,udp` — and both ban
+`--nft-egress-l4proto`) - comma lists or repeats, bare addresses as
+host prefixes, protocols defaulting to `tcp,udp` - and both ban
 directions enforce correctly. Ingress rules match their scope as
 destination fields and the Target as source; egress rules match their
 scope as source fields and the Target as destination; the protocol gate
@@ -32,7 +32,7 @@ sides of the translation.
       direction's scope (an unscoped ban covers tcp and udp traffic
       only)
 - [x] A ban rule's family reachability is decided by the installing
-      direction's scope alone — an ingress-only scope never constrains
+      direction's scope alone - an ingress-only scope never constrains
       egress rules and vice versa
 - [x] A change to either scope re-enforces (the ruleset hash folds both
       scopes)

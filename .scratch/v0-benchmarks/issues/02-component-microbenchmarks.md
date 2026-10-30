@@ -1,4 +1,4 @@
-# 02 — Component microbenchmarks (spec Phase 1)
+# 02 - Component microbenchmarks (spec Phase 1)
 
 Type: task
 Status: resolved
@@ -44,13 +44,13 @@ affecting interpretation: fixed wall clock everywhere, zerolog.Nop()
 for the store (eviction log rendering excluded), evaluation event times
 advance one second per op (cycled timestamps freeze the leaky bucket's
 LastUpdate and would let the match-never fixtures creep into
-overflow — pinned by `TestBenchChainsMatchTheirNames` and
+overflow - pinned by `TestBenchChainsMatchTheirNames` and
 `TestEvaluateBenchScenarios`), report-rule fixtures are single-rule
 chains (a report rule is terminal), and the sqlite insert variant hands
 out pre-generated distinct targets with the timer stopped.
 
 Measured with `make bench` (go1.27.0, linux/amd64, Intel Core Ultra 9
-185H, default GOMAXPROCS=22, default benchtime, single run — the
+185H, default GOMAXPROCS=22, default benchtime, single run - the
 -count=10 benchstat hygiene is ticket 04's).
 
 ### Measured (ns/op, B/op, allocs/op)
@@ -131,24 +131,24 @@ BenchmarkProgressBump/serial-22      49.06 ns/op   112 B/op   1 allocs/op   2038
 BenchmarkProgressBump/parallel-22  106.9  ns/op   112 B/op   1 allocs/op    9354212 lines/s
 ```
 
-### Reading (observations only — verdicts belong to ticket 04)
+### Reading (observations only - verdicts belong to ticket 04)
 
 The numbers speak to every hypothesis except H5 (ingest handoff,
 ticket 03's), most sharply to H4 and H2: a single sqlite report upsert
 costs 25µs (`:memory:`) to 75µs (file), so with rules matching on every
 event the sqlite-sink evaluation runs 114.5µs/event against 0.73µs when
-no rule ever matches — the write path is two to three orders of
+no rule ever matches - the write path is two to three orders of
 magnitude above every other per-line stage combined. `progress.bump` costs 49ns
 and one channel allocation per line serial, and parallel throughput
 (9.4M lines/s) lands *below* the serial rate (20.4M lines/s) as all
-workers serialize on the global mutex and per-line channel churn — the
+workers serialize on the global mutex and per-line channel churn - the
 shape H2 predicts for a flattening worker-scaling curve. H1's
 allocation claim is confirmed outright: parse allocates 23–32 objects
 and 0.7–1.5KB per line (1.8µs minimal / 2.9µs full, ~60% more for the
 full line shape), and `Store.Update` allocates exactly one 32B object
 per call (the `ns+"\x00"+key` concat). H3 shows in the contention
 numbers: hot-key parallel update is 3.5× its serial cost (single-shard
-mutex plus the shared stats atomic — even uniform keys gain nothing
+mutex plus the shared stats atomic - even uniform keys gain nothing
 from 22 goroutines), and forced eviction roughly doubles the per-call
 cost with two more allocations. H6's O(rules) growth is clean (chains
 cost ~12ns/rule, 1.2µs at 100 rules; leaves 1–6ns with zero
@@ -156,12 +156,12 @@ allocations) but negligible next to parse and store costs at realistic
 rule counts. The read path scales at ~6–8µs and ~26 allocs per row
 (10 rows ≈ 80µs, 10k rows ≈ 64ms).
 
-**Code-review pass note** — the Evaluate sub-benchmarks were renamed
+**Code-review pass note** - the Evaluate sub-benchmarks were renamed
 (`fires`/`never-fires` → `match-every`/`match-never`, GLOSSARY:
 Match/Trigger) and their numbers above were refreshed by the
 code-review pass; every other recorded block is unchanged (those
 benchmarks kept their names, semantics and results). The pass also
-completed the stage coverage this table left open — measured the same
+completed the stage coverage this table left open - measured the same
 way (single run, `-benchmem`, ns/op · B/op · allocs/op):
 `BenchmarkIngestForward/{tcp,unixgram}` (syslog Source run loop, no
 evaluation) 1600 · 3205 · 17 and 1847 · 1909 · 14;

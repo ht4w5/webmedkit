@@ -1,4 +1,4 @@
-# 01 — Benchmark harness and fixtures
+# 01 - Benchmark harness and fixtures
 
 Type: task
 Status: resolved
@@ -39,7 +39,7 @@ by tests/benchmarks, never by production code):
   host, server, duration plus an unknown field). Key distributions over
   256-entry path and client-IP pools: `DistUniform`, `DistZipf` (weight
   1/(rank+1) via inverse-transform over a fixed CDF), and `DistHot`
-  (every line carries the `HotPath`/`HotIP` pair — one tracker-cache
+  (every line carries the `HotPath`/`HotIP` pair - one tracker-cache
   key, hence single-shard contention; the pair is also the Zipfian
   head). Generation is deterministic by construction: a self-contained
   splitmix64 PRNG, so the same seed yields byte-identical corpora on

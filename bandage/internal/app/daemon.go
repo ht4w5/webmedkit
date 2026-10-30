@@ -372,7 +372,7 @@ func (d *Daemon) Stats() httpapi.Stats {
 }
 
 // goRuntime is the standard-library httpapi.RuntimeSource adapter; every
-// field is read fresh per call — scrape time only, nothing cached.
+// field is read fresh per call - scrape time only, nothing cached.
 type goRuntime struct{}
 
 func (goRuntime) Runtime() httpapi.Runtime {

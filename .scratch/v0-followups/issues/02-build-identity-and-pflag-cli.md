@@ -31,5 +31,5 @@ Notes:
 - `-l`/`-w` are parsed and resolved here; their behavior lands in
   tickets 03/04.
 - Legacy `bandage -check` parses under pflag as `-c heck` (an opaque
-  config error) — accepted: `-c`'s shorthand semantics are spec'd and the
+  config error) - accepted: `-c`'s shorthand semantics are spec'd and the
   word is retired from the surface.

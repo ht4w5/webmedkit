@@ -1,4 +1,4 @@
-# mem-mn1.out — alloc_objects (top) then alloc_space (top)
+# mem-mn1.out - alloc_objects (top) then alloc_space (top)
 File: app.test
 Build ID: 8e91155ddfe4fb40ade4e74b4ed31adf460284bb
 Type: alloc_objects

@@ -412,7 +412,7 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 	}
 }
 
-// wantRule is one expected kernel rule: the match prefix in order —
+// wantRule is one expected kernel rule: the match prefix in order -
 // family gate, scope (protocol gate, ports, addresses), target match, counter.
 type wantRule struct {
 	proto   byte

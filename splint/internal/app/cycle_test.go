@@ -130,7 +130,7 @@ func canonicalDoc(t *testing.T) string {
 }
 
 // fixture builds a document body from the canonical example via a
-// generic decode/mutate/encode — every fixture descends from it.
+// generic decode/mutate/encode - every fixture descends from it.
 func fixture(t *testing.T, mutate func(t *testing.T, doc map[string]any)) string {
 	t.Helper()
 	doc := decodeFixture(t, canonicalDoc(t))
@@ -863,7 +863,7 @@ func TestUpdateCycleMergePolicy(t *testing.T) {
 			wantRules: []firewall.BanRule{dropRule("203.0.113.7/32")},
 		},
 		{
-			name: "tied limits of different actions combine — one meter per dimension",
+			name: "tied limits of different actions combine - one meter per dimension",
 			reports: []reportSpec{
 				{target: "203.0.113.7/32", action: domain.PenaltyLimitBandwidth, rate: json.Number("5000")},
 				{target: "203.0.113.7/32", action: domain.PenaltyLimitPktRate, rate: json.Number("100")},
@@ -938,7 +938,7 @@ func TestUpdateCycleMergePolicy(t *testing.T) {
 			wantRules: []firewall.BanRule{banRule(firewall.StanceLimitReqRate, ratePtr(100), "203.0.113.7/32")},
 		},
 		{
-			name: "request rates combine with the other limit dimensions — never lost to an invented ordering",
+			name: "request rates combine with the other limit dimensions - never lost to an invented ordering",
 			reports: []reportSpec{
 				{target: "203.0.113.7/32", action: domain.PenaltyLimitBandwidth, rate: json.Number("5000")},
 				{target: "203.0.113.7/32", action: domain.PenaltyLimitReqRate, rate: json.Number("30")},
@@ -1131,7 +1131,7 @@ func TestUpdateCycleSubtractsExclusions(t *testing.T) {
 			wantRules: []firewall.BanRule{banRule(firewall.StanceLimitBandwidth, ratePtr(1000000), "2001:db8:8000::/33")},
 		},
 		{
-			// The split compiles to one rule per prefix length — one
+			// The split compiles to one rule per prefix length - one
 			// equal-length set per ban rule (same coverage).
 			name:    "an exclusion inside the Target splits it into residual prefixes",
 			exclude: []string{"203.0.113.64/26"},
@@ -1326,7 +1326,7 @@ func TestDryRunPrintsTheRulesetHash(t *testing.T) {
 	}
 }
 
-// Hash values are compared to each other only — never pinned — so the
+// Hash values are compared to each other only - never pinned - so the
 // rolling-hash construction stays refactorable.
 var hashPattern = regexp.MustCompile(`"hash":"([0-9a-f]+)"`)
 

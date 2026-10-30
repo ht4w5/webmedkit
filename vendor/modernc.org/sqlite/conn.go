@@ -342,8 +342,8 @@ func (c *conn) columnName(pstmt uintptr, n int) (string, error) {
 // ColumnInfo returns column information for query.
 // It does not execute query.
 //
-// For output columns that are expressions, function calls, or constants —
-// or otherwise do not resolve to a single column — the DatabaseName,
+// For output columns that are expressions, function calls, or constants -
+// or otherwise do not resolve to a single column - the DatabaseName,
 // TableName, and OriginName fields of the corresponding ColumnInfo are
 // empty, per the sqlite3 contract.
 //

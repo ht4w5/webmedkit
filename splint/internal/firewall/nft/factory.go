@@ -51,7 +51,7 @@ func NewFactory() *Factory {
 	}
 }
 
-// Name is the driver's registry name — the --firewall value that
+// Name is the driver's registry name - the --firewall value that
 // selects it.
 func (f *Factory) Name() string { return "nftables" }
 
@@ -110,8 +110,8 @@ func parseScope(flags scopeFlags) (Scope, error) {
 	scope.L4Protos = dedup(scope.L4Protos)
 	scope.Ports = dedup(scope.Ports)
 	scope.Addrs = dedup(scope.Addrs)
-	// After dedup, any overlap is ambiguous — CIDR blocks are disjoint
-	// or nested — so enforcement would not match the command line.
+	// After dedup, any overlap is ambiguous - CIDR blocks are disjoint
+	// or nested - so enforcement would not match the command line.
 	for i, a := range scope.Addrs {
 		for _, b := range scope.Addrs[i+1:] {
 			if a.Overlaps(b) {
@@ -137,7 +137,7 @@ func dedup[T comparable](values []T) []T {
 	return out
 }
 
-// parseL4Protos accepts strict lowercase tcp or udp — the only
+// parseL4Protos accepts strict lowercase tcp or udp - the only
 // protocols a ban rule can gate on.
 func parseL4Protos(flagName string, values []string) ([]byte, error) {
 	protos := make([]byte, 0, len(values))
@@ -182,7 +182,7 @@ func parseAddrs(flagName string, values []string) ([]netip.Prefix, error) {
 }
 
 // Open expands the configured targeting into one driver instance per
-// enforcement point — one per nsfs path, the current namespace when
+// enforcement point - one per nsfs path, the current namespace when
 // none is configured. Opening is lazy: no I/O happens until a driver
 // method runs, so --dry-run needs no privileges.
 func (f *Factory) Open() ([]firewall.Point, error) {

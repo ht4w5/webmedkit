@@ -11,7 +11,7 @@ import (
 // the factories registered for this binary plus the selection
 // semantics of the command surface (see Select) and the
 // flag-ownership grouping the usage output renders (see Groups). One
-// firewall driver serves a whole run — no per-point driver mixing.
+// firewall driver serves a whole run - no per-point driver mixing.
 type Registry struct {
 	factories []Factory
 	groups    []Group // flag ownership in registration order, recorded by Bind
@@ -40,7 +40,7 @@ func (r *Registry) Names() []string {
 }
 
 // Bind binds every factory's flag group to fs and records which flag
-// names each factory owns — the grouping the usage output renders and
+// names each factory owns - the grouping the usage output renders and
 // the ownership Select refuses unselected-driver flags by.
 func (r *Registry) Bind(fs *pflag.FlagSet) {
 	r.groups = nil
@@ -62,8 +62,8 @@ func (r *Registry) Bind(fs *pflag.FlagSet) {
 // Groups returns the flag groups by owner, in registration order.
 func (r *Registry) Groups() []Group { return r.groups }
 
-// Select returns the factory the --firewall value names — the one
-// driver serving the whole run — refusing an unknown value with the
+// Select returns the factory the --firewall value names - the one
+// driver serving the whole run - refusing an unknown value with the
 // known drivers listed, and refusing an explicitly set flag belonging
 // to an unselected driver (pflag's Changed semantics).
 func (r *Registry) Select(name string, fs *pflag.FlagSet) (Factory, error) {

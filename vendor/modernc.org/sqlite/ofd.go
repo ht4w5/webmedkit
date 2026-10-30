@@ -25,7 +25,7 @@ var ErrOFDLockingTooLate = errors.New(
 // OFDLocking switches SQLite between POSIX record locks (the default) and
 // Linux Open File Description (OFD) locks for database files, process-wide.
 // It returns the setting previously in effect; when err is non-nil the
-// returned prev is meaningless — use [OFDLockingEnabled] for the current
+// returned prev is meaningless - use [OFDLockingEnabled] for the current
 // state.
 //
 // A POSIX record lock belongs to the (process, inode) pair: the kernel drops
@@ -35,7 +35,7 @@ var ErrOFDLockingTooLate = errors.New(
 //	f, _ := os.Open(dbPath) // hash, back up, inspect, ...
 //	f.Close()
 //
-// anywhere in the process — a third-party library included — therefore
+// anywhere in the process - a third-party library included - therefore
 // silently strips SQLite's own transaction locks and leaves the database
 // unprotected against other processes. An OFD lock belongs to the open file
 // description through which it was placed and survives such a close. OFD
@@ -56,7 +56,7 @@ var ErrOFDLockingTooLate = errors.New(
 // environment variable, which enables OFD locking when set to anything but
 // the empty string or a value starting with "0" and which the library reads
 // once, at initialization time, from the environment the process started
-// with — to switch from Go, prefer this call over os.Setenv.
+// with - to switch from Go, prefer this call over os.Setenv.
 //
 // OFD locks exist on Linux only; everywhere else OFDLocking returns
 // [ErrOFDLockingUnavailable]. On Linux kernels older than 3.15, and on
@@ -69,8 +69,8 @@ var ErrOFDLockingTooLate = errors.New(
 // locks coordinating WAL mode through the -shm file remain POSIX locks. And
 // one visible behavior change comes with the immunity: code in the same
 // process that takes fcntl record locks of its own on a database file used
-// to share ownership with SQLite's locks — never conflicting, while quietly
-// destroying them — whereas with OFD locking enabled such locks conflict
+// to share ownership with SQLite's locks - never conflicting, while quietly
+// destroying them - whereas with OFD locking enabled such locks conflict
 // with SQLite's and fail loudly instead.
 //
 // OFDLocking is safe for concurrent use.

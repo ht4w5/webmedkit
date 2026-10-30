@@ -22,10 +22,10 @@ immediately.
 ## Comments
 
 Resolved on branch `ticket/02-ambiguous-scopes`. What landed: the
-factory's `parseScope` now resolves each direction's scope as a set —
+factory's `parseScope` now resolves each direction's scope as a set -
 duplicate values (ports, protocols, addresses, including a bare
 address and its host prefix) are deduplicated silently, keeping first
-occurrences — and refuses any remaining overlapping address pair
+occurrences - and refuses any remaining overlapping address pair
 within one scope (`netip.Prefix.Overlaps`) at startup with
 `<flag>: overlapping address prefixes (got <a> and <b>)`, naming the
 flag and both values. Equal prefixes are duplicates, not overlaps;

@@ -2,15 +2,15 @@
 
 **What to build:** One report write per (rule, Target) per report
 lifetime. While a report for (rule, Target) is alive, further Triggers
-for it write nothing — the rule keeps matching and all its actions keep
-running, and the tracker still empties — but the report is not written
+for it write nothing - the rule keeps matching and all its actions keep
+running, and the tracker still empties - but the report is not written
 again (ADR 0008). Deleting or expiring the report re-arms writing: the
 next Trigger writes (immediately for tracker-less rules, after a fresh
 episode for tracker rules). Reasons keep accruing across rules, and
-flagged Targets' events keep enriching and feeding other trackers —
+flagged Targets' events keep enriching and feeding other trackers -
 analysis stays complete, bandage stays an analyzer.
 
-**Blocked by:** 01 (Prefactor — one report lifecycle module)
+**Blocked by:** 01 (Prefactor - one report lifecycle module)
 
 **Status:** resolved
 
@@ -35,14 +35,14 @@ analysis stays complete, bandage stays an analyzer.
 
 ## Answer
 
-While a report for (rule, Target) is alive its write is suppressed — one
-write per (rule, Target) per report lifetime — and deleting or expiring
+While a report for (rule, Target) is alive its write is suppressed - one
+write per (rule, Target) per report lifetime - and deleting or expiring
 the report re-arms writing. Changed:
 
 - `bandage/internal/domain/report/report.go`: the Service owns the live-report
   set (in-memory map keyed (rule, Target) → expiry; the report table is
   the correctness source). `Trigger` suppresses the write while the
-  report is alive and returns nil — the report action completed, so the
+  report is alive and returns nil - the report action completed, so the
   tracker still empties (ticket 02's hand-off; ADR 0008: reset on every
   Trigger). The key is reserved before the write, so concurrent Triggers
   for one (rule, Target) produce at most one write (spec story 14); a
@@ -50,13 +50,13 @@ the report re-arms writing. Changed:
   (story 5). Aliveness is `expires_at >` the Trigger's wall time
   (`rec.UpdatedAt`): a report is alive until expiry or deletion
   (GLOSSARY **Report**), so an expired report stops suppressing even
-  before the sweeper runs — restart re-derivation and steady state agree.
+  before the sweeper runs - restart re-derivation and steady state agree.
   `Delete`/`DeleteExpired` drop the matching keys (re-arm, stories 9/10);
   `Rebuild(ctx, now)` supplants the set from `List` at startup (story
   13).
 - `bandage/internal/app/daemon.go`: `Start` rebuilds before the workers start.
 - `bandage/internal/app/rules.go`: tracker-less `report` actions are legal (the
-  "report requires a tracker" gate removed — the spec decides tracker-
+  "report requires a tracker" gate removed - the spec decides tracker-
   less rules stay legal, stories 12/29); suppression alone bounds their
   writes. The evaluation traversal is untouched beyond this.
 - `bandage/internal/infra/httpapi/httpapi.go`: the delete-promise doc names the
@@ -74,7 +74,7 @@ delete/expiry re-arm, expiry alone re-arming pre-sweep, restart rebuild
 still enriching Filesize and feeding another rule's tracker with nothing
 dropped, replay rule at (rule, Target) grain). Re-modeled, intent kept:
 `TestE2EReportUpsertIdentity`, `TestE2EExpiresAtRecomputedOnWrite` (was
-`…RefreshedUnconditionally` — a live report is never refreshed now),
+`…RefreshedUnconditionally` - a live report is never refreshed now),
 `TestE2EEvictedBucketAccumulatesFresh`, `TestE2EFilterGatesTracker`,
 `TestE2ETriggerOncePerVolumeOfTraffic`,
 `TestE2EConcurrentTriggersLeaveClearedBucket`,
@@ -82,20 +82,20 @@ dropped, replay rule at (rule, Target) grain). Re-modeled, intent kept:
 without tracker rejected" case → accepted.
 
 Key facts: writes stay synchronous; suppression lives in report.Service
-(domain-purity lint green — stdlib only). A write over an
+(domain-purity lint green - stdlib only). A write over an
 expired-but-stored row keeps the row's created_at (upsert identity
-unchanged — ticket 04's contract). The Trigger's wall time is
+unchanged - ticket 04's contract). The Trigger's wall time is
 `rec.UpdatedAt`, so unit callers must set it on the report.
 
 Context pointers: GLOSSARY **Trigger** and **Report** ("alive until
-expiry or deletion"); ADR 0008 (suppression gates only the write —
+expiry or deletion"); ADR 0008 (suppression gates only the write -
 reset on every Trigger), ADR 0007 (relaxed-ordering pool); spec
 Implementation Decisions "Suppression lives in the report write path" +
 stories 2–6, 9–15, 17; notes /tmp/bandage-v0-hot-path-notes/
 (report-lifecycle.md, test-harness.md).
 
 Implemented on integration branch `feat/v0-hot-path` (merge commit
-`61d1423`; cross-ticket code-review fixes through `78386ca` — contention
+`61d1423`; cross-ticket code-review fixes through `78386ca` - contention
 handoff so stories 4/5/14 all hold). Context: spec `../spec.md`,
 foundations `01-prefactor-report-lifecycle.md` /
 `02-trigger-empties-tracker.md`.

@@ -1,8 +1,8 @@
 # 04: Worker pool and daemon lifetime context
 
-**What to build:** The daemon keeps up with a busy log stream and shuts down predictably. `pipeline.workers` (default: the machine's CPU count) configures N pipeline goroutines and `-w` overrides it with the usual precedence; every received line is processed exactly once across workers, tracker state for a shared Target stays consistent under concurrency, and `pipeline.workers: 1` gives strictly ordered processing for reproducible runs. SIGINT/SIGTERM drains in-flight work first — report upserts complete — and shutdown is bounded even if a store call hangs.
+**What to build:** The daemon keeps up with a busy log stream and shuts down predictably. `pipeline.workers` (default: the machine's CPU count) configures N pipeline goroutines and `-w` overrides it with the usual precedence; every received line is processed exactly once across workers, tracker state for a shared Target stays consistent under concurrency, and `pipeline.workers: 1` gives strictly ordered processing for reproducible runs. SIGINT/SIGTERM drains in-flight work first - report upserts complete - and shutdown is bounded even if a store call hangs.
 
-**Blocked by:** 02 — Build identity and the pflag command line
+**Blocked by:** 02 - Build identity and the pflag command line
 
 **Status:** resolved
 

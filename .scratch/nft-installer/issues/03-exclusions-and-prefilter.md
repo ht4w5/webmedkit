@@ -3,11 +3,11 @@
 **What to build:** enforcement can never reach traffic the operator never
 intended to touch. Excluded prefixes are subtracted from every ban set,
 overriding every report, and every ban rule leads with the service
-prefilter — the protected destinations' ports and addresses — so a ban
+prefilter - the protected destinations' ports and addresses - so a ban
 applies only to service traffic, never to SSH, monitoring, or unrelated
 forwarded traffic.
 
-**Blocked by:** 02 — Kernel install: the nftables driver
+**Blocked by:** 02 - Kernel install: the nftables driver
 
 **Status:** resolved
 

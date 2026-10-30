@@ -1,7 +1,7 @@
 # HANDOFF: no page-retention hysteresis in `Allocator.UintptrFree`
 
 **Status:** resolved 2026-08-06. Retention is now unconditional and bounded to
-one empty page per size class — design option 1 below — combined with the
+one empty page per size class - design option 1 below - combined with the
 explicit flush of option 3, `(*Allocator).Trim`. The tests keep their full
 `Allocs`/`Mmaps`/`Bytes`/`regs` assertions by calling `Trim` first; moving them
 after `Close` would have made them vacuous, since `Close` ends with
@@ -18,7 +18,7 @@ rationale. It describes the code as of `0a6f754`.
 `UintptrFree` returns a shared page to the OS the moment its last live slot is
 freed. There is no hysteresis, so an allocation pattern whose live count for a
 size class repeatedly crosses zero pays a full `mmap`/`munmap` round trip per
-turnover — in the degenerate case, **one `mmap` + three `munmap`s per single
+turnover - in the degenerate case, **one `mmap` + three `munmap`s per single
 alloc/free pair**. Decide whether this allocator should retain empty pages, and
 under what policy.
 
@@ -46,7 +46,7 @@ of that size class must `newSharedPage` → `mmap` again.
 Two amplifiers make each turnover cost more than one syscall pair:
 
 - `mmap(size)` (`mmap_unix.go:29`) asks the kernel for `size + pageSize` so it
-  can align the result, then unmaps the misaligned head and the tail — up to
+  can align the result, then unmaps the misaligned head and the tail - up to
   **two trim `munmap`s per `mmap`**, on top of the one that releases the page.
   A 64 KiB page therefore costs a 128 KiB kernel request. Measured totals below
   show all three `munmap`s in the synthetic case and an average of two under the
@@ -58,7 +58,7 @@ Two amplifiers make each turnover cost more than one syscall pair:
 ## Why it has not bitten before
 
 Long-lived consumers (sqlite et al.) keep a working set alive, so `used` rarely
-reaches 0 for a hot size class — the page stays mapped and the free list does its
+reaches 0 for a hot size class - the page stays mapped and the free list does its
 job. The pathology needs a consumer that repeatedly *drains* a size class.
 
 ## Standalone reproducer
@@ -131,7 +131,7 @@ Syscall counts and profile for DeltaBlue alone:
 
 72% of a JavaScript benchmark's runtime in `mmap`/`munmap`. Note the third
 column of the score table: with retention the *new* QuickJS overtakes the old one
-everywhere, which is the expected outcome — the arena allocator is a win once it
+everywhere, which is the expected outcome - the arena allocator is a win once it
 stops thrashing.
 
 ## The experiment (proof of diagnosis, NOT a shippable patch)
@@ -168,7 +168,7 @@ in practice only for classes actually used).
 if alloc.Allocs != 0 || alloc.Mmaps != 0 || alloc.Bytes != 0 || len(alloc.regs) != 0 {
 ```
 
-Retention breaks `Mmaps`, `Bytes` and `len(regs)` by construction — visible in
+Retention breaks `Mmaps`, `Bytes` and `len(regs)` by construction - visible in
 the reproducer's end-state column, and `go test ./...` fails with the patch
 applied. **This is a policy conflict, not a leak**: `Close()` still walks
 `a.regs` and unmaps everything, so nothing escapes the allocator's lifetime. But

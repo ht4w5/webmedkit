@@ -1,6 +1,6 @@
 # Reports carry an advisory penalty
 
-Every report carries a **Penalty** — the enforcement stance its rule's
+Every report carries a **Penalty** - the enforcement stance its rule's
 report action recommends for the target: the closed vocabulary `drop`,
 `reject`, `limit-pkt-rate`, `limit-bandwidth`, `limit-req-rate`, the
 limit penalties carrying a `rate` in the unit their name states
@@ -8,12 +8,12 @@ limit penalties carrying a `rate` in the unit their name states
 over the target). The penalty is required on the report action and
 travels with the report into the canonical report document.
 
-The penalty is advice: how a report consumer applies it — or whether to
-at all — is deliberately out of bandage's control, so bandage defines
+The penalty is advice: how a report consumer applies it - or whether to
+at all - is deliberately out of bandage's control, so bandage defines
 the vocabulary's intent (drop discards the target's traffic silently,
 reject refuses it with an error signal, limits throttle it to `rate`)
 but prescribes no mechanics, and validates the penalty for
-well-formedness only — never against the rule's tracker or reason. This
+well-formedness only - never against the rule's tracker or reason. This
 keeps ADR 0004 unchanged: bandage produces reports and never ban rules;
 the penalty is metadata that downstream tooling may fold into its ban
 rules.

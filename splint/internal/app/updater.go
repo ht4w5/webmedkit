@@ -37,7 +37,7 @@ func ClampInterval(d time.Duration) (time.Duration, bool) {
 // Updater runs the fetch-compile-apply update cycle at every
 // enforcement point: a startup test install before the loop, the last
 // installed rules kept on a failed cycle, and a reset on clean exit.
-// The engine carries no hash or skip logic — each driver owns its
+// The engine carries no hash or skip logic - each driver owns its
 // identity and the engine logs what it reports.
 type Updater struct {
 	fetcher  *Fetcher
@@ -96,7 +96,7 @@ func (u *Updater) applyAll(rules []firewall.BanRule) error {
 		if out.Skipped {
 			u.log.Info().Str("point", name).Str("hash", hash).Msg("ban rules unchanged; skipping install")
 		} else {
-			// Hits are the nonzero counters of the rules just replaced —
+			// Hits are the nonzero counters of the rules just replaced -
 			// the previous apply's input rules, by index.
 			for _, h := range out.Hits {
 				u.log.Info().
@@ -108,7 +108,7 @@ func (u *Updater) applyAll(rules []firewall.BanRule) error {
 			}
 			u.log.Info().Str("point", name).Int("rules", len(rules)).Int("declined", len(out.Declined)).Str("hash", hash).Msg("installed ban rules")
 		}
-		// Declines are lost enforcement, logged per rule and feature —
+		// Declines are lost enforcement, logged per rule and feature -
 		// never silently dropped.
 		for _, d := range out.Declined {
 			u.log.Warn().
@@ -122,7 +122,7 @@ func (u *Updater) applyAll(rules []firewall.BanRule) error {
 	return errors.Join(failed...)
 }
 
-// skipUnreachable warns and swallows firewall.ErrUnreachable — one
+// skipUnreachable warns and swallows firewall.ErrUnreachable - one
 // dead container cannot halt enforcement everywhere or spoil a clean
 // shutdown. It reports whether the failure was swallowed.
 func (u *Updater) skipUnreachable(err error, name, msg string) bool {
@@ -152,7 +152,7 @@ func (u *Updater) resetAll() error {
 
 // DryRun runs one fetch-compile cycle and writes the compiled ban rules
 // to w as indented JSON, then the selected driver's plan, instead of
-// installing: pure planning only — no enforcement surface, no privileges.
+// installing: pure planning only - no enforcement surface, no privileges.
 func (u *Updater) DryRun(ctx context.Context, w io.Writer) error {
 	rules, _, err := u.load(ctx)
 	if err != nil {

@@ -8,6 +8,6 @@ needed, it arrives as a separate Prometheus-format endpoint; nothing
 promises that `/stats`'s shape survives field additions.
 
 Consequences: this deliberately amends spec story 35 ("`GET /ping` … and
-nothing else exposed") — `/stats` is a read-only ops endpoint on the same
+nothing else exposed") - `/stats` is a read-only ops endpoint on the same
 unauthenticated listener as `/reports`. Scrapers built on it are
 unsupported by design.
