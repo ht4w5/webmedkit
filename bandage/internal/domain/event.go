@@ -26,10 +26,8 @@ type Event struct {
 	// ContentLength is the response's Content-Length as the server
 	// reported it; 0 means absent or unusable.
 	ContentLength int64
-	// ContentRangeTotal is the file's total size as the response's
-	// Content-Range reported it (the complete-length); 0 means absent
-	// or unusable. The parser extracts the total - header syntax never
-	// reaches the domain.
+	// ContentRangeTotal is the file's total size extracted from the
+	// response's Content-Range; 0 means absent or unusable.
 	ContentRangeTotal int64
 
 	// Derived fields, set by enrichment.

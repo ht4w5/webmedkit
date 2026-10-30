@@ -170,20 +170,16 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	}
 	ev.SentBytes = sent
 
-	// clen is optional; absent, null and "" (header not sent) mean no size
-	// information. When present it must be a non-negative integer, strict
-	// like sent: a malformed value drops the line.
+	// clen is optional (absent, null, "" = no size information); when present
+	// it must be a non-negative integer, strict like sent - malformed drops the line.
 	if raw = fields.Clen; raw.present && !isNull(raw) {
 		if ev.ContentLength, err = parseContentLength(raw); err != nil {
 			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
 		}
 	}
 
-	// crange is optional and parsed leniently: "bytes <a>-<b>/<total>"
-	// and "bytes */<total>" yield the file's total; a "*" total and
-	// anything unparsable yield 0 (no size information). Unusual
-	// Content-Range values never drop the line - they degrade. Header
-	// syntax stays here; the domain sees only the extracted total.
+	// crange is optional and lenient: "bytes <a>-<b>/<total>" and "bytes
+	// */<total>" yield the total; anything else yields 0 and never drops the line.
 	if raw = fields.Crange; raw.present && !isNull(raw) {
 		ev.ContentRangeTotal = parseContentRangeTotal(raw)
 	}
@@ -322,10 +318,8 @@ func parseInt(v fieldValue) (int64, error) {
 	return n, nil
 }
 
-// parseContentLength parses the clen field: the log format carries it as
-// a quoted integer string ("" when the header was not sent); a bare
-// number is accepted too. Empty means absent and only non-negative
-// integers are valid.
+// parseContentLength parses the clen field: a quoted integer string ("" =
+// header not sent) or bare number; only non-negative integers are valid.
 func parseContentLength(v fieldValue) (int64, error) {
 	text := v.text()
 	if text == "" {
@@ -341,11 +335,8 @@ func parseContentLength(v fieldValue) (int64, error) {
 	return n, nil
 }
 
-// parseContentRangeTotal extracts the file's total size from the crange
-// field's Content-Range header value: "bytes <a>-<b>/<total>" and "bytes
-// */<total>" yield the total (the unit is case-insensitive per HTTP); a
-// "*" total and anything unparsable yield 0. Lenient by contract: no
-// value is ever invalid enough to drop the line.
+// parseContentRangeTotal extracts the file's total from the crange field's
+// Content-Range value; anything unparsable yields 0 and never drops the line.
 func parseContentRangeTotal(v fieldValue) int64 {
 	text := v.text()
 	const unit = "bytes "

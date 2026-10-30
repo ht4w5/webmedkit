@@ -21,14 +21,8 @@ func enrichmentFilterConfig(t *testing.T, src string) Enrichment {
 	return Enrichment{Filter: f}
 }
 
-// TestE2EEnrichmentFilterScopesTheEnrichmentPath: the Filter gates the
-// enrichment path wholly. Scoped to one path prefix, traffic outside it
-// flows through evaluation with default derived fields and touches no
-// enrichment state - zero cache updates, zero observations - while
-// scoped-in traffic enriches exactly as without the gate. The /stats
-// tracker-cache counters are the enrichment-state touch: the replay
-// rule skips unknown sizes without a cache touch, so every counted
-// update below belongs to enrichment.
+// TestE2EEnrichmentFilterScopesTheEnrichmentPath: scoped-out traffic
+// touches no enrichment state; scoped-in enriches as without the gate.
 func TestE2EEnrichmentFilterScopesTheEnrichmentPath(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -44,9 +38,8 @@ chains:
 		c.Enrichment = enrichmentFilterConfig(t, `path prefix "/files/"`)
 	})
 
-	// Five partial downloads under /files/ warm the estimate to 1000;
-	// each takes one enrichment update and (from the 5th) one tracker
-	// update, creating both records.
+	// Five partial downloads under /files/ warm the estimate to 1000.
+	// tracker_cache counts the enrichment touch: unknown sizes skip the tracker.
 	for i := 0; i < 5; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/files/a.iso", 200, 500, "1000"))
 	}
@@ -58,10 +51,8 @@ chains:
 		}
 	}
 
-	// Scoped-out traffic on /other/b.iso: even eligible-shaped events
-	// (a full transfer carrying its length) touch nothing - the gate is
-	// wholly out. The rules still evaluate them; the replay rule sees
-	// unknown sizes and stays blind.
+	// Scoped-out traffic on /other/b.iso: even eligible-shaped events touch
+	// nothing - the gate is wholly out; the replay rule stays blind.
 	for _, line := range []string{
 		nginxLineClen("1734345939", "203.0.113.7", "GET", "/other/b.iso", 200, 500, "1000"),
 		nginxLineClen("1734345940", "203.0.113.7", "GET", "/other/b.iso", 200, 500, "1000"),
@@ -110,9 +101,7 @@ chains:
 }
 
 // TestE2EEnrichmentFilterUnmatchedEventsCarryDefaultDerivedFields: an
-// unmatched event on a path that carries a warm estimate still ends with
-// default derived fields - the single reset runs before the gate, so no
-// stale derived state leaks into evaluation or a report sample.
+// unmatched event keeps default derived fields despite a warm estimate.
 func TestE2EEnrichmentFilterUnmatchedEventsCarryDefaultDerivedFields(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -133,9 +122,8 @@ chains:
 	for i := 0; i < 5; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.8", "GET", "/files/a.iso", 200, 10, "1000"))
 	}
-	// A POST to the same path is unmatched: it overflows the bandwidth
-	// rule and its sample must carry the default size 0, never the
-	// path's warm estimate.
+	// A POST to the same path is unmatched: it overflows the bandwidth rule,
+	// and its sample must carry the default 0, never the warm estimate.
 	d.send(nginxLineClen("1734345939", "203.0.113.7", "POST", "/files/a.iso", 200, 120, "100"))
 	d.waitProcessed(t, 6)
 
@@ -160,12 +148,8 @@ chains:
 	}
 }
 
-// TestE2EWidenedFilterCannotPoisonTheEstimate: the Sampling rule is
-// stricter than any Filter - with enrichment.filter widened to any,
-// loud ineligible traffic (304, 416, errors, headerless) never enters
-// the estimate even when the Filter admits every event. Matched
-// ineligible events are still enriched with the current estimate, so the
-// closing chunked transfers count as full downloads and overflow at 3.
+// TestE2EWidenedFilterCannotPoisonTheEstimate: with enrichment.filter
+// widened to any, 304/416/error/headerless traffic still never observes.
 func TestE2EWidenedFilterCannotPoisonTheEstimate(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -202,8 +186,7 @@ chains:
 				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
 			}
 			// Two loud events of the row's shape: admitted rows move the
-			// estimate one EWMA step each (1000 -> 1600 -> 2080), the
-			// rest move nothing.
+			// estimate one step each (1000 -> 1600 -> 2080); the rest move nothing.
 			for i := 0; i < 2; i++ {
 				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen))
 			}

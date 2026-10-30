@@ -63,9 +63,7 @@ func TestNewFilesizeEnricherValidation(t *testing.T) {
 }
 
 // EWMA: prev + (observed-prev)/period with int64 truncating division.
-// The first row pins the seed: the first observation lands exactly,
-// with no blend against an implied zero. Observations are response
-// sizes (Content-Length), never transferred bytes.
+// The first row pins the seed: the first observation lands exactly.
 func TestEnrichEWMAIntegerMath(t *testing.T) {
 	tests := []struct {
 		observed int64
@@ -154,9 +152,7 @@ func TestEnrichStateIsPerPath(t *testing.T) {
 }
 
 // The Sampling rule admits only GET/HEAD 200 responses carrying a
-// Content-Length; every other event is enriched with the current
-// estimate but adds no observation. Transferred bytes never observe,
-// whatever their size.
+// Content-Length; every other event is enriched but observes nothing.
 func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
 	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 5)
 	if err != nil {
@@ -207,9 +203,7 @@ func TestEnrichIneligibleEventsFollowWarmUpGate(t *testing.T) {
 }
 
 // Range responses observe the Content-Range total - the file's exact
-// size - and never their Content-Length: the observation of a GET 206 is
-// always the total. A 206 without a usable total is enriched with the
-// current estimate and adds no observation.
+// size - never their Content-Length; a 206 without a total observes nothing.
 func TestEnrichRangeResponsesObserveContentRangeTotal(t *testing.T) {
 	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 1)
 	if err != nil {

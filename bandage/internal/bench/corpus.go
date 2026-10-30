@@ -209,9 +209,8 @@ func NewCorpus(seed uint64, shape LineShape, dist KeyDist, n int) *Corpus {
 			agent:  agent,
 		}
 		if shape == ShapeFull {
-			// Full-shape lines carry every optional field: a complete
-			// transfer's Content-Length is its sent bytes, and the
-			// 206s' Content-Range (header sent) totals the same.
+			// Full-shape lines carry every optional field: a complete transfer's
+			// Content-Length and a 206's Content-Range total both equal its sent bytes.
 			ec.clen = ec.sent
 			if ec.status == 206 {
 				ec.crange = ec.sent

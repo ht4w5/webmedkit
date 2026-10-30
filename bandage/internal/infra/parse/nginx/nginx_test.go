@@ -51,10 +51,7 @@ func TestParseFieldMapping(t *testing.T) {
 }
 
 // shippedFormat is the log_format template the shipped nginx snippet
-// (configs/nginx/bandage_log.conf) must define: the parser's seven mapped
-// fields plus the response size fields, time as a quoted $msec string,
-// status and sent unquoted integers, clen and crange quoted strings (""
-// when the header was not sent).
+// (configs/nginx/bandage_log.conf) must define.
 const shippedFormat = `{"time":"$msec","client":"$remote_addr","method":"$request_method","url":"$uri","status":$status,"sent":$body_bytes_sent,"clen":"$sent_http_content_length","crange":"$sent_http_content_range","agent":"$http_user_agent"}`
 
 // shippedLogFormat returns the template from the shipped nginx snippet; the
@@ -80,10 +77,7 @@ func shippedLogFormat(t *testing.T) string {
 }
 
 // TestShippedLogFormatConf pins the shipped snippet to the parser's field
-// contract: one log_format bandage escape=json directive carrying exactly
-// the mapped fields (time a quoted $msec string, status and sent unquoted,
-// clen and crange quoted strings; no reserved superset fields, no vhost,
-// no comments).
+// contract: one log_format bandage escape=json directive, nothing else.
 func TestShippedLogFormatConf(t *testing.T) {
 	if got := shippedLogFormat(t); got != shippedFormat {
 		t.Errorf("shipped log format = %q, want %q", got, shippedFormat)
@@ -141,9 +135,8 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 	}
 }
 
-// TestParseContentLengthField pins the clen mapping: the response
-// Content-Length as a quoted integer string ("" when the header was not
-// sent). Absent, empty or zero all mean "no size information" (0).
+// TestParseContentLengthField pins the clen mapping: quoted integer string
+// ("" = header not sent); absent, empty and zero all mean "no size information".
 func TestParseContentLengthField(t *testing.T) {
 	tests := []struct {
 		name string
@@ -175,12 +168,8 @@ func TestParseContentLengthField(t *testing.T) {
 	}
 }
 
-// TestParseContentRangeField pins the crange mapping: the response
-// Content-Range parsed leniently down to the file's total size. "bytes
-// <a>-<b>/<total>" and "bytes */<total>" yield the total; a "*" total
-// and anything unparsable yield 0 ("no size information") and never
-// drop the line - every row below must parse. Header syntax never
-// reaches the domain: the event carries only the extracted total.
+// TestParseContentRangeField pins the crange mapping: the extracted total.
+// Every row below must parse - unusual values yield 0, never a dropped line.
 func TestParseContentRangeField(t *testing.T) {
 	tests := []struct {
 		name   string

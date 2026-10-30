@@ -73,25 +73,20 @@ func nginxLine(t, client, method, path string, status int, sent int64) string {
 }
 
 // nginxLineClen builds one raw line in the current bandage log format:
-// nginxLine plus the response Content-Length field. clen is the rendered
-// $sent_http_content_length content ("" when the header was not sent; a
-// complete transfer carries its sent bytes).
+// nginxLine plus the rendered $sent_http_content_length ("" = not sent).
 func nginxLineClen(t, client, method, path string, status int, sent int64, clen string) string {
 	return nginxLineFields(t, client, method, path, status, sent, fmt.Sprintf(`"clen":%q`, clen))
 }
 
 // nginxLineCrange builds one raw line in the current bandage log format:
-// nginxLineClen plus the response Content-Range field. crange is the
-// rendered $sent_http_content_range content ("" when the header was not
-// sent; a range response carries "bytes <a>-<b>/<total>").
+// nginxLineClen plus the rendered $sent_http_content_range ("" = not sent).
 func nginxLineCrange(t, client, method, path string, status int, sent int64, clen, crange string) string {
 	return nginxLineFields(t, client, method, path, status, sent,
 		fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
 }
 
-// nginxLineFields renders one raw nginx JSON line: the mapped base
-// fields plus the given already-rendered JSON members (`"key":value`)
-// in order. Every nginxLine* shape composes through it.
+// nginxLineFields renders one raw nginx JSON line: the mapped base fields
+// plus the given already-rendered JSON members (`"key":value`) in order.
 func nginxLineFields(t, client, method, path string, status int, sent int64, extra ...string) string {
 	line := fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d`, t, client, method, path, status, sent)
 	for _, member := range extra {
@@ -2273,10 +2268,8 @@ chains:
 	}
 }
 
-// TestE2ESizeEstimateTracksResponseLengthNotSentBytes: the estimate
-// learns the length the server reports, not the bytes that happened to
-// transfer, and cached revalidations leave it alone - so replay tolerates
-// ordinary partial downloads instead of counting each as a full one.
+// TestE2ESizeEstimateTracksResponseLengthNotSentBytes: the estimate learns
+// the reported length, and cached revalidations leave it alone.
 func TestE2ESizeEstimateTracksResponseLengthNotSentBytes(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -2323,15 +2316,7 @@ chains:
 }
 
 // TestE2ESizeSamplingRuleAdmitRejectTable pins the Sampling rule at the
-// pipeline: only GET/HEAD 200 responses carrying a Content-Length and
-// GET 206 responses carrying a usable Content-Range total feed the
-// estimate (a 206 observes only its total, never its Content-Length);
-// every other shape is still enriched with the current estimate and
-// counted by replay, but adds no observation. The warm-up leaves /f at
-// size 1000; two loud probes of the row's shape move it one EWMA step
-// each when admitted, and two big chunked transfers close the row -
-// length-less, they add no observation, but each counts as a full
-// download equivalent and overflows volume 2 when the probes did not.
+// pipeline: which shapes observe, and that all still enrich and replay.
 func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2395,13 +2380,8 @@ chains:
 	}
 }
 
-// TestE2EResumedDownloadAccumulatesTrueFractions: range transfers size
-// the download by the Content-Range total and count as their true
-// fraction of a download toward replay - a resumable download across
-// several range transfers accumulates exactly one download-equivalent
-// instead of one per request - and the tolerated volume derives from
-// the exact total (step volume: the 1000-byte file sits on the high
-// rung where a 250-byte transferred chunk would not).
+// TestE2EResumedDownloadAccumulatesTrueFractions: range transfers count
+// as their true fraction of a download, sized by the Content-Range total.
 func TestE2EResumedDownloadAccumulatesTrueFractions(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -2424,9 +2404,8 @@ chains:
 		d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345934+seq), "203.0.113.7", "GET", "/iso", 206, 250, "250", ranges[i]))
 	}
 
-	// The first download's four range transfers warm the estimate to the
-	// exact total 1000 (observations are the totals), but are blind to
-	// replay and add nothing.
+	// The first download's four range transfers warm the estimate to the exact
+	// total 1000; still blind to replay, they add nothing.
 	for i := range ranges {
 		sendRange(i, i)
 	}
@@ -2435,8 +2414,7 @@ chains:
 		t.Fatalf("reports during warm-up = %+v, want none (replay is blind until the estimate warms)", doc.Reports)
 	}
 
-	// The second (resumed) download again spans four range transfers:
-	// the fifth event crosses the warm-up gate, and the four together
+	// The resumed download's four transfers cross the warm-up gate and
 	// accumulate exactly 4 x 0.25 = one download-equivalent.
 	for i := range ranges {
 		sendRange(4+i, i)
@@ -2504,9 +2482,7 @@ func TestE2EMalformedClenDroppedAndCounted(t *testing.T) {
 }
 
 // TestE2EUnusualContentRangeKeptAsNormalTraffic: unusual Content-Range
-// values degrade to "no size information" instead of invalidating the
-// line - the events parse, count as normal traffic and never reach the
-// drop counter.
+// values degrade to "no size information"; the line is never dropped.
 func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
