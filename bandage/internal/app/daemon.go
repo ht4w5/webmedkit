@@ -92,7 +92,7 @@ type Daemon struct {
 	now     func() time.Time
 	logger  zerolog.Logger
 	parser  EventParser
-	enrich  *enrichment.FilesizeEnricher
+	enrich  *enrichment.Enricher
 	workers int
 
 	// repo is the raw report store, kept for Close; report mutations go
@@ -146,7 +146,13 @@ func New(cfg Config, chains []domain.Chain, build identity.Build, opts ...Option
 	}
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
 	reports := report.NewService(repo)
-	enricher, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod, filesizeMinSamples)
+	filesize, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod, filesizeMinSamples)
+	if err != nil {
+		return nil, err
+	}
+	// The enrichment path owns the Filter gate and the single
+	// derived-field reset (spec Implementation Decision 2).
+	enricher, err := enrichment.NewEnricher(cfg.Enrichment.Filter, filesize)
 	if err != nil {
 		return nil, err
 	}

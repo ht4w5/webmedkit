@@ -83,6 +83,32 @@ api: {listen: "127.0.0.1:8080"}
 	if cfg.Pipeline.Workers != runtime.NumCPU() {
 		t.Errorf("pipeline.workers = %d, want default %d (CPU count)", cfg.Pipeline.Workers, runtime.NumCPU())
 	}
+	// The whole enrichment block is optional; enrichment.filter defaults
+	// to any, like rules.
+	if cfg.Enrichment.FilterSource != "any" {
+		t.Errorf("enrichment.filter = %q, want default %q", cfg.Enrichment.FilterSource, "any")
+	}
+	if !cfg.Enrichment.Filter.Match(&domain.Event{Path: "/x", Method: "GET", Status: 200}) {
+		t.Error("default enrichment.filter rejects an event, want any to match everything")
+	}
+}
+
+// TestParseConfigEnrichmentFilter: enrichment.filter compiles with the
+// rule filter language and scopes events exactly like a rule filter.
+func TestParseConfigEnrichmentFilter(t *testing.T) {
+	yaml := strings.Replace(validConfig, "api:", "enrichment:\n  filter: path prefix \"/files/\"\n\napi:", 1)
+	cfg, err := ParseConfig([]byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseConfig error: %v", err)
+	}
+	if cfg.Enrichment.FilterSource != `path prefix "/files/"` {
+		t.Errorf("enrichment.filter = %q, want the expression as written", cfg.Enrichment.FilterSource)
+	}
+	for path, want := range map[string]bool{"/files/a.iso": true, "/other": false} {
+		if got := cfg.Enrichment.Filter.Match(&domain.Event{Path: path, Method: "GET", Status: 200}); got != want {
+			t.Errorf("enrichment.filter.Match(%q) = %v, want %v", path, got, want)
+		}
+	}
 }
 
 // TestParseConfigLogLevel: log.level accepts exactly the four level words.
@@ -144,6 +170,8 @@ func TestParseConfigErrors(t *testing.T) {
 		{name: "negative cache entries", yaml: strings.Replace(validConfig, "max_entries: 65536", "max_entries: -1", 1), wantErr: "max_entries"},
 		{name: "missing api listen", yaml: strings.Replace(validConfig, "  listen: 127.0.0.1:8080\n", "", 1), wantErr: "api.listen"},
 		{name: "empty api listen", yaml: strings.Replace(validConfig, "listen: 127.0.0.1:8080", `listen: ""`, 1), wantErr: "api.listen"},
+		{name: "unknown enrichment key", yaml: strings.Replace(validConfig, "api:", "enrichment:\n  filter: any\n  observe: sent\n\napi:", 1), wantErr: "observe"},
+		{name: "invalid enrichment filter", yaml: strings.Replace(validConfig, "api:", "enrichment:\n  filter: bogus\n\napi:", 1), wantErr: "enrichment.filter"},
 		{name: "multiple documents", yaml: validConfig + "\n---\ningest: {}\n", wantErr: "document"},
 	}
 	for _, tt := range tests {
