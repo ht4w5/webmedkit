@@ -48,7 +48,7 @@ func TestNewRejectsNonPositiveWorkerCount(t *testing.T) {
 		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
 		Cache:      Cache{MaxEntries: 65536},
 		Pipeline:   Pipeline{Workers: 0},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}
 	if _, err := New(cfg, chains, identity.For("bandage")); err == nil {
@@ -258,7 +258,7 @@ func startWedgeDaemon(t *testing.T, clock *testClock, workers int) *wedgeDaemon 
 		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: dbPath}},
 		Cache:      Cache{MaxEntries: 65536},
 		Pipeline:   Pipeline{Workers: workers},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}
 	chains, err := ParseRules([]byte(poolRules))

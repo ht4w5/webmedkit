@@ -66,13 +66,10 @@ type Pipeline struct {
 	Workers int
 }
 
-// Enrichment configures the enrichment path: the Filter that gates it
-// wholly (spec: enrichment.filter).
+// Enrichment configures the enrichment path: the Filter (the
+// enrichment.filter key) that gates it wholly (GLOSSARY: Filter).
 type Enrichment struct {
-	// FilterSource is the effective filter expression as written
-	// ("any" when omitted), kept like a rule's.
-	FilterSource string
-	Filter       domain.Matcher
+	Filter domain.Matcher
 }
 
 // API configures the HTTP report API listener.
@@ -253,6 +250,6 @@ func validateConfig(raw rawConfig) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config: enrichment.filter: %w", err)
 	}
-	cfg.Enrichment = Enrichment{FilterSource: flt, Filter: parsed}
+	cfg.Enrichment = Enrichment{Filter: parsed}
 	return cfg, nil
 }

@@ -237,7 +237,7 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 		// The suite asserts exact accumulation values, so it runs the
 		// deterministic single-worker pipeline.
 		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}
 	if mutate != nil {
@@ -818,7 +818,7 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
 		Cache:      Cache{MaxEntries: 65536},
 		Pipeline:   Pipeline{Workers: 1},
-		Enrichment: Enrichment{FilterSource: "any", Filter: &filter.FilterAny{}},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
 		API:        API{Listen: "127.0.0.1:0"},
 	}, chains, build, WithLogger(zerolog.Nop()))
 	if err != nil {
