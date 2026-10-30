@@ -11,7 +11,7 @@ import (
 
 // fullLine is a full-shape bandage nginx log format line (optional, reserved
 // and unknown fields included).
-const fullLine = `{"time":"1734345934.123","client":"203.0.113.7","server":"203.0.113.1","method":"GET","url":"/releases/24.04.iso","duration":"0.125","host":"example.org","status":200,"sent":123456,"agent":"Wget/1.21","extra":"ignored"}`
+const fullLine = `{"time":"1734345934.123","client":"203.0.113.7","server":"203.0.113.1","method":"GET","url":"/releases/24.04.iso","duration":"0.125","host":"example.org","status":200,"sent":123456,"clen":"234567","crange":"bytes 0-234566/345678","agent":"Wget/1.21","extra":"ignored"}`
 
 func TestParseFieldMapping(t *testing.T) {
 	ev, err := New().Parse([]byte(fullLine))
@@ -36,6 +36,12 @@ func TestParseFieldMapping(t *testing.T) {
 	if ev.SentBytes != 123456 {
 		t.Errorf("SentBytes = %d, want 123456", ev.SentBytes)
 	}
+	if ev.ContentLength != 234567 {
+		t.Errorf("ContentLength = %d, want 234567", ev.ContentLength)
+	}
+	if ev.ContentRangeTotal != 345678 {
+		t.Errorf("ContentRangeTotal = %d, want 345678", ev.ContentRangeTotal)
+	}
 	if ev.Agent != "Wget/1.21" {
 		t.Errorf("Agent = %q, want %q", ev.Agent, "Wget/1.21")
 	}
@@ -45,9 +51,8 @@ func TestParseFieldMapping(t *testing.T) {
 }
 
 // shippedFormat is the log_format template the shipped nginx snippet
-// (configs/nginx/bandage_log.conf) must define: the parser's seven mapped
-// fields, time as a quoted $msec string, status and sent unquoted integers.
-const shippedFormat = `{"time":"$msec","client":"$remote_addr","method":"$request_method","url":"$uri","status":$status,"sent":$body_bytes_sent,"agent":"$http_user_agent"}`
+// (configs/nginx/bandage_log.conf) must define.
+const shippedFormat = `{"time":"$msec","client":"$remote_addr","method":"$request_method","url":"$uri","status":$status,"sent":$body_bytes_sent,"clen":"$sent_http_content_length","crange":"$sent_http_content_range","agent":"$http_user_agent"}`
 
 // shippedLogFormat returns the template from the shipped nginx snippet; the
 // anchored match also pins the file to exactly one directive, no comments
@@ -72,9 +77,7 @@ func shippedLogFormat(t *testing.T) string {
 }
 
 // TestShippedLogFormatConf pins the shipped snippet to the parser's field
-// contract: one log_format bandage escape=json directive carrying exactly
-// the seven mapped fields (time a quoted $msec string, status and sent
-// unquoted; no reserved superset fields, no vhost, no comments).
+// contract: one log_format bandage escape=json directive, nothing else.
 func TestShippedLogFormatConf(t *testing.T) {
 	if got := shippedLogFormat(t); got != shippedFormat {
 		t.Errorf("shipped log format = %q, want %q", got, shippedFormat)
@@ -92,6 +95,8 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 		"$uri", "/releases/24.04.iso",
 		"$status", "200",
 		"$body_bytes_sent", "123456",
+		"$sent_http_content_length", "234567",
+		"$sent_http_content_range", "bytes 0-234566/234567",
 		"$http_user_agent", "curl/8.5.0",
 	).Replace(shippedLogFormat(t))
 	if strings.Contains(line, "$") {
@@ -119,8 +124,113 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 	if ev.SentBytes != 123456 {
 		t.Errorf("SentBytes = %d, want 123456", ev.SentBytes)
 	}
+	if ev.ContentLength != 234567 {
+		t.Errorf("ContentLength = %d, want 234567", ev.ContentLength)
+	}
+	if ev.ContentRangeTotal != 234567 {
+		t.Errorf("ContentRangeTotal = %d, want 234567 (the total the shipped crange carries)", ev.ContentRangeTotal)
+	}
 	if ev.Agent != "curl/8.5.0" {
 		t.Errorf("Agent = %q, want %q", ev.Agent, "curl/8.5.0")
+	}
+}
+
+// TestParseContentLengthField pins the clen mapping: quoted integer string
+// ("" = header not sent); absent, empty and zero all mean "no size information".
+func TestParseContentLengthField(t *testing.T) {
+	tests := []struct {
+		name string
+		clen string // the raw JSON member; "<absent>" omits it
+		want int64
+	}{
+		{name: "absent", clen: "<absent>", want: 0},
+		{name: "null", clen: `null`, want: 0},
+		{name: "empty string", clen: `""`, want: 0},
+		{name: "zero", clen: `"0"`, want: 0},
+		{name: "length", clen: `"4000"`, want: 4000},
+		{name: "bare number", clen: `4000`, want: 4000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0`
+			if tt.clen != "<absent>" {
+				line += `,"clen":` + tt.clen
+			}
+			line += `}`
+			ev, err := New().Parse([]byte(line))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if ev.ContentLength != tt.want {
+				t.Errorf("ContentLength = %d, want %d", ev.ContentLength, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseContentRangeField pins the crange mapping: the extracted total.
+// Every row below must parse - unusual values yield 0, never a dropped line.
+func TestParseContentRangeField(t *testing.T) {
+	tests := []struct {
+		name   string
+		crange string // the raw JSON member; "<absent>" omits it
+		want   int64
+	}{
+		{name: "absent", crange: "<absent>", want: 0},
+		{name: "null", crange: `null`, want: 0},
+		{name: "empty string", crange: `""`, want: 0},
+		{name: "range with total", crange: `"bytes 0-499/1234"`, want: 1234},
+		{name: "middle range with total", crange: `"bytes 500-999/1234"`, want: 1234},
+		{name: "unsatisfied range with total", crange: `"bytes */1234"`, want: 1234},
+		{name: "unit case-insensitive", crange: `"Bytes 0-499/1234"`, want: 1234},
+		{name: "star total", crange: `"bytes 0-499/*"`, want: 0},
+		{name: "star range and star total", crange: `"bytes */*"`, want: 0},
+		{name: "zero total", crange: `"bytes 0-499/0"`, want: 0},
+		{name: "no total", crange: `"bytes 0-499"`, want: 0},
+		{name: "empty total", crange: `"bytes 0-499/"`, want: 0},
+		{name: "garbage range part", crange: `"bytes abc-def/1234"`, want: 0},
+		{name: "signed range bound", crange: `"bytes -1-499/1234"`, want: 0},
+		{name: "non-numeric total", crange: `"bytes 0-499/abc"`, want: 0},
+		{name: "overflowing total", crange: `"bytes 0-499/99999999999999999999"`, want: 0},
+		{name: "trailing total junk", crange: `"bytes 0-499/1234x"`, want: 0},
+		{name: "unknown unit", crange: `"items 0-499/1234"`, want: 0},
+		{name: "missing unit", crange: `"0-499/1234"`, want: 0},
+		{name: "bare number", crange: `1234`, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":0`
+			if tt.crange != "<absent>" {
+				line += `,"crange":` + tt.crange
+			}
+			line += `}`
+			ev, err := New().Parse([]byte(line))
+			if err != nil {
+				t.Fatalf("Parse error (unusual Content-Range values must never drop the line): %v", err)
+			}
+			if ev.ContentRangeTotal != tt.want {
+				t.Errorf("ContentRangeTotal = %d, want %d", ev.ContentRangeTotal, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseOldFluxLineUnchanged: a line in the old flux log format (no
+// clen or crange) keeps parsing unchanged and carries no size information.
+func TestParseOldFluxLineUnchanged(t *testing.T) {
+	line := `{"time":"1734345934.123","client":"203.0.113.7","method":"GET","url":"/releases/24.04.iso","status":200,"sent":123456,"agent":"Wget/1.21"}`
+	ev, err := New().Parse([]byte(line))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if ev.ContentLength != 0 {
+		t.Errorf("ContentLength = %d, want 0 (old flux lines carry no response length)", ev.ContentLength)
+	}
+	if ev.ContentRangeTotal != 0 {
+		t.Errorf("ContentRangeTotal = %d, want 0 (old flux lines carry no response range)", ev.ContentRangeTotal)
+	}
+	if ev.SentBytes != 123456 || ev.Path != "/releases/24.04.iso" || ev.Agent != "Wget/1.21" {
+		t.Errorf("event = %+v, want the old line's fields unchanged", ev)
 	}
 }
 
@@ -248,6 +358,10 @@ func TestParseInvalidRequiredField(t *testing.T) {
 		{name: "sent negative", field: "sent", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":-1}`},
 		{name: "sent fractional", field: "sent", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":1.5}`},
 		{name: "agent wrong type", field: "agent", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"agent":7}`},
+		{name: "clen negative", field: "clen", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"-1"}`},
+		{name: "clen non-numeric", field: "clen", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"abc"}`},
+		{name: "clen fractional", field: "clen", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"1.5"}`},
+		{name: "clen wrong type", field: "clen", line: `{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":true}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/bench"
+	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 	"github.com/HT4w5/webmedkit/bandage/internal/domain/report"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 	"github.com/HT4w5/webmedkit/internal/identity"
@@ -105,11 +106,12 @@ func (p benchParams) name() string {
 // worker count.
 func benchConfig(p benchParams) Config {
 	return Config{
-		Ingest:   Ingest{Driver: "syslog", Parser: "nginx", Syslog: Syslog{Network: p.network, Listen: p.listen}},
-		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
-		Cache:    Cache{MaxEntries: p.sc.cacheMax},
-		Pipeline: Pipeline{Workers: p.workers},
-		API:      API{Listen: "127.0.0.1:0"},
+		Ingest:     Ingest{Driver: "syslog", Parser: "nginx", Syslog: Syslog{Network: p.network, Listen: p.listen}},
+		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
+		Cache:      Cache{MaxEntries: p.sc.cacheMax},
+		Pipeline:   Pipeline{Workers: p.workers},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
+		API:        API{Listen: "127.0.0.1:0"},
 	}
 }
 

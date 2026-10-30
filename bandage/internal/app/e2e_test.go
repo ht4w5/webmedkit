@@ -21,6 +21,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
+	"github.com/HT4w5/webmedkit/bandage/internal/domain/filter"
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
@@ -65,10 +66,33 @@ const (
 	eventTime2At = "2024-12-16T10:45:35Z"
 )
 
-// nginxLine builds one raw nginx JSON access-log line.
+// nginxLine builds one raw nginx JSON access-log line in the old flux
+// shape (no response-size fields), which must keep parsing.
 func nginxLine(t, client, method, path string, status int, sent int64) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d}`,
-		t, client, method, path, status, sent)
+	return nginxLineFields(t, client, method, path, status, sent)
+}
+
+// nginxLineClen builds one raw line in the current bandage log format:
+// nginxLine plus the rendered $sent_http_content_length ("" = not sent).
+func nginxLineClen(t, client, method, path string, status int, sent int64, clen string) string {
+	return nginxLineFields(t, client, method, path, status, sent, fmt.Sprintf(`"clen":%q`, clen))
+}
+
+// nginxLineCrange builds one raw line in the current bandage log format:
+// nginxLineClen plus the rendered $sent_http_content_range ("" = not sent).
+func nginxLineCrange(t, client, method, path string, status int, sent int64, clen, crange string) string {
+	return nginxLineFields(t, client, method, path, status, sent,
+		fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
+}
+
+// nginxLineFields renders one raw nginx JSON line: the mapped base fields
+// plus the given already-rendered JSON members (`"key":value`) in order.
+func nginxLineFields(t, client, method, path string, status int, sent int64, extra ...string) string {
+	line := fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d`, t, client, method, path, status, sent)
+	for _, member := range extra {
+		line += "," + member
+	}
+	return line + "}"
 }
 
 // testDaemon bundles a running daemon with a raw-line sender and captured
@@ -207,8 +231,9 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 		Cache: Cache{MaxEntries: 65536},
 		// The suite asserts exact accumulation values, so it runs the
 		// deterministic single-worker pipeline.
-		Pipeline: Pipeline{Workers: 1},
-		API:      API{Listen: "127.0.0.1:0"},
+		Pipeline:   Pipeline{Workers: 1},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
+		API:        API{Listen: "127.0.0.1:0"},
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -785,10 +810,11 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 			Parser: "nginx",
 			Syslog: Syslog{Network: "unixgram", Listen: filepath.Join(t.TempDir(), "log.sock")},
 		},
-		DB:       DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
-		Cache:    Cache{MaxEntries: 65536},
-		Pipeline: Pipeline{Workers: 1},
-		API:      API{Listen: "127.0.0.1:0"},
+		DB:         DB{Driver: "sqlite", SQLite: SQLite{Path: ":memory:"}},
+		Cache:      Cache{MaxEntries: 65536},
+		Pipeline:   Pipeline{Workers: 1},
+		Enrichment: Enrichment{Filter: &filter.FilterAny{}},
+		API:        API{Listen: "127.0.0.1:0"},
 	}, chains, build, WithLogger(zerolog.Nop()))
 	if err != nil {
 		t.Fatalf("New error: %v", err)
@@ -2175,7 +2201,7 @@ chains:
 	// Warm-up (the first 4 of 5 samples): the size estimate is unknown,
 	// so every event is skipped entirely.
 	for i := 0; i < 4; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 4)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
@@ -2185,7 +2211,7 @@ chains:
 	// Samples 5..7 are enriched (size 1000): each full transfer adds
 	// fraction 1, and value 3 > volume 2 overflows on the third.
 	for i := 4; i < 7; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
@@ -2222,8 +2248,8 @@ chains:
 	// Interleave small (100 B) and big (10 000 B) transfers of two paths
 	// from one client: each path warms and accumulates on its own.
 	for i := 0; i < 6; i++ {
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100))
-		d.send(nginxLine(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100, "100"))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000, "10000"))
 	}
 	d.waitProcessed(t, 12)
 
@@ -2239,6 +2265,242 @@ chains:
 	}
 	if r.Sample.Path != "/small.iso" || r.Sample.Size != 100 {
 		t.Errorf("sample = %+v, want /small.iso with enriched size 100", r.Sample)
+	}
+}
+
+// TestE2ESizeEstimateTracksResponseLengthNotSentBytes: the estimate learns
+// the reported length, and cached revalidations leave it alone.
+func TestE2ESizeEstimateTracksResponseLengthNotSentBytes(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker: {track: replay, leak: 0, volume: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+	// Five partial downloads (500 of 1000 bytes on the wire) warm the
+	// estimate to the reported length 1000; each counts half a download.
+	for i := 0; i < 5; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
+	}
+	// Cached revalidations (304, nothing on the wire) move nothing.
+	for i := 0; i < 4; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", "GET", "/releases/24.04.iso", 304, 0, ""))
+	}
+	// Four more partial downloads add 0.5 each and overflow volume 2 at
+	// 2.5 on the last.
+	for i := 0; i < 4; i++ {
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345943+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
+	}
+	d.waitProcessed(t, 13)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.Tracker.Value != 2.5 {
+		t.Errorf("tracker value = %v, want 2.5 (nine half-downloads; the revalidations added none)", r.Tracker.Value)
+	}
+	if r.Sample.Size != 1000 {
+		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.Size)
+	}
+	if r.Sample.Sent != 500 {
+		t.Errorf("sample sent = %d, want 500", r.Sample.Sent)
+	}
+}
+
+// TestE2ESizeSamplingRuleAdmitRejectTable pins the Sampling rule at the
+// pipeline: which shapes observe, and that all still enrich and replay.
+func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		status   int
+		sent     int64
+		clen     string
+		crange   string
+		wantSize int64
+	}{
+		{"GET 200 observes the response length", "GET", 200, 4000, "4000", "", 2080},
+		{"HEAD 200 observes the response length", "HEAD", 200, 0, "4000", "", 2080},
+		{"304 revalidations never observe", "GET", 304, 0, "4000", "bytes 0-3999/4000", 1000},
+		{"length-less HEAD never observes", "HEAD", 200, 0, "", "", 1000},
+		{"chunked 200 bodies never observe", "GET", 200, 4000, "", "", 1000},
+		{"206 observes the Content-Range total, never its Content-Length", "GET", 206, 4000, "4000", "bytes 0-3999/5000", 2440},
+		{"206 without a usable total never observes", "GET", 206, 4000, "4000", "", 1000},
+		{"206 with a * total never observes", "GET", 206, 4000, "4000", "bytes 0-3999/*", 1000},
+		{"416 never observes its Content-Range total", "GET", 416, 4000, "", "bytes */4000", 1000},
+		{"error bodies never observe", "GET", 404, 4000, "4000", "bytes 0-3999/4000", 1000},
+		{"non-GET/HEAD never observes", "POST", 200, 4000, "4000", "bytes 0-3999/4000", 1000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker: {track: replay, leak: 0, volume: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+			d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+			// Warm the /f estimate to 1000 (samples 1-4 stay blind).
+			for i := 0; i < 5; i++ {
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
+			}
+			for i := 0; i < 2; i++ {
+				d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen, tt.crange))
+			}
+			for i := 0; i < 2; i++ {
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345941+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
+			}
+			d.waitProcessed(t, 9)
+
+			doc := d.getReports(t, nil)
+			if len(doc.Reports) != 1 {
+				t.Fatalf("reports = %+v, want exactly 1 (the overflow)", doc.Reports)
+			}
+			r := doc.Reports[0]
+			if r.Tracker.Value != 3 {
+				t.Errorf("tracker value = %v, want 3 (three unit fractions at trigger)", r.Tracker.Value)
+			}
+			if r.Sample.Size != tt.wantSize {
+				t.Errorf("sample size = %d, want %d", r.Sample.Size, tt.wantSize)
+			}
+		})
+	}
+}
+
+// TestE2EResumedDownloadAccumulatesTrueFractions: range transfers count
+// as their true fraction of a download, sized by the Content-Range total.
+func TestE2EResumedDownloadAccumulatesTrueFractions(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-replay
+        tracker:
+          track: replay
+          leak: 0
+          volume: {method: step, threshold: 500, volume_low: 1, volume_high: 2}
+        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+	// sendRange is one 250-byte range transfer of the 1000-byte /iso.
+	ranges := [4]string{"bytes 0-249/1000", "bytes 250-499/1000", "bytes 500-749/1000", "bytes 750-999/1000"}
+	sendRange := func(seq, i int) {
+		d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345934+seq), "203.0.113.7", "GET", "/iso", 206, 250, "250", ranges[i]))
+	}
+
+	// The first download's four range transfers warm the estimate to the exact
+	// total 1000; still blind to replay, they add nothing.
+	for i := range ranges {
+		sendRange(i, i)
+	}
+	d.waitProcessed(t, 4)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports during warm-up = %+v, want none (replay is blind until the estimate warms)", doc.Reports)
+	}
+
+	// The resumed download's four transfers cross the warm-up gate and
+	// accumulate exactly 4 x 0.25 = one download-equivalent.
+	for i := range ranges {
+		sendRange(4+i, i)
+	}
+	d.waitProcessed(t, 8)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports after one resumed download = %+v, want none (one download totals one download-equivalent, not one per request)", doc.Reports)
+	}
+
+	// A third full download accumulates one more: value 2.0 still sits
+	// at its tolerance, so no report yet.
+	for i := range ranges {
+		sendRange(8+i, i)
+	}
+	d.waitProcessed(t, 12)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports at value 2.0 = %+v, want none (2.0 does not exceed the tolerance 2)", doc.Reports)
+	}
+
+	// The fourth download's first chunk pushes 2.25 past the tolerance.
+	sendRange(12, 0)
+	d.waitProcessed(t, 13)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.Tracker.Value != 2.25 {
+		t.Errorf("tracker value = %v, want 2.25 (nine counted quarters: the resumed downloads' true fractions)", r.Tracker.Value)
+	}
+	if r.Tracker.Volume != 2 {
+		t.Errorf("tracker volume = %v, want 2 (volume_high at the exact total 1000, not at the 250-byte chunk)", r.Tracker.Volume)
+	}
+	if r.Sample.Size != 1000 {
+		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.Size)
+	}
+	if r.Sample.Sent != 250 {
+		t.Errorf("sample sent = %d, want 250", r.Sample.Sent)
+	}
+}
+
+// TestE2EMalformedClenDroppedAndCounted: a malformed response length is
+// an invalid field - the line is dropped and counted like any other.
+func TestE2EMalformedClenDroppedAndCounted(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"-5"}`)
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":"abc"}`)
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":0,"clen":true}`)
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/small", 200, 10, "10"))
+	d.waitProcessed(t, 4)
+
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("dropped lines produced reports %+v, want none", doc.Reports)
+	}
+	stats := d.counters()
+	if stats.Dropped != 3 {
+		t.Errorf("stats dropped = %d, want 3", stats.Dropped)
+	}
+	if stats.Parsed != 1 {
+		t.Errorf("stats parsed = %d, want 1", stats.Parsed)
+	}
+}
+
+// TestE2EUnusualContentRangeKeptAsNormalTraffic: unusual Content-Range
+// values degrade to "no size information"; the line is never dropped.
+func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	d.send(`{"time":"1734345934","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes 0-499/*"}`)
+	d.send(`{"time":"1734345935","client":"203.0.113.7","method":"GET","url":"/","status":206,"sent":10,"clen":"","crange":"bytes weird"}`)
+	d.send(`{"time":"1734345936","client":"203.0.113.7","method":"GET","url":"/","status":200,"sent":10,"clen":"10","crange":"not a range"}`)
+	d.waitProcessed(t, 3)
+
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("reports = %+v, want none", doc.Reports)
+	}
+	stats := d.counters()
+	if stats.Dropped != 0 {
+		t.Errorf("stats dropped = %d, want 0 (unusual Content-Range values never drop the line)", stats.Dropped)
+	}
+	if stats.Parsed != 3 {
+		t.Errorf("stats parsed = %d, want 3 (the lines count as normal traffic)", stats.Parsed)
 	}
 }
 

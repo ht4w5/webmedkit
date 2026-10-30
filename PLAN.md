@@ -172,6 +172,8 @@ nginx log format (flux-compatible)
 | `url` | `$uri` | string | `Path` | `string` | required |
 | `status` | `$status` | number | `Status` | `int` | required, 100–599 |
 | `sent` | `$body_bytes_sent` | number | `SentBytes` | `int64` | required, ≥ 0 |
+| `clen` | `$sent_http_content_length` | string | `ContentLength` | `int64` | optional, `""` when absent; non-negative integer text, invalid drops the line |
+| `crange` | `$sent_http_content_range` | string | `ContentRangeTotal` | `int64` | optional, `""` when absent; `bytes <a>-<b>/<total>` or `bytes */<total>` parsed leniently to the total, else 0 (never drops the line) |
 | `agent` | `$http_user_agent` | string | `Agent` | `string` | optional, `""` when absent |
 | - | - | - | `SizeBytes` | `int64` | derived (enrichment), `FilesizeUnknown` = 0 until warm |
 
@@ -192,8 +194,10 @@ bandage/                      the analyzer - and nothing of splint's (ADR 0011)
                               value types, log `Level` enum (ADR 0005)
   internal/domain/filter/     webjail filter language: Parse,
                               Filter.Match(*Event), ParseError{Line, Col} - ported as-is
-  internal/domain/enrichment/ FilesizeEnricher (EWMA,
-                              minSamples) + FilesizeCache port - ported from webjail
+  internal/domain/enrichment/ Enricher (Filter gate + derived-field
+                              reset) over FilesizeEnricher (Sampling
+                              rule: response-size observations, EWMA,
+                              minSamples) + FilesizeCache port
   internal/domain/track/      RateTracker, BandwidthTracker,
                               ReplayTracker (flux bucket math + replay volume methods)
                               + TrackerCache port
@@ -274,8 +278,13 @@ log:
    messages.
 2. **Parse** - parser driver (v0: nginx-JSON, ported from flux) →
    `domain.Event` per §2.
-3. **Enrich** - `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA,
-   warm-up gated by `minSamples`); `replay` trackers read it.
+3. **Enrich** - the `Enricher` Filter gate (default `any`) resets the
+   derived fields and gates the path wholly: unmatched events end here
+   with default derived fields and touch no enrichment state. Matched:
+   `FilesizeEnricher` sets `event.SizeBytes` (per-path EWMA over the
+   Sampling rule's response-size observations - `clen` on GET/HEAD 200,
+   the `crange` total on GET 206; warm-up gated by `minSamples`);
+   `replay` trackers read it.
 4. **Evaluate** - per event: enter the entry chain `main`; every other
    chain runs only when a `goto`/`jump` action names it (dispatch runs
    the target chain inline - `jump` resumes, `goto` ends the current

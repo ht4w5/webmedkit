@@ -38,6 +38,8 @@ func shippedLogLine(t *testing.T) string {
 		"$uri", "/",
 		"$status", "200",
 		"$body_bytes_sent", "0",
+		"$sent_http_content_length", "",
+		"$sent_http_content_range", "",
 		"$http_user_agent", "curl/8.5.0",
 	).Replace(m[1])
 	if strings.Contains(line, "$") {

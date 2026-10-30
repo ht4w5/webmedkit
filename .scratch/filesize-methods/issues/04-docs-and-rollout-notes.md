@@ -11,12 +11,15 @@ read true against the merged code.
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The log-format docs carry the `clen` and `crange` contracts and the rollout-ordering warning
-- [ ] The rules/replay docs state the Filesize source: response sizes, not transferred bytes
-- [ ] Glossary entries (Filesize, Filter, Sampling rule) match shipped behaviour; prose calls the estimate's inputs observations and reserves "Sample" for the report concept
-- [ ] ADR 0019 reads true against merged code (Sampling rule, filter gate, lenient `crange`, no probing, no fallback)
-- [ ] No documentation still describes the estimate as learned from transferred bytes
+- [x] The log-format docs carry the `clen` and `crange` contracts and the rollout-ordering warning
+- [x] The rules/replay docs state the Filesize source: response sizes, not transferred bytes
+- [x] Glossary entries (Filesize, Filter, Sampling rule) match shipped behaviour; prose calls the estimate's inputs observations and reserves "Sample" for the report concept
+- [x] ADR 0019 reads true against merged code (Sampling rule, filter gate, lenient `crange`, no probing, no fallback)
+- [x] No documentation still describes the estimate as learned from transferred bytes
 
+Implemented on integration branch `feat/filesize-methods` (merge commit
+`0672f91`; cross-ticket code-review fixes through `4299be9`, incl. the
+PLAN.md pipeline/module-map sync).
 Context: spec `../spec.md` (Further Notes; Out of Scope).

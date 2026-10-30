@@ -23,6 +23,12 @@ type Event struct {
 	Agent      string
 	Status     int
 	SentBytes  int64
+	// ContentLength is the response's Content-Length as the server
+	// reported it; 0 means absent or unusable.
+	ContentLength int64
+	// ContentRangeTotal is the file's total size extracted from the
+	// response's Content-Range; 0 means absent or unusable.
+	ContentRangeTotal int64
 
 	// Derived fields, set by enrichment.
 	SizeBytes int64

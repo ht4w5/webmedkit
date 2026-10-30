@@ -80,6 +80,15 @@ func isNull(v fieldValue) bool {
 	return v.present && !v.isStr && string(v.raw) == "null"
 }
 
+// text returns the member's value as text: the decoded string, or the
+// exact raw JSON bytes for other kinds.
+func (v fieldValue) text() string {
+	if v.isStr {
+		return v.str
+	}
+	return string(v.raw)
+}
+
 // rawFields holds the captured values of the known log fields; unknown and
 // reserved fields are never captured.
 type rawFields struct {
@@ -89,6 +98,8 @@ type rawFields struct {
 	URL    fieldValue `json:"url"`
 	Status fieldValue `json:"status"`
 	Sent   fieldValue `json:"sent"`
+	Clen   fieldValue `json:"clen"`
+	Crange fieldValue `json:"crange"`
 	Agent  fieldValue `json:"agent"`
 }
 
@@ -158,6 +169,20 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 		return domain.Event{}, &FieldError{Field: "sent", Msg: "must be non-negative"}
 	}
 	ev.SentBytes = sent
+
+	// clen is optional (absent, null, "" = no size information); when present
+	// it must be a non-negative integer, strict like sent - malformed drops the line.
+	if raw = fields.Clen; raw.present && !isNull(raw) {
+		if ev.ContentLength, err = parseContentLength(raw); err != nil {
+			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
+		}
+	}
+
+	// crange is optional and lenient: "bytes <a>-<b>/<total>" and "bytes
+	// */<total>" yield the total; anything else yields 0 and never drops the line.
+	if raw = fields.Crange; raw.present && !isNull(raw) {
+		ev.ContentRangeTotal = parseContentRangeTotal(raw)
+	}
 
 	// agent is optional; when present it must be a string (null = absent).
 	if raw = fields.Agent; raw.present && !isNull(raw) {
@@ -293,13 +318,68 @@ func parseInt(v fieldValue) (int64, error) {
 	return n, nil
 }
 
+// parseContentLength parses the clen field: a quoted integer string ("" =
+// header not sent) or bare number; only non-negative integers are valid.
+func parseContentLength(v fieldValue) (int64, error) {
+	text := v.text()
+	if text == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, errors.New("must be an integer")
+	}
+	if n < 0 {
+		return 0, errors.New("must be non-negative")
+	}
+	return n, nil
+}
+
+// parseContentRangeTotal extracts the file's total from the crange field's
+// Content-Range value; anything unparsable yields 0 and never drops the line.
+func parseContentRangeTotal(v fieldValue) int64 {
+	text := v.text()
+	const unit = "bytes "
+	if len(text) < len(unit) || !strings.EqualFold(text[:len(unit)], unit) {
+		return 0
+	}
+	span, total, ok := strings.Cut(text[len(unit):], "/")
+	if !ok {
+		return 0
+	}
+	if span != "*" {
+		lo, hi, ok := strings.Cut(span, "-")
+		if !ok {
+			return 0
+		}
+		if _, ok := parseSizeDigits(lo); !ok {
+			return 0
+		}
+		if _, ok := parseSizeDigits(hi); !ok {
+			return 0
+		}
+	}
+	n, ok := parseSizeDigits(total)
+	if !ok {
+		return 0
+	}
+	return n
+}
+
+// parseSizeDigits parses a non-negative decimal size (up to int64); empty,
+// signed, fractional and overflowing values fail.
+func parseSizeDigits(s string) (int64, bool) {
+	n, err := strconv.ParseUint(s, 10, 63)
+	if err != nil {
+		return 0, false
+	}
+	return int64(n), true
+}
+
 // parseTime parses the $msec time: Unix seconds with an optional
 // fraction, as a JSON string or JSON number. The fraction is kept.
 func parseTime(v fieldValue) (time.Time, error) {
-	text := v.str
-	if !v.isStr {
-		text = string(v.raw)
-	}
+	text := v.text()
 	if text == "" || strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") {
 		return time.Time{}, errors.New("must be Unix seconds with fraction")
 	}
