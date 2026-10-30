@@ -24,15 +24,43 @@ path for unixgram). Unknown keys and invalid values abort startup.
 `ingest.parser: nginx` parses one JSON access-log line per message: the
 bandage nginx log format. Bandage ships it ready to include -
 [`configs/nginx/bandage_log.conf`](../configs/nginx/bandage_log.conf)
-defines `log_format bandage escape=json` with exactly the parser's seven
+defines `log_format bandage escape=json` with exactly the parser's nine
 mapped fields (`time`, `client`, `method`, `url`, `status`, `sent`,
-`agent`), so wiring ingest is `include .../bandage_log.conf;` and
+`clen`, `crange`, `agent`), so wiring ingest is `include .../bandage_log.conf;` and
 `access_log <path> bandage;` - no field contract to reverse-engineer.
+
+`sent` is the response payload bytes the request actually transferred;
+the two response-size fields feed the Filesize estimate
+([GLOSSARY.md](../GLOSSARY.md)) instead:
+
+- `clen` (`$sent_http_content_length`) - the response's
+  `Content-Length` header as a quoted string, `""` when the header was
+  not sent. It is strict: a present value must be a non-negative
+  integer - a negative or non-numeric `clen` is an invalid field and
+  drops the line, counted like any other bad log line. Absent, empty or
+  zero carries no size information.
+- `crange` (`$sent_http_content_range`) - the response's
+  `Content-Range` header as a quoted string, `""` when the header was
+  not sent. It is lenient by contract: `bytes <a>-<b>/<total>` and
+  `bytes */<total>` yield the file's total size; a `*` total and
+  anything unparsable carry no size information and never drop the
+  line.
+
+What feeds the estimate is the Sampling rule ([GLOSSARY.md](../GLOSSARY.md),
+[ADR 0019](adr/0019-filesize-from-response-sizes.md)): `clen` on
+GET/HEAD 200 and the `crange` total on GET 206 - response sizes, never
+the bytes a request happened to transfer.
 
 Migration (flux-compatible): lines from an existing flux `log_format`
 keep parsing unchanged - its extra `host`/`server`/`duration` fields
-(and any others) are accepted and ignored - while the `bandage` format
+(and any others) are accepted and ignored, and lines without `clen` and
+`crange` simply carry no size information - while the `bandage` format
 name never collides with an existing `flux` definition.
+
+**Rollout ordering:** deploy the updated nginx log format before
+upgrading bandage. The other order is safe - the daemon runs unchanged
+against old log lines - but the Filesize estimate stays unknown (replay
+stays blind) until the emitter is upgraded and paths are re-observed.
 
 ## Recommendation: udp or unixgram at high rate
 

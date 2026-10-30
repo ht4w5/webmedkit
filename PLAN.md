@@ -172,6 +172,8 @@ nginx log format (flux-compatible)
 | `url` | `$uri` | string | `Path` | `string` | required |
 | `status` | `$status` | number | `Status` | `int` | required, 100–599 |
 | `sent` | `$body_bytes_sent` | number | `SentBytes` | `int64` | required, ≥ 0 |
+| `clen` | `$sent_http_content_length` | string | `ContentLength` | `int64` | optional, `""` when absent; non-negative integer text, invalid drops the line |
+| `crange` | `$sent_http_content_range` | string | `ContentRangeTotal` | `int64` | optional, `""` when absent; `bytes <a>-<b>/<total>` or `bytes */<total>` parsed leniently to the total, else 0 (never drops the line) |
 | `agent` | `$http_user_agent` | string | `Agent` | `string` | optional, `""` when absent |
 | - | - | - | `SizeBytes` | `int64` | derived (enrichment), `FilesizeUnknown` = 0 until warm |
 
