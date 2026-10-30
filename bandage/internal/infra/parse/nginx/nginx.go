@@ -89,6 +89,7 @@ type rawFields struct {
 	URL    fieldValue `json:"url"`
 	Status fieldValue `json:"status"`
 	Sent   fieldValue `json:"sent"`
+	Clen   fieldValue `json:"clen"`
 	Agent  fieldValue `json:"agent"`
 }
 
@@ -158,6 +159,15 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 		return domain.Event{}, &FieldError{Field: "sent", Msg: "must be non-negative"}
 	}
 	ev.SentBytes = sent
+
+	// clen is optional; absent, null and "" (header not sent) mean no size
+	// information. When present it must be a non-negative integer, strict
+	// like sent: a malformed value drops the line.
+	if raw = fields.Clen; raw.present && !isNull(raw) {
+		if ev.ContentLength, err = parseContentLength(raw); err != nil {
+			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
+		}
+	}
 
 	// agent is optional; when present it must be a string (null = absent).
 	if raw = fields.Agent; raw.present && !isNull(raw) {
@@ -289,6 +299,28 @@ func parseInt(v fieldValue) (int64, error) {
 	n, err := strconv.ParseInt(string(v.raw), 10, 64)
 	if err != nil {
 		return 0, errors.New("must be an integer")
+	}
+	return n, nil
+}
+
+// parseContentLength parses the clen field: the log format carries it as
+// a quoted integer string ("" when the header was not sent); a bare
+// number is accepted too. Empty means absent and only non-negative
+// integers are valid.
+func parseContentLength(v fieldValue) (int64, error) {
+	text := v.str
+	if !v.isStr {
+		text = string(v.raw)
+	}
+	if text == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, errors.New("must be an integer")
+	}
+	if n < 0 {
+		return 0, errors.New("must be non-negative")
 	}
 	return n, nil
 }
