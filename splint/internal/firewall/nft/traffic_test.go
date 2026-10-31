@@ -1,6 +1,7 @@
 package nft
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/google/nftables"
@@ -28,6 +30,13 @@ import (
 // burst (5 datagrams) is overrun by a 20-datagram spike in a
 // millisecond of sends, and a spike of exactly 5 stays in rate.
 const meterRate = 5
+
+// meterByteRate is the bandwidth pin's stated Meter rate in response
+// bytes per second: five datagrams' worth (meterRate at datagramBytes
+// apiece). The kernel stocks a byte Meter with its derived burst plus
+// one second's worth of tokens - 290 bytes here, exactly ten
+// datagrams - so the spike arithmetic below is exact.
+const meterByteRate = meterRate * datagramBytes
 
 // datagramBytes is one pin datagram as the input hook counts it: the
 // 20-byte IPv4 header, the 8-byte UDP header, a 1-byte payload.
@@ -201,28 +210,137 @@ func TestKernelInRateMeteredTrafficFallsThroughUnchanged(t *testing.T) {
 	}
 }
 
-// spike is one burst of datagrams from one source prefix: the pin's
-// traffic pattern, delivered in order.
+// TestKernelSaturatingOneByteMeterLeavesItsSiblingUnaffected extends
+// the Meter independence pin to the response-bandwidth stance on the
+// egress direction: the byte budget each effective Target prefix owns
+// is its own. One bandwidth-limited ban rule covers two same-rate
+// prefixes, metered per prefix at the output hook (matched on
+// destination - the response direction the Penalty's unit names);
+// saturating one prefix's byte budget drops only its excess, and the
+// sibling's in-rate burst passes untouched.
+func TestKernelSaturatingOneByteMeterLeavesItsSiblingUnaffected(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root: netlink requires CAP_NET_ADMIN")
+	}
+	if reason := netlinkUnusable(); reason != "" {
+		t.Skip(reason)
+	}
+	unshare, err := exec.LookPath("unshare")
+	if err != nil {
+		t.Skip("needs unshare(1) to create the scratch network namespace")
+	}
+	path, _ := startScratchNetNS(t, unshare)
+
+	// Whatever happens in the scratch namespace, the current one must
+	// come out exactly as it went in - possibly under a live splint.
+	conn, err := nftables.New()
+	if err != nil {
+		t.Fatalf("nftables.New: %v", err)
+	}
+	existsBefore, err := tableExists(conn, ownedTable())
+	if err != nil {
+		t.Fatalf("probe current namespace: %v", err)
+	}
+
+	d, err := New(Config{Hook: HookInput, NetNSPath: path})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := d.Reset(); err != nil {
+			t.Errorf("cleanup reset: %v", err)
+		}
+	})
+	// One bandwidth-limited ban rule over two same-rate sibling
+	// prefixes - the shape whose byte budgets must never be shared -
+	// and the broader bandwidth rule below. The drop stance cannot
+	// witness egress fall-through (drop installs on ingress), so the
+	// witness is another bandwidth rule whose Meter is far too large
+	// to ever throttle (1 MB/s, burst 1 MB): its counter shows exactly
+	// what the Meters above let through.
+	rules := []firewall.BanRule{
+		bandwidthFixture(meterByteRate, "203.0.113.7/32", "198.51.100.7/32"),
+		bandwidthFixture(1000000, "0.0.0.0/0"),
+	}
+	if _, err := d.Apply(rules); err != nil {
+		t.Fatalf("Apply into the scratch namespace: %v", err)
+	}
+
+	// Saturate the first prefix's byte budget, then send the sibling's
+	// whole burst back-to-back while the first prefix's Meter is still
+	// dry: a shared budget would swallow the sibling's datagrams
+	// together with the first prefix's excess.
+	driveSpikes(t, path, []spike{
+		{from: netip.MustParseAddr("127.0.0.1"), to: netip.MustParseAddr("203.0.113.7"), datagrams: 20},
+		{from: netip.MustParseAddr("127.0.0.1"), to: netip.MustParseAddr("198.51.100.7"), datagrams: meterRate},
+	})
+
+	// A changed ruleset replaces the table and reports the replaced
+	// rules' counters - the read-back operators see.
+	out, err := d.Apply([]firewall.BanRule{dropFixture("203.0.113.8/32")})
+	if err != nil {
+		t.Fatalf("rebuild Apply: %v", err)
+	}
+	// Both Meters counted every datagram sent at them (20 + 5), but
+	// only the in-budget datagrams fell off the Meter chains' ends onto
+	// the witness below: the saturated prefix's 10 of 20 and the
+	// sibling's whole 5 of 5. A shared budget would read 25/10 - the
+	// sibling's burst swallowed with the excess.
+	want := []firewall.Hit{
+		{Rule: 0, Packets: 25, Bytes: 25 * datagramBytes},
+		{Rule: 1, Packets: 15, Bytes: 15 * datagramBytes},
+	}
+	if !reflect.DeepEqual(out.Hits, want) {
+		t.Errorf("hits = %+v, want %+v (per-prefix Meters: only the excess dropped, the sibling untouched)", out.Hits, want)
+	}
+
+	existsAfter, err := tableExists(conn, ownedTable())
+	if err != nil {
+		t.Fatalf("probe current namespace: %v", err)
+	}
+	if existsAfter != existsBefore {
+		t.Errorf("current namespace table existence = %v, want %v (driving traffic elsewhere must not touch it)", existsAfter, existsBefore)
+	}
+}
+
+// spike is one burst of datagrams from one source toward one
+// destination: the pin's traffic pattern, delivered in order. The
+// destination is zero for the ingress pin (the shared loopback
+// receiver); the egress pin names its metered prefixes as the
+// destinations - the response direction its Meters meter.
 type spike struct {
 	from      netip.Addr
+	to        netip.Addr
 	datagrams int
 }
 
 // driveSpikes delivers each spike back-to-back from inside the
-// scratch namespace: lo up carrying the spikes' sources, one one-byte
-// UDP datagram per send toward a receiver that absorbs them silently -
-// a reply would be traffic of its own at the hooks below the Meters.
+// scratch namespace: lo up carrying the spikes' endpoints, one
+// one-byte UDP datagram per send toward a receiver that absorbs them
+// silently - a reply would be traffic of its own at the hooks below
+// the Meters. Each spike's destination gets its own receiver (the
+// egress pin's metered prefixes); the zero destination is the shared
+// loopback receiver the ingress pin sends to.
 func driveSpikes(t *testing.T, path string, spikes []spike) {
 	t.Helper()
 	inScratchNetNS(t, path, func() {
 		addrs := []netip.Addr{netip.MustParseAddr("127.0.0.1")}
 		for _, s := range spikes {
-			addrs = append(addrs, s.from)
+			for _, a := range [2]netip.Addr{s.from, s.to} {
+				if a.IsValid() && !slices.Contains(addrs, a) {
+					addrs = append(addrs, a)
+				}
+			}
 		}
 		prepareLoopback(t, addrs)
-		dst := listenLoopback(t)
+		receivers := map[netip.Addr]*net.UDPAddr{}
 		for _, s := range spikes {
-			sendSpike(t, dst, s)
+			if _, ok := receivers[s.to]; !ok {
+				receivers[s.to] = listenLoopback(t, s.to)
+			}
+		}
+		for _, s := range spikes {
+			sendSpike(t, receivers[s.to], s)
 		}
 	})
 }
@@ -295,11 +413,15 @@ func prepareLoopback(t *testing.T, addrs []netip.Addr) {
 }
 
 // listenLoopback opens the receiver the pin's datagrams are sent to:
-// a silent UDP socket on lo. Absorbing the traffic keeps the hooks
-// quiet but for the pin's own datagrams.
-func listenLoopback(t *testing.T) *net.UDPAddr {
+// a silent UDP socket at the given address on lo (the zero address is
+// the loopback receiver). Absorbing the traffic keeps the hooks quiet
+// but for the pin's own datagrams.
+func listenLoopback(t *testing.T, ip netip.Addr) *net.UDPAddr {
 	t.Helper()
-	recv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if !ip.IsValid() {
+		ip = netip.MustParseAddr("127.0.0.1")
+	}
+	recv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip.AsSlice()})
 	if err != nil {
 		t.Fatalf("open the receiver: %v", err)
 	}
@@ -310,6 +432,9 @@ func listenLoopback(t *testing.T) *net.UDPAddr {
 // sendSpike delivers one spike's datagrams as fast as the kernel
 // takes them: a Meter's token bucket refills at the stated rate, so
 // the sends must outrun the refill for the excess count to be exact.
+// A send refused with EPERM is the egress hook dropping the datagram
+// at its Meter - enforcement working: the drop is synchronous to the
+// send, and the Meter's counter counts the datagram before it.
 func sendSpike(t *testing.T, dst *net.UDPAddr, s spike) {
 	t.Helper()
 	from, err := net.ListenUDP("udp4", &net.UDPAddr{IP: s.from.AsSlice()})
@@ -318,7 +443,7 @@ func sendSpike(t *testing.T, dst *net.UDPAddr, s spike) {
 	}
 	defer from.Close()
 	for i := 0; i < s.datagrams; i++ {
-		if _, err := from.WriteToUDP([]byte{0x5a}, dst); err != nil {
+		if _, err := from.WriteToUDP([]byte{0x5a}, dst); err != nil && !errors.Is(err, unix.EPERM) {
 			t.Fatalf("send from %s: %v", s.from, err)
 		}
 	}

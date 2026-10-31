@@ -532,14 +532,14 @@ startup instead of surfacing inside a kernel batch.
 | `drop` | verdict `drop` |
 | `reject` | `reject with icmpx admin-prohibited` (TCP gets a reset automatically) |
 | `limit-pkt-rate` | one Meter per effective Target prefix: `limit rate over N/second`, then `drop` |
-| `limit-bandwidth` | `limit rate bytes over N/second` on the egress chain, then `drop` |
+| `limit-bandwidth` | one Meter per effective Target prefix: `limit rate bytes over N/second` on the egress chain, then `drop` |
 | `limit-req-rate` | nothing - **declined** with a reason (application-layer intent), logged and counted |
 
 The direction split: one **ingress** chain at the configured hook
 carries `drop`, `reject` and `limit-pkt-rate`, matched on source ∈
-Target; one **egress** chain carries `limit-bandwidth` meters matched on
-destination ∈ Target - the response direction the Penalty's unit names
-(response-payload bytes). In input mode the egress chain attaches at
+Target; one **egress** chain carries the `limit-bandwidth` Meters
+matched on destination ∈ Target - the response direction the Penalty's
+unit names (response-payload bytes). In input mode the egress chain attaches at
 output and the ingress chain at input (filter priority 0); in
 prerouting mode the egress chain attaches at forward and the ingress
 chain at prerouting (raw priority −300, so ingress ban rules run
@@ -551,13 +551,14 @@ packet layer: the driver declines it with a reason and the engine logs
 and counts every decline (ADR 0012 narrows ADR 0011).
 
 Every limit is an aggregate over the Report's whole Target prefix, not
-each host inside it. A packet-rate limit installs one
+each host inside it. Every limit Penalty installs one
 **[Meter](../GLOSSARY.md)** - the rate-limit state carrying the
 Penalty's stated rate - per effective Target prefix (the Report's
-Target as narrowed by exclusions), so one noisy prefix never drains a
-same-rate sibling's allowed rate. Rate limits carry a derived burst of
-one second's worth of the rate (floored), so legitimate micro-bursts
-survive enforcement. Every ban rule carries a packet/byte counter on
+Target as narrowed by exclusions) per dimension (packet rate or
+response bandwidth), so one noisy prefix never drains a same-rate
+sibling's allowed rate, and two limit Penalties on one target never
+interfere. Meters carry a derived burst of one second's worth of the
+rate (floored), so legitimate micro-bursts survive enforcement. Every ban rule carries a packet/byte counter on
 the traffic the rule matches - never the traffic the enforcement scope
 or Target match lets past; nonzero hits are logged at each install - "since the
 last change" (see the cycle logs below).

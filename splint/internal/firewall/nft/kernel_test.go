@@ -244,7 +244,7 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_4", l4Set: "il4_4", tail: dropTail},   // 255.255.255.0/24
 	}
 	egressRules := []wantRule{
-		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
+		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", metered: true}, // 203.0.113.9/32, one Meter per prefix on the egress direction
 	}
 	// The sets behind the rules; v4_4's top-touching range gets the
 	// null end (its "end 0.0.0.0" element). Every rule's protocol gate
@@ -252,11 +252,11 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	wantSets := map[string]wantSet{
 		"v4_0": {interval: true, elems: []string{"end 198.51.100.8", "end 203.0.114.0", "start 198.51.100.7", "start 203.0.113.0"}},
 		"v6_1": {interval: true, elems: []string{"end 2001:db9::", "start 2001:db8::"}},
-		// v4_2 is the metered rule's verdict map. The read-back reports
-		// its element keys; each element's jump into its slot's Meter
-		// chain is pinned at the fake seam.
+		// v4_2 and v4_3 are the metered rules' verdict maps. The
+		// read-back reports their element keys; each element's jump into
+		// its slot's Meter chain is pinned at the fake seam.
 		"v4_2":  {isMap: true, interval: true, elems: []string{"end 198.51.100.10", "start 198.51.100.9"}},
-		"v4_3":  {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
+		"v4_3":  {isMap: true, interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
 		"v4_4":  {interval: true, elems: []string{"end 0.0.0.0", "start 255.255.255.0"}},
 		"il4_0": {elems: []string{"17", "6"}}, // udp and tcp; sorted as strings
 		"il4_1": {elems: []string{"17", "6"}},
@@ -266,6 +266,7 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	}
 	wantMeters := map[string]tailCheck{
 		"v4_2.0": meterTail(expr.LimitTypePkts, 250, 250),
+		"v4_3.0": meterTail(expr.LimitTypePktBytes, 1000000, 1000000),
 	}
 	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets, wantMeters)
 }
@@ -294,20 +295,20 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 			proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_1",
 			l4Set: "el4_1", portSet: "esp_1", portOff: 0,
 			scopeSet: "esa4_1", scopeOff: 12, scopeLen: 4,
-			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 203.0.113.9/32 under the egress scope
+			metered: true, // 203.0.113.9/32 under the egress scope
 		},
 		{
 			proto: unix.NFPROTO_IPV6, off: 24, length: 16, setName: "v6_1",
 			l4Set: "el4_1", portSet: "esp_1", portOff: 0,
 			scopeSet: "esa6_1", scopeOff: 8, scopeLen: 16,
-			tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000), // 2001:db8::9/128 under the egress scope
+			metered: true, // 2001:db8::9/128 under the egress scope
 		},
 	}
 	wantSets := map[string]wantSet{
 		"v4_0":   {interval: true, elems: []string{"end 203.0.113.8", "start 203.0.113.7"}},
 		"v6_0":   {interval: true, elems: []string{"end 2001:db8::8", "start 2001:db8::7"}},
-		"v4_1":   {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
-		"v6_1":   {interval: true, elems: []string{"end 2001:db8::a", "start 2001:db8::9"}},
+		"v4_1":   {isMap: true, interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
+		"v6_1":   {isMap: true, interval: true, elems: []string{"end 2001:db8::a", "start 2001:db8::9"}},
 		"ida4_0": {interval: true, elems: []string{"end 198.51.100.6", "start 198.51.100.5"}},
 		"ida6_0": {interval: true, elems: []string{"end 2001:db8::6", "start 2001:db8::5"}},
 		"esa4_1": {interval: true, elems: []string{"end 192.0.2.6", "start 192.0.2.5"}},
@@ -317,7 +318,11 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 		"el4_1":  {elems: []string{"17"}},          // the egress scope gates on udp alone
 		"esp_1":  {elems: []string{"53"}},          // the egress scope's sport
 	}
-	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets, nil)
+	wantMeters := map[string]tailCheck{
+		"v4_1.0": meterTail(expr.LimitTypePktBytes, 1000000, 1000000),
+		"v6_1.0": meterTail(expr.LimitTypePktBytes, 1000000, 1000000),
+	}
+	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets, wantMeters)
 }
 
 // assertEmptyKernelState asserts a rebuild that installed nothing:

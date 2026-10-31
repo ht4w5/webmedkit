@@ -919,7 +919,7 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 		want := []string{
 			"del-table", "add-table", "add-chain", "add-chain",
 			"add-set", "add-set", "add-rule", // the protocol gate and the target of ban rule 0
-			"add-set", "add-set", "add-rule", // the protocol gate and the target of ban rule 1
+			"add-set", "add-chain", "add-rule", "add-set", "add-rule", // ban rule 1: its gate, its Meter chain and rule, its verdict map, its rule
 		}
 		if !reflect.DeepEqual(kinds, want) {
 			t.Errorf("batch = %v, want %v", kinds, want)
@@ -997,7 +997,7 @@ func TestApplyComposesTheTargetMatchAndTheTerminal(t *testing.T) {
 		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", metered: true},    // 198.51.100.9/32
 	}
 	egressRules := []wantRule{
-		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
+		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", metered: true}, // 203.0.113.9/32
 	}
 	assertRecorded := func(chain string, want []wantRule) {
 		t.Helper()
@@ -1014,12 +1014,13 @@ func TestApplyComposesTheTargetMatchAndTheTerminal(t *testing.T) {
 }
 
 // TestApplyInstallsOneMeterPerEffectiveTargetPrefix pins the metered
-// ban rule's installed shape: one interval verdict map per ban rule
-// and address family, its elements jumping to one Meter chain per
+// ban rules' installed shape - packet rate on ingress, response
+// bandwidth on egress: one interval verdict map per ban rule and
+// address family, its elements jumping to one Meter chain per
 // effective Target prefix - each chain its prefix's counter, Meter
 // (the stated rate, the derived burst, inverted semantics) and drop,
-// in that order. The drop and reject ban rules beside it install
-// unchanged.
+// in that order. Each dimension meters per prefix in its own chains.
+// The drop and reject ban rules beside them install unchanged.
 func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 	kernel := newFakeKernel()
 	rules := []firewall.BanRule{
@@ -1030,6 +1031,7 @@ func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 			netip.MustParsePrefix("198.51.100.128/25"),
 			netip.MustParsePrefix("2001:db8::/32"),
 		}, Stance: firewall.StanceLimitPktRate, Rate: ratePtr(250)},
+		bandwidthFixture(1000000, "203.0.113.9/32", "203.0.113.128/25"),
 	}
 	if _, err := newFakeDriver(t, HookInput, kernel).Apply(rules); err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -1042,11 +1044,11 @@ func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 			gotNames = append(gotNames, name)
 		}
 		slices.Sort(gotNames)
-		wantNames := []string{"il4_0", "il4_1", "il4_2", "v4_0", "v4_1", "v4_2", "v6_2"}
+		wantNames := []string{"el4_3", "il4_0", "il4_1", "il4_2", "v4_0", "v4_1", "v4_2", "v4_3", "v6_2"}
 		if !slices.Equal(gotNames, wantNames) {
-			t.Fatalf("kernel sets = %v, want %v (one verdict map per family of the metered rule, the rest unchanged)", gotNames, wantNames)
+			t.Fatalf("kernel sets = %v, want %v (one verdict map per family of each metered rule, the rest unchanged)", gotNames, wantNames)
 		}
-		for _, name := range []string{"v4_2", "v6_2"} {
+		for _, name := range []string{"v4_2", "v6_2", "v4_3"} {
 			s := sets[name]
 			if !s.set.IsMap || !s.set.Interval || s.set.DataType != nftables.TypeVerdict {
 				t.Errorf("set %q = map %v interval %v type %v, want the interval verdict map", name, s.set.IsMap, s.set.Interval, s.set.DataType)
@@ -1069,6 +1071,12 @@ func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 				"end 2001:db9::",
 				"start 2001:db8:: -> jump v6_2.0",
 			},
+			"v4_3": {
+				"end 203.0.113.10",
+				"end 203.0.114.0",
+				"start 203.0.113.128 -> jump v4_3.1",
+				"start 203.0.113.9 -> jump v4_3.0",
+			},
 		}
 		for name, want := range wantElems {
 			s := sets[name]
@@ -1079,12 +1087,18 @@ func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 	})
 
 	t.Run("one Meter chain per effective Target prefix, each its counter, Meter and drop in order", func(t *testing.T) {
-		wantChains := []string{"egress", "ingress", "v4_2.0", "v4_2.1", "v6_2.0"}
+		wantChains := []string{"egress", "ingress", "v4_2.0", "v4_2.1", "v4_3.0", "v4_3.1", "v6_2.0"}
 		if got := kernel.chainNames(); !slices.Equal(got, wantChains) {
 			t.Fatalf("chains = %v, want %v (one chain per effective Target prefix, no more)", got, wantChains)
 		}
-		meter := meterTail(expr.LimitTypePkts, 250, 250)
-		for _, name := range []string{"v4_2.0", "v4_2.1", "v6_2.0"} {
+		meters := map[string]tailCheck{
+			"v4_2.0": meterTail(expr.LimitTypePkts, 250, 250),
+			"v4_2.1": meterTail(expr.LimitTypePkts, 250, 250),
+			"v6_2.0": meterTail(expr.LimitTypePkts, 250, 250),
+			"v4_3.0": meterTail(expr.LimitTypePktBytes, 1000000, 1000000),
+			"v4_3.1": meterTail(expr.LimitTypePktBytes, 1000000, 1000000),
+		}
+		for name, meter := range meters {
 			recorded := kernel.recordedRules(name)
 			if len(recorded) != 1 {
 				t.Fatalf("chain %s carries %d kernel rules, want exactly 1", name, len(recorded))
@@ -1100,16 +1114,21 @@ func TestApplyInstallsOneMeterPerEffectiveTargetPrefix(t *testing.T) {
 			{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", metered: true},
 			{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_2", l4Set: "il4_2", metered: true},
 		}
-		recorded := kernel.recordedRules(ingressName)
-		if len(recorded) != len(ingressRules) {
-			t.Fatalf("ingress chain carries %d kernel rules, want %d", len(recorded), len(ingressRules))
+		egressRules := []wantRule{
+			{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", metered: true}, // 203.0.113.9/32 + 203.0.113.128/25
 		}
-		for i, w := range ingressRules {
-			assertRule(t, recorded[i], w)
+		assertRecorded := func(chain string, want []wantRule) {
+			t.Helper()
+			recorded := kernel.recordedRules(chain)
+			if len(recorded) != len(want) {
+				t.Fatalf("chain %s carries %d kernel rules, want %d", chain, len(recorded), len(want))
+			}
+			for i, w := range want {
+				assertRule(t, recorded[i], w)
+			}
 		}
-		if n := kernel.rulesIn(egressName); n != 0 {
-			t.Errorf("egress chain carries %d kernel rules, want 0", n)
-		}
+		assertRecorded(ingressName, ingressRules)
+		assertRecorded(egressName, egressRules)
 	})
 }
 
