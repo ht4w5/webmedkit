@@ -82,6 +82,11 @@ type Driver struct {
 	// marks a succeeded apply (the zero hash is a legal hash).
 	hash      uint32
 	installed bool
+
+	// prevRules are the last install's input rules - the ruleset the
+	// hit read-back reports on; without them a Meter reading's prefix
+	// cannot be named.
+	prevRules []firewall.BanRule
 }
 
 var _ firewall.Driver = (*Driver)(nil)
@@ -143,7 +148,7 @@ type kernelConn interface {
 	DelTable(*nftables.Table)
 	Flush() error
 	ListTableOfFamily(name string, family nftables.TableFamily) (*nftables.Table, error)
-	ListChain(table *nftables.Table, chain string) (*nftables.Chain, error)
+	ListChainsOfTableFamily(family nftables.TableFamily) ([]*nftables.Chain, error)
 	GetRules(table *nftables.Table, chain *nftables.Chain) ([]*nftables.Rule, error)
 }
 
@@ -188,6 +193,13 @@ func (d *Driver) openNetlink() (kernelConn, io.Closer, error) {
 
 func ownedTable() *nftables.Table {
 	return &nftables.Table{Family: nftables.TableFamilyINet, Name: tableName}
+}
+
+// chainOfTable reports whether a listed chain belongs to the given
+// table: chain listings span the family, and only the owned table's
+// chains hold the driver's own counters.
+func chainOfTable(chain *nftables.Chain, table *nftables.Table) bool {
+	return chain.Table != nil && chain.Table.Name == table.Name && chain.Table.Family == table.Family
 }
 
 // tableExists probes for the owned table: a delete of a missing
@@ -468,7 +480,7 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 	}
 	var hits []firewall.Hit
 	if exists {
-		hits, err = ruleHits(conn, table)
+		hits, err = ruleHits(conn, table, d.prevRules)
 		if err != nil {
 			return firewall.Outcome{}, fmt.Errorf("apply: read rule counters: %w", err)
 		}
@@ -493,23 +505,47 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 		return firewall.Outcome{}, fmt.Errorf("apply: %w", err)
 	}
 	d.hash, d.installed = plan.Hash, true
+	d.prevRules = slices.Clone(rules)
 	return firewall.Outcome{Hash: plan.Hash, Hits: hits, Declined: plan.Declined}, nil
 }
 
+// ruleRead accumulates one ban rule's counter readings as the
+// read-back walks the owned table; prefixes are its Meter readings
+// keyed by the effective Target prefix they meter.
+type ruleRead struct {
+	packets  uint64
+	bytes    uint64
+	prefixes map[string]*prefixRead
+}
+
+// prefixRead is one prefix's Meter reading.
+type prefixRead struct {
+	packets uint64
+	bytes   uint64
+}
+
 // ruleHits reads the owned table's per-rule counters back, one hit
-// per ban rule: the counter position and the set-name index map each
-// reading onto the ban rule it counts - the ruleset being replaced.
-// Only nonzero readings come back.
-func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
-	byRule := map[int]firewall.Hit{}
-	for _, name := range []string{ingressName, egressName} {
-		chain, err := conn.ListChain(table, name)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue // the chain is gone with the table
-			}
-			return nil, err
+// per ban rule. Every chain the owned table holds is read: a chain
+// named after its ban rule (a verdict-map element slot chain) names
+// the ban rule outright, a base chain's kernel rule carries its index
+// in its set names - either way the readings aggregate onto the ban
+// rule they count, the ruleset being replaced (prev). A metered rule's
+// Meter readings also break down per effective Target prefix. Only
+// nonzero readings come back.
+func ruleHits(conn kernelConn, table *nftables.Table, prev []firewall.BanRule) ([]firewall.Hit, error) {
+	chains, err := conn.ListChainsOfTableFamily(table.Family)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil // the chains are gone with the table
 		}
+		return nil, err
+	}
+	byRule := map[int]*ruleRead{}
+	for _, chain := range chains {
+		if !chainOfTable(chain, table) {
+			continue // not a chain of the owned table
+		}
+		cs, isSlotChain := meterChainSlot(chain.Name)
 		krules, err := conn.GetRules(table, chain)
 		if err != nil {
 			return nil, err
@@ -519,16 +555,52 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 			if !ok || (c.Packets == 0 && c.Bytes == 0) {
 				continue
 			}
-			i, ok := ruleIndex(r)
+			i, ok := chainRuleIndex(chain.Name) // the chain names its ban rule
+			if !ok {
+				i, ok = ruleIndex(r) // a base chain's rule names its own
+			}
 			if !ok {
 				continue // not a kernel rule this driver wrote
 			}
-			h := byRule[i]
-			byRule[i] = firewall.Hit{Rule: i, Packets: h.Packets + c.Packets, Bytes: h.Bytes + c.Bytes}
+			read := byRule[i]
+			if read == nil {
+				read = &ruleRead{prefixes: map[string]*prefixRead{}}
+				byRule[i] = read
+			}
+			read.packets += c.Packets
+			read.bytes += c.Bytes
+			if !isSlotChain {
+				continue
+			}
+			if target, ok := meterTarget(prev, i, cs); ok {
+				p := read.prefixes[target]
+				if p == nil {
+					p = &prefixRead{}
+					read.prefixes[target] = p
+				}
+				p.packets += c.Packets
+				p.bytes += c.Bytes
+			}
 		}
 	}
 	hits := make([]firewall.Hit, 0, len(byRule))
-	for _, h := range byRule {
+	for i, read := range byRule {
+		h := firewall.Hit{Rule: i, Packets: read.packets, Bytes: read.bytes}
+		if i >= 0 && i < len(prev) {
+			// Entries come out in the order the Meter chains were
+			// appended: family, then slot in the family's target list.
+			for _, f := range families {
+				for _, t := range familyPrefixes(prev[i].Targets, f) {
+					target := t.String()
+					p := read.prefixes[target]
+					if p == nil {
+						continue
+					}
+					delete(read.prefixes, target) // a repeated target meters once
+					h.Prefixes = append(h.Prefixes, firewall.PrefixHit{Target: target, Packets: p.packets, Bytes: p.bytes})
+				}
+			}
+		}
 		hits = append(hits, h)
 	}
 	slices.SortFunc(hits, func(a, b firewall.Hit) int { return a.Rule - b.Rule })
@@ -563,6 +635,71 @@ func ruleIndex(r *nftables.Rule) (int, bool) {
 	return 0, false
 }
 
+// chainSlot is a Meter chain's identity: the verdict map it slots
+// into (v4_3) and its slot in the map (1).
+type chainSlot struct {
+	mapName string
+	slot    int
+}
+
+// meterChainSlot splits an owned chain's name at its slot separator
+// (v4_3.1); a name without a numeric slot segment (the base chains)
+// names no Meter chain.
+func meterChainSlot(name string) (chainSlot, bool) {
+	dot := strings.LastIndex(name, meterSlotSep)
+	if dot < 0 {
+		return chainSlot{}, false
+	}
+	slot, err := strconv.Atoi(name[dot+1:])
+	if err != nil {
+		return chainSlot{}, false
+	}
+	return chainSlot{mapName: name[:dot], slot: slot}, true
+}
+
+// chainRuleIndex reads a ban rule's index out of an owned chain's
+// name: a chain named after its verdict-map element slot strips its
+// trailing slot segment and takes the index its map name carries -
+// the index ruleIndex reads from a kernel rule's set names. A name
+// without a slot segment (the base chains) names no ban rule.
+func chainRuleIndex(name string) (int, bool) {
+	cs, ok := meterChainSlot(name)
+	if !ok {
+		return 0, false
+	}
+	i, err := strconv.Atoi(cs.mapName[strings.LastIndex(cs.mapName, "_")+1:])
+	if err != nil {
+		return 0, false
+	}
+	return i, true
+}
+
+// meterTarget names the effective Target prefix one Meter chain
+// meters, through the ruleset being replaced (prev): the chain's
+// verdict map names the ban rule and address family, its slot the
+// prefix's position in that family's target list. Only a metered rule
+// owns Meters - anything else matches no prefix.
+func meterTarget(prev []firewall.BanRule, rule int, cs chainSlot) (string, bool) {
+	if rule < 0 || rule >= len(prev) {
+		return "", false
+	}
+	r := prev[rule]
+	if !metered(r.Stance) {
+		return "", false
+	}
+	for _, f := range families {
+		if f.setName(rule) != cs.mapName {
+			continue
+		}
+		targets := familyPrefixes(r.Targets, f)
+		if cs.slot < 0 || cs.slot >= len(targets) {
+			return "", false
+		}
+		return targets[cs.slot].String(), true
+	}
+	return "", false
+}
+
 // Reset removes the owned table with everything in it, tolerating the
 // table being already absent, and ends the skip state: after a reset
 // the same ruleset installs again.
@@ -580,6 +717,7 @@ func (d *Driver) Reset() error {
 		return fmt.Errorf("reset: %w", err)
 	}
 	d.installed = false
+	d.prevRules = nil
 	return nil
 }
 
@@ -689,12 +827,20 @@ func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 	return fams
 }
 
-// addBanRule buffers one ban rule's sets and kernel rules: one
-// target interval set, one kernel rule per reachable family.
+// addBanRule buffers one ban rule's sets, Meter chains and kernel
+// rules: one target set (a metered stance's interval verdict map into
+// its per-prefix Meters, a plain interval set otherwise) and one
+// kernel rule per reachable family, each kernel rule its target match
+// composed with its terminal.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
-	verdict, err := verdictExprs(r)
-	if err != nil {
-		return err
+	isMetered := metered(r.Stance)
+	var terminal []expr.Any
+	if !isMetered {
+		var err error
+		terminal, err = terminalExprs(r)
+		if err != nil {
+			return err
+		}
 	}
 	dir, err := d.direction(r.Stance)
 	if err != nil {
@@ -739,19 +885,11 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 	}
 	for _, f := range familyRules {
 		fam := f.family
-		if err := conn.AddSet(&nftables.Set{
-			Table:    table,
-			KeyType:  fam.keyType,
-			Name:     fam.setName(i),
-			Interval: true,
-		}, intervalElements(f.targets)); err != nil {
-			return err
-		}
-		exprs := []expr.Any{
+		match := []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.proto}},
 		}
-		exprs = append(exprs, scopeExprs...)
+		match = append(match, scopeExprs...)
 		if len(f.scopeAddrs) > 0 {
 			if err := conn.AddSet(&nftables.Set{
 				Table:    table,
@@ -761,28 +899,64 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			}, intervalElements(f.scopeAddrs)); err != nil {
 				return err
 			}
-			exprs = append(exprs,
+			match = append(match,
 				&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
 					Base: expr.PayloadBaseNetworkHeader, Offset: dir.scopeOff(fam), Len: fam.srcLen},
 				&expr.Lookup{SourceRegister: 1, SetName: dir.addrSet(fam, i)},
 			)
 		}
-		exprs = append(exprs,
-			&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
-				Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
-			&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
-			// The counter sits after every match and immediately before
-			// the verdict, so it counts only the ban rule's own hits.
-			&expr.Counter{},
-		)
-		exprs = append(exprs, verdict...)
-		conn.AddRule(&nftables.Rule{
-			Table: table,
-			Chain: chain,
-			Exprs: exprs,
-		})
+		match = append(match, targetMatchExprs(dir, fam, i, isMetered)...)
+		if isMetered {
+			// One Meter per effective Target prefix (ADR 0020). The
+			// jump ends the rule: the terminal lives in the slot chains.
+			if err := addMeterChains(conn, table, fam, i, r, f.targets); err != nil {
+				return err
+			}
+			if err := conn.AddSet(&nftables.Set{
+				Table:    table,
+				KeyType:  fam.keyType,
+				Name:     fam.setName(i),
+				Interval: true,
+				IsMap:    true,
+				DataType: nftables.TypeVerdict,
+			}, meterElements(f.targets, fam.setName(i))); err != nil {
+				return err
+			}
+			conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})
+			continue
+		}
+		if err := conn.AddSet(&nftables.Set{
+			Table:    table,
+			KeyType:  fam.keyType,
+			Name:     fam.setName(i),
+			Interval: true,
+		}, intervalElements(f.targets)); err != nil {
+			return err
+		}
+		// The target match and the terminal compose into the one
+		// kernel rule: either substitutes without the other.
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: append(match, terminal...)})
 	}
 	return nil
+}
+
+// targetMatchExprs builds a ban rule's target match: the load of the
+// address its direction matches on and the lookup of the family's
+// target set. A verdict map's lookup lands its element's jump verdict
+// in the verdict register - the destination the kernel applies it
+// from. It composes with terminalExprs into one kernel rule - match
+// first, terminal last.
+func targetMatchExprs(dir banDirection, fam addrFamily, i int, verdictMap bool) []expr.Any {
+	lookup := &expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)}
+	if verdictMap {
+		lookup.DestRegister = unix.NFT_REG_VERDICT
+		lookup.IsDestRegSet = true
+	}
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
+			Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
+		lookup,
+	}
 }
 
 func familyPrefixes(prefixes []netip.Prefix, fam addrFamily) []netip.Prefix {
@@ -814,12 +988,23 @@ func portElements(ports []uint16) []nftables.SetElement {
 	return elems
 }
 
-// verdictExprs maps a stance onto its verdict expressions (unknown
-// stances error loudly). Reject is icmpx admin-prohibited: TCP peers
-// get a reset automatically. The rate meter's Over flag drops only
-// the traffic past the rate. Reject at prerouting needs kernel ~5.9 -
-// older kernels refuse the batch, the documented floor for --hook
-// prerouting.
+// terminalExprs builds a ban rule's terminal: the counter and the
+// stance's verdict tail. The counter sits after every match and
+// immediately before the verdict, so it counts only the ban rule's
+// own hits.
+func terminalExprs(r firewall.BanRule) ([]expr.Any, error) {
+	verdict, err := verdictExprs(r)
+	if err != nil {
+		return nil, err
+	}
+	return append([]expr.Any{&expr.Counter{}}, verdict...), nil
+}
+
+// verdictExprs maps a terminal stance onto its verdict tail: drop
+// and reject only (unknown stances error loudly). Reject is icmpx
+// admin-prohibited: TCP peers get a reset automatically. Reject at
+// prerouting needs kernel ~5.9 - older kernels refuse the batch, the
+// documented floor for --hook prerouting.
 func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 	switch r.Stance {
 	case firewall.StanceDrop:
@@ -829,27 +1014,73 @@ func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 			Type: unix.NFT_REJECT_ICMPX_UNREACH,
 			Code: unix.NFT_REJECT_ICMPX_ADMIN_PROHIBITED,
 		}}, nil
-	case firewall.StanceLimitPktRate, firewall.StanceLimitBandwidth:
-		if err := checkRate(r); err != nil {
-			return nil, err
-		}
-		limitType := expr.LimitTypePkts
-		if r.Stance == firewall.StanceLimitBandwidth {
-			limitType = expr.LimitTypePktBytes
-		}
-		return []expr.Any{
-			&expr.Limit{
-				Type:  limitType,
-				Rate:  uint64(*r.Rate),
-				Over:  true,
-				Unit:  expr.LimitTimeSecond,
-				Burst: burstFor(*r.Rate),
-			},
-			&expr.Verdict{Kind: expr.VerdictDrop},
-		}, nil
 	default:
+		if metered(r.Stance) {
+			// An inline limit would share one budget across the prefixes.
+			return nil, fmt.Errorf("stance %q: terminates in its Meter chains, never at the rule", r.Stance)
+		}
 		return nil, fmt.Errorf("stance %q: not supported", r.Stance)
 	}
+}
+
+// metered reports whether a stance enforces through per-prefix Meters
+// (ADR 0020) - the limit stances, packet rate and response bandwidth:
+// its target set is an interval verdict map whose slots jump to
+// per-prefix chains, instead of a plain target set with an inline
+// limit.
+func metered(s firewall.Stance) bool {
+	return s == firewall.StanceLimitPktRate || s == firewall.StanceLimitBandwidth
+}
+
+// addMeterChains buffers one ban rule's Meter chains for a family:
+// one chain per effective Target prefix, named after its verdict-map
+// element slot (map.slot), each holding its prefix's counter, Meter
+// and drop. The chains read no registers - recent kernels refuse a
+// rule reading a register no earlier expression loads.
+func addMeterChains(conn kernelConn, table *nftables.Table, fam addrFamily, i int, r firewall.BanRule, targets []netip.Prefix) error {
+	meter, err := meterChainExprs(r)
+	if err != nil {
+		return err
+	}
+	for slot := range targets {
+		chain := conn.AddChain(&nftables.Chain{Table: table, Name: meterChainName(fam.setName(i), slot)})
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: meter})
+	}
+	return nil
+}
+
+// meterChainExprs builds a Meter chain's one kernel rule: the
+// prefix's counter, its Meter - the limit expression with the stated
+// rate, the derived burst, inverted semantics - and the drop. In-rate
+// traffic matches no limit and falls off the chain end, back into the
+// calling rule walk.
+func meterChainExprs(r firewall.BanRule) ([]expr.Any, error) {
+	lim, err := limitExpr(r)
+	if err != nil {
+		return nil, err
+	}
+	return []expr.Any{&expr.Counter{}, lim, &expr.Verdict{Kind: expr.VerdictDrop}}, nil
+}
+
+// limitExpr is a ban rule's rate limit as one limit expression: the
+// Penalty's stated rate, the derived burst, and inverted ("over")
+// semantics - only the traffic past the rate matches, so the drop
+// applies to the excess alone.
+func limitExpr(r firewall.BanRule) (*expr.Limit, error) {
+	if err := checkRate(r); err != nil {
+		return nil, err
+	}
+	limitType := expr.LimitTypePkts
+	if r.Stance == firewall.StanceLimitBandwidth {
+		limitType = expr.LimitTypePktBytes
+	}
+	return &expr.Limit{
+		Type:  limitType,
+		Rate:  uint64(*r.Rate),
+		Over:  true,
+		Unit:  expr.LimitTimeSecond,
+		Burst: burstFor(*r.Rate),
+	}, nil
 }
 
 // burstFor derives a rate meter's burst: one second's worth of the
@@ -860,6 +1091,29 @@ func burstFor(rate int64) uint32 {
 		return math.MaxUint32
 	}
 	return uint32(rate) // rate >= 1 where the compiler emits it
+}
+
+// meterSlotSep is the one separator in a Meter chain's map.slot name
+// (v4_3.1): meterChainName builds the shape chainRuleIndex parses.
+const meterSlotSep = "."
+
+// meterChainName is the chain one verdict-map element jumps to: the
+// map name plus the element's numeric slot suffix - the shape
+// chainRuleIndex strips to name the ban rule.
+func meterChainName(mapName string, slot int) string {
+	return mapName + meterSlotSep + strconv.Itoa(slot)
+}
+
+// meterElements encodes the effective Target prefixes as a verdict
+// map's element pairs: intervalElements' ranges, each start element
+// carrying the jump into its slot's Meter chain (one element per
+// prefix, slots positional in the target list).
+func meterElements(prefixes []netip.Prefix, mapName string) []nftables.SetElement {
+	elems := intervalElements(prefixes)
+	for slot := range prefixes {
+		elems[2*slot].VerdictData = &expr.Verdict{Kind: expr.VerdictJump, Chain: meterChainName(mapName, slot)}
+	}
+	return elems
 }
 
 // intervalElements encodes masked Target prefixes as an interval
