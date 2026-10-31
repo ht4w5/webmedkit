@@ -186,6 +186,14 @@ func (k *fakeKernel) rulesIn(chain string) int {
 	return len(k.chains[chain])
 }
 
+// recordedRules serves the flushed kernel rules of one chain - the
+// installed shape the fake keeps for the seam's assertions.
+func (k *fakeKernel) recordedRules(chain string) []*nftables.Rule {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]*nftables.Rule(nil), k.chains[chain]...)
+}
+
 func (k *fakeKernel) probeCount() int {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -822,6 +830,51 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 			t.Errorf("batch = %v, want %v", kinds, want)
 		}
 	})
+}
+
+// TestApplyComposesTheTargetMatchAndTheTerminal pins the rule
+// builder's seam at the installed shape: every kernel rule is its ban
+// rule's target match - family gate, scope gates, target-address
+// match - followed whole by its terminal (the counter and the
+// stance's verdict tail). Either half substitutes without the other.
+// The wants are hand-written like the kernel suite's, whose shape
+// assertions need root; this pin runs on the fake kernel.
+func TestApplyComposesTheTargetMatchAndTheTerminal(t *testing.T) {
+	kernel := newFakeKernel()
+	rules := []firewall.BanRule{
+		{Targets: []netip.Prefix{
+			netip.MustParsePrefix("203.0.113.0/24"),
+			netip.MustParsePrefix("2001:db8::/32"),
+		}, Stance: firewall.StanceDrop},
+		{Targets: []netip.Prefix{netip.MustParsePrefix("198.51.100.7/32")}, Stance: firewall.StanceReject},
+		{Targets: []netip.Prefix{netip.MustParsePrefix("198.51.100.9/32")}, Stance: firewall.StanceLimitPktRate, Rate: ratePtr(250)},
+		bandwidthFixture(1000000, "203.0.113.9/32"),
+	}
+	if _, err := newFakeDriver(t, HookInput, kernel).Apply(rules); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	ingressRules := []wantRule{
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", l4Set: "il4_0", tail: dropTail},                                // 203.0.113.0/24
+		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_0", l4Set: "il4_0", tail: dropTail},                                // 2001:db8::/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_1", l4Set: "il4_1", tail: rejectTail},                              // 198.51.100.7/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", tail: limitTail(expr.LimitTypePkts, 250, 250)}, // 198.51.100.9/32
+	}
+	egressRules := []wantRule{
+		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
+	}
+	assertRecorded := func(chain string, want []wantRule) {
+		t.Helper()
+		recorded := kernel.recordedRules(chain)
+		if len(recorded) != len(want) {
+			t.Fatalf("chain %s carries %d kernel rules, want %d", chain, len(recorded), len(want))
+		}
+		for i, w := range want {
+			tail := assertMatch(t, recorded[i], w)
+			w.tail(t, tail)
+		}
+	}
+	assertRecorded(ingressName, ingressRules)
+	assertRecorded(egressName, egressRules)
 }
 
 func TestResetToleratesAnAbsentRuleset(t *testing.T) {

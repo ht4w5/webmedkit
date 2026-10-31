@@ -690,9 +690,10 @@ func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 }
 
 // addBanRule buffers one ban rule's sets and kernel rules: one
-// target interval set, one kernel rule per reachable family.
+// target interval set, one kernel rule per reachable family, each
+// kernel rule its target match composed with its terminal.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
-	verdict, err := verdictExprs(r)
+	terminal, err := terminalExprs(r)
 	if err != nil {
 		return err
 	}
@@ -747,11 +748,11 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		}, intervalElements(f.targets)); err != nil {
 			return err
 		}
-		exprs := []expr.Any{
+		match := []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.proto}},
 		}
-		exprs = append(exprs, scopeExprs...)
+		match = append(match, scopeExprs...)
 		if len(f.scopeAddrs) > 0 {
 			if err := conn.AddSet(&nftables.Set{
 				Table:    table,
@@ -761,28 +762,34 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			}, intervalElements(f.scopeAddrs)); err != nil {
 				return err
 			}
-			exprs = append(exprs,
+			match = append(match,
 				&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
 					Base: expr.PayloadBaseNetworkHeader, Offset: dir.scopeOff(fam), Len: fam.srcLen},
 				&expr.Lookup{SourceRegister: 1, SetName: dir.addrSet(fam, i)},
 			)
 		}
-		exprs = append(exprs,
-			&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
-				Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
-			&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
-			// The counter sits after every match and immediately before
-			// the verdict, so it counts only the ban rule's own hits.
-			&expr.Counter{},
-		)
-		exprs = append(exprs, verdict...)
+		match = append(match, targetMatchExprs(dir, fam, i)...)
 		conn.AddRule(&nftables.Rule{
 			Table: table,
 			Chain: chain,
-			Exprs: exprs,
+			// The target match and the terminal compose into the one
+			// kernel rule: either substitutes without the other.
+			Exprs: append(match, terminal...),
 		})
 	}
 	return nil
+}
+
+// targetMatchExprs builds a ban rule's target match: the load of the
+// address its direction matches on and the lookup of the family's
+// target set. It composes with terminalExprs into one kernel rule -
+// match first, terminal last.
+func targetMatchExprs(dir banDirection, fam addrFamily, i int) []expr.Any {
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
+			Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
+		&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
+	}
 }
 
 func familyPrefixes(prefixes []netip.Prefix, fam addrFamily) []netip.Prefix {
@@ -812,6 +819,18 @@ func portElements(ports []uint16) []nftables.SetElement {
 		elems = append(elems, nftables.SetElement{Key: []byte{byte(p >> 8), byte(p)}})
 	}
 	return elems
+}
+
+// terminalExprs builds a ban rule's terminal: the counter and the
+// stance's verdict tail. The counter sits after every match and
+// immediately before the verdict, so it counts only the ban rule's
+// own hits.
+func terminalExprs(r firewall.BanRule) ([]expr.Any, error) {
+	verdict, err := verdictExprs(r)
+	if err != nil {
+		return nil, err
+	}
+	return append([]expr.Any{&expr.Counter{}}, verdict...), nil
 }
 
 // verdictExprs maps a stance onto its verdict expressions (unknown
