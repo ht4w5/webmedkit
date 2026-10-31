@@ -531,7 +531,7 @@ startup instead of surfacing inside a kernel batch.
 |---|---|
 | `drop` | verdict `drop` |
 | `reject` | `reject with icmpx admin-prohibited` (TCP gets a reset automatically) |
-| `limit-pkt-rate` | `limit rate over N/second`, then `drop` |
+| `limit-pkt-rate` | one Meter per effective Target prefix: `limit rate over N/second`, then `drop` |
 | `limit-bandwidth` | `limit rate bytes over N/second` on the egress chain, then `drop` |
 | `limit-req-rate` | nothing - **declined** with a reason (application-layer intent), logged and counted |
 
@@ -551,11 +551,15 @@ packet layer: the driver declines it with a reason and the engine logs
 and counts every decline (ADR 0012 narrows ADR 0011).
 
 Every limit is an aggregate over the Report's whole Target prefix, not
-each host inside it. Rate limits carry a derived burst of one second's
-worth of the rate (floored), so legitimate micro-bursts survive
-enforcement. Every ban rule carries a packet/byte counter on the
-traffic the rule matches - never the traffic the enforcement scope or
-Target match lets past; nonzero hits are logged at each install - "since the
+each host inside it. A packet-rate limit installs one
+**[Meter](../GLOSSARY.md)** - the rate-limit state carrying the
+Penalty's stated rate - per effective Target prefix (the Report's
+Target as narrowed by exclusions), so one noisy prefix never drains a
+same-rate sibling's allowed rate. Rate limits carry a derived burst of
+one second's worth of the rate (floored), so legitimate micro-bursts
+survive enforcement. Every ban rule carries a packet/byte counter on
+the traffic the rule matches - never the traffic the enforcement scope
+or Target match lets past; nonzero hits are logged at each install - "since the
 last change" (see the cycle logs below).
 
 #### Known limitation: first-match meter stances
