@@ -156,24 +156,47 @@ type kernelConn interface {
 
 var _ kernelConn = (*nftables.Conn)(nil)
 
-// elemsPerSetMessage caps one NEWSETELEM's element list: netlink
-// attribute lengths are 16-bit and an oversized list corrupts on the
-// wire, so a big set travels as several messages in the same batch.
-const elemsPerSetMessage = 128
+// setElemListBudget caps one NEWSETELEM's element list well under the
+// 16-bit attribute length an oversized list would silently wrap.
+const setElemListBudget = 32 << 10
 
-// addSet creates set and fills it in elemsPerSetMessage chunks - one
-// atomic batch either way; AddSet with the elements would pack them
-// all into a single wire message.
+// addSet creates set and fills it in budgeted chunks - one atomic
+// batch either way (ADR 0020).
 func addSet(conn kernelConn, set *nftables.Set, elems []nftables.SetElement) error {
 	if err := conn.AddSet(set, nil); err != nil {
 		return err
 	}
-	for chunk := range slices.Chunk(elems, elemsPerSetMessage) {
-		if err := conn.SetAddElements(set, chunk); err != nil {
-			return err
+	var (
+		chunk []nftables.SetElement
+		size  int
+	)
+	for _, e := range elems {
+		n := setElemWireSize(e)
+		if size+n > setElemListBudget && len(chunk) > 0 {
+			if err := conn.SetAddElements(set, chunk); err != nil {
+				return err
+			}
+			chunk, size = nil, 0
 		}
+		chunk, size = append(chunk, e), size+n
+	}
+	if len(chunk) > 0 {
+		return conn.SetAddElements(set, chunk)
 	}
 	return nil
+}
+
+// setElemWireSize upper-bounds one element's marshaled bytes so addSet
+// keeps every message clear of the 16-bit attribute length.
+func setElemWireSize(e nftables.SetElement) int {
+	n := 48 + len(e.Key) + len(e.KeyEnd) // wrapper, attrs, padding slack
+	if e.IntervalEnd {
+		n += 16
+	}
+	if e.VerdictData != nil {
+		n += 64 + len(e.VerdictData.Chain)
+	}
+	return n
 }
 
 // New builds a driver for one enforcement point. The nsfs handle re-opens on
@@ -213,18 +236,13 @@ func (d *Driver) openNetlink() (kernelConn, io.Closer, error) {
 	return conn, nsFile, nil
 }
 
-// netlinkBatchBuffer is the requested netlink socket buffer size: one
-// install batch and its per-message acknowledgements must fit (the
-// kernel doubles the request and, without CAP_NET_ADMIN, caps it).
-const netlinkBatchBuffer = 32 << 20
+// netlinkRequestedBuffer is the requested socket buffer size: one
+// install batch and its ACK stream must fit (the kernel doubles it).
+const netlinkRequestedBuffer = 32 << 20
 
 // netlinkBuffers sizes the netlink socket so one atomic install batch
-// and its acknowledgements fit - at default sizes the ACK stream
-// overflows the receive buffer at a few hundred messages ("recvmsg: no
-// buffer space available") and the batch write exceeds the send
-// buffer at a few thousand. FORCE needs CAP_NET_ADMIN, which the
-// daemon already needs to program nftables; the plain calls are the
-// capped fallback. Best effort: a failure keeps the kernel default.
+// and its ACK stream fit - the kernel defaults overflow within real
+// rulesets ("recvmsg: no buffer space available").
 func netlinkBuffers(c *netlink.Conn) error {
 	raw, err := c.SyscallConn()
 	if err != nil {
@@ -235,8 +253,8 @@ func netlinkBuffers(c *netlink.Conn) error {
 			{unix.SO_RCVBUFFORCE, unix.SO_RCVBUF},
 			{unix.SO_SNDBUFFORCE, unix.SO_SNDBUF},
 		} {
-			if unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.force, netlinkBatchBuffer) != nil {
-				_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.plain, netlinkBatchBuffer)
+			if unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.force, netlinkRequestedBuffer) != nil {
+				_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.plain, netlinkRequestedBuffer)
 			}
 		}
 	})
