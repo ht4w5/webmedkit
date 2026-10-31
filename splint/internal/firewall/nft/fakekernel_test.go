@@ -871,6 +871,98 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 	})
 }
 
+// TestApplyBreaksDownMeteredHitsPerEffectiveTargetPrefix pins the
+// breakdown the outcome carries behind a metered rule's unchanged
+// total: one nonzero Meter reading per effective Target prefix, named
+// by the replaced ruleset's CIDR text - never a chain name. Drop and
+// reject rules carry no breakdown.
+func TestApplyBreaksDownMeteredHitsPerEffectiveTargetPrefix(t *testing.T) {
+	rules := []firewall.BanRule{
+		dropFixture("203.0.113.7/32"), // rule 0
+		{
+			Targets: []netip.Prefix{
+				netip.MustParsePrefix("198.51.100.128/25"), // v4 slot 0
+				netip.MustParsePrefix("2001:db8::9/128"),    // v6 slot 0
+				netip.MustParsePrefix("198.51.100.9/32"),    // v4 slot 1
+			},
+			Stance: firewall.StanceLimitPktRate,
+			Rate:   ratePtr(250),
+		}, // rule 1: metered across both families
+	}
+
+	t.Run("a metered rule's hit breaks down per effective Target prefix", func(t *testing.T) {
+		kernel := newFakeKernel()
+		d := newFakeDriver(t, HookInput, kernel)
+		if _, err := d.Apply(rules); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		kernel.seed(map[string][]*nftables.Rule{
+			ingressName: {counterRule("v4_0", 5, 50)}, // the drop rule's own counter
+			"v4_1.0":    {chainOnlyCounter(10, 1000)},
+			"v4_1.1":    {chainOnlyCounter(2, 200)},
+			"v6_1.0":    {chainOnlyCounter(5, 500)},
+		})
+		out, err := d.Apply([]firewall.BanRule{dropFixture("203.0.113.8/32")})
+		if err != nil {
+			t.Fatalf("rebuild Apply: %v", err)
+		}
+		want := []firewall.Hit{
+			{Rule: 0, Packets: 5, Bytes: 50},
+			{Rule: 1, Packets: 17, Bytes: 1700, Prefixes: []firewall.PrefixHit{
+				{Target: "198.51.100.128/25", Packets: 10, Bytes: 1000},
+				{Target: "198.51.100.9/32", Packets: 2, Bytes: 200},
+				{Target: "2001:db8::9/128", Packets: 5, Bytes: 500},
+			}},
+		}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (per prefix in effective-target order, totals unchanged)", out.Hits, want)
+		}
+	})
+
+	t.Run("drop and reject rules carry no breakdown", func(t *testing.T) {
+		kernel := newFakeKernel()
+		d := newFakeDriver(t, HookInput, kernel)
+		both := []firewall.BanRule{
+			dropFixture("203.0.113.7/32"), // rule 0
+			{Targets: mustPrefixes("2001:db8::7/128"), Stance: firewall.StanceReject}, // rule 1
+		}
+		if _, err := d.Apply(both); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		kernel.seed(map[string][]*nftables.Rule{
+			ingressName: {counterRule("v4_0", 5, 50), counterRule("v6_1", 3, 30)},
+			"v4_0.0":    {chainOnlyCounter(9, 90)}, // a slot name under a rule with no Meters
+		})
+		out, err := d.Apply([]firewall.BanRule{dropFixture("203.0.113.8/32")})
+		if err != nil {
+			t.Fatalf("rebuild Apply: %v", err)
+		}
+		want := []firewall.Hit{
+			{Rule: 0, Packets: 14, Bytes: 140},
+			{Rule: 1, Packets: 3, Bytes: 30},
+		}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (totals only, never a per-prefix breakdown)", out.Hits, want)
+		}
+	})
+
+	t.Run("counters of a ruleset the driver never installed carry no breakdown", func(t *testing.T) {
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			"v4_1.0": {chainOnlyCounter(10, 1000)}, // names its ban rule, but not its prefix
+		})
+		d := newFakeDriver(t, HookInput, kernel)
+		out, err := d.Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		want := []firewall.Hit{{Rule: 1, Packets: 10, Bytes: 1000}}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (indexes and totals survive; prefixes need the replaced ruleset)", out.Hits, want)
+		}
+	})
+}
+
 func TestApplyReportsDeclines(t *testing.T) {
 	kernel := newFakeKernel()
 	d := newFakeDriver(t, HookInput, kernel)
