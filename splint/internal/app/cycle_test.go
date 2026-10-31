@@ -1393,48 +1393,62 @@ func TestUpdateCycleLogsTheBanRuleHits(t *testing.T) {
 
 func TestUpdateCycleLogsThePerPrefixMeterHits(t *testing.T) {
 	srv := newDocServer(t)
-	srv.serve(http.StatusOK, canonicalDoc(t))
+	srv.serve(http.StatusOK, fixture(t, func(t *testing.T, doc map[string]any) {
+		setReports(t, doc, []reportSpec{
+			{target: "203.0.113.7/32", action: domain.PenaltyLimitPktRate, rate: json.Number("10")},
+			{target: "198.51.100.7/32", action: domain.PenaltyLimitBandwidth, rate: json.Number("5000")},
+			{target: "203.0.113.0/24", action: domain.PenaltyDrop},
+		})
+	}))
 	u, stub, logs := newTestUpdater(t, srv)
-	stub.ApplyHits = []firewall.Hit{{
-		Rule: 0, Packets: 25, Bytes: 725,
-		Prefixes: []firewall.PrefixHit{
+	stub.ApplyHits = []firewall.Hit{
+		{Rule: 0, Packets: 25, Bytes: 725, Prefixes: []firewall.PrefixHit{
 			{Target: "203.0.113.7/32", Packets: 20, Bytes: 580},
-			{Target: "198.51.100.7/32", Packets: 5, Bytes: 145},
-		},
-	}}
+			{Target: "203.0.113.6/32", Packets: 5, Bytes: 145},
+		}},
+		{Rule: 1, Packets: 7, Bytes: 210, Prefixes: []firewall.PrefixHit{
+			{Target: "198.51.100.7/32", Packets: 7, Bytes: 210},
+		}},
+		{Rule: 2, Packets: 3, Bytes: 90}, // a drop rule carries no breakdown
+	}
 
 	if _, err := u.Update(context.Background()); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	logText := logs.String()
-	if !strings.Contains(logText, "ban rule hit in the replaced ruleset") {
-		t.Errorf("the install logs no ban rule hit: %s", logText)
-	}
-	var meterLines []string
-	for _, line := range strings.Split(logText, "\n") {
-		if strings.Contains(line, "meter hit in the replaced ruleset") {
-			meterLines = append(meterLines, line)
+	assertApplies(t, stub, []firewall.BanRule{
+		banRule(firewall.StanceLimitPktRate, ratePtr(10), "203.0.113.7/32"),
+		banRule(firewall.StanceLimitBandwidth, ratePtr(5000), "198.51.100.7/32"),
+		dropRule("203.0.113.0/24"),
+	})
+	var hitLines []string
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "hit in the replaced ruleset") {
+			hitLines = append(hitLines, line)
 		}
 	}
-	if len(meterLines) != 2 {
-		t.Fatalf("logged %d meter hits, want 2 (one per prefix): %s", len(meterLines), logText)
+	// Each meter hit trails its own rule's total line - total and
+	// breakdown grouped per rule, in hit order.
+	want := []struct {
+		msg    string
+		fields string
+	}{
+		{"ban rule hit in the replaced ruleset", `"point":"current","rule":0,"packets":25,"bytes":725`},
+		{"meter hit in the replaced ruleset", `"point":"current","rule":0,"prefix":"203.0.113.7/32","packets":20,"bytes":580`},
+		{"meter hit in the replaced ruleset", `"point":"current","rule":0,"prefix":"203.0.113.6/32","packets":5,"bytes":145`},
+		{"ban rule hit in the replaced ruleset", `"point":"current","rule":1,"packets":7,"bytes":210`},
+		{"meter hit in the replaced ruleset", `"point":"current","rule":1,"prefix":"198.51.100.7/32","packets":7,"bytes":210`},
+		{"ban rule hit in the replaced ruleset", `"point":"current","rule":2,"packets":3,"bytes":90`},
 	}
-	for i, entry := range []string{
-		`"prefix":"203.0.113.7/32","packets":20,"bytes":580`,
-		`"prefix":"198.51.100.7/32","packets":5,"bytes":145`,
-	} {
-		if !strings.Contains(meterLines[i], entry) {
-			t.Errorf("meter hit %d = %s, want it to carry %s", i, meterLines[i], entry)
-		}
-		if !strings.Contains(meterLines[i], `"point":"current"`) || !strings.Contains(meterLines[i], `"rule":0`) {
-			t.Errorf("meter hit %d does not carry its point and rule: %s", i, meterLines[i])
-		}
+	if len(hitLines) != len(want) {
+		t.Fatalf("logged %d hit lines, want %d (a total per rule, a meter hit per prefix): %s", len(hitLines), len(want), logs.String())
 	}
-	// The per-prefix lines follow their rule's total line.
-	total := strings.Index(logText, "ban rule hit in the replaced ruleset")
-	first := strings.Index(logText, "meter hit in the replaced ruleset")
-	if total < 0 || first < total {
-		t.Errorf("the meter hits do not follow their rule's total line: %s", logText)
+	for i, w := range want {
+		if !strings.Contains(hitLines[i], w.msg) {
+			t.Errorf("hit line %d = %s, want a %q line", i, hitLines[i], w.msg)
+		}
+		if !strings.Contains(hitLines[i], w.fields) {
+			t.Errorf("hit line %d = %s, want it to carry %s", i, hitLines[i], w.fields)
+		}
 	}
 }
 
