@@ -922,11 +922,12 @@ func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 }
 
 // metered reports whether a stance enforces through per-prefix Meters
-// (ADR 0020): its target set is an interval verdict map whose slots
-// jump to per-prefix chains, instead of a plain target set with an
-// inline limit.
+// (ADR 0020) - the limit stances, packet rate and response bandwidth:
+// its target set is an interval verdict map whose slots jump to
+// per-prefix chains, instead of a plain target set with an inline
+// limit.
 func metered(s firewall.Stance) bool {
-	return s == firewall.StanceLimitPktRate
+	return s == firewall.StanceLimitPktRate || s == firewall.StanceLimitBandwidth
 }
 
 // addMeterChains buffers one ban rule's Meter chains for a family:
