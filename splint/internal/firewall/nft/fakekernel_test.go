@@ -249,9 +249,9 @@ func counterRule(setName string, packets, bytes uint64) *nftables.Rule {
 	}}
 }
 
-// countingRule builds a reading whose only attribution is the chain
+// chainOnlyCounter builds a reading whose only attribution is the chain
 // carrying it: no lookup names a ban rule, so the chain name must.
-func countingRule(packets, bytes uint64) *nftables.Rule {
+func chainOnlyCounter(packets, bytes uint64) *nftables.Rule {
 	return &nftables.Rule{Exprs: []expr.Any{
 		&expr.Counter{Packets: packets, Bytes: bytes},
 	}}
@@ -794,7 +794,7 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 	t.Run("a counter in a chain named after its ban rule comes back as that ban rule's hit", func(t *testing.T) {
 		kernel := newFakeKernel()
 		kernel.seed(map[string][]*nftables.Rule{
-			"v4_2.0": {countingRule(7, 700)},
+			"v4_2.0": {chainOnlyCounter(7, 700)},
 		})
 		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
 		if err != nil {
@@ -811,7 +811,7 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 		// counter onto a ban rule 9.
 		kernel := newFakeKernel()
 		kernel.seed(map[string][]*nftables.Rule{
-			"v4_2.9": {countingRule(7, 700)},
+			"v4_2.9": {chainOnlyCounter(7, 700)},
 		})
 		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
 		if err != nil {
@@ -827,8 +827,8 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 		kernel := newFakeKernel()
 		kernel.seed(map[string][]*nftables.Rule{
 			ingressName: {counterRule("v4_2", 5, 50)},
-			"v4_2.0":    {countingRule(3, 30)},
-			"v6_2.1":    {countingRule(4, 40)},
+			"v4_2.0":    {chainOnlyCounter(3, 30)},
+			"v6_2.1":    {chainOnlyCounter(4, 40)},
 		})
 		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
 		if err != nil {
@@ -843,9 +843,9 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 	t.Run("a counter no name attributes is left unread", func(t *testing.T) {
 		kernel := newFakeKernel()
 		kernel.seed(map[string][]*nftables.Rule{
-			"stray.0":    {countingRule(9, 90)},
-			"stray":      {countingRule(8, 80)},
-			"v4_2.alpha": {countingRule(7, 70)},
+			"stray.0":    {chainOnlyCounter(9, 90)},
+			"stray":      {chainOnlyCounter(8, 80)},
+			"v4_2.alpha": {chainOnlyCounter(7, 70)},
 		})
 		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
 		if err != nil {
@@ -859,7 +859,7 @@ func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
 	t.Run("a zero counter in a named chain is not a hit worth reporting", func(t *testing.T) {
 		kernel := newFakeKernel()
 		kernel.seed(map[string][]*nftables.Rule{
-			"v4_2.0": {countingRule(0, 0)},
+			"v4_2.0": {chainOnlyCounter(0, 0)},
 		})
 		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
 		if err != nil {
