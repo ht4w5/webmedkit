@@ -183,7 +183,7 @@ _Avoid_: backend, adapter
 
 **Meter**:
 The rate-limit state a limit Penalty installs at the enforcement
-surface: one per Target prefix and dimension (packet rate or response
+surface: one per effective Target prefix and dimension (packet rate or response
 bandwidth), carrying the Penalty's stated rate and aggregating over the
 whole prefix rather than each host inside it.
 _Avoid_: bucket, rate limiter
