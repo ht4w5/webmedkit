@@ -52,9 +52,9 @@ Fixes, in `splint/internal/firewall/nft/`:
   to the kernel-capped plain options, best effort. The Flush failure
   now names the cause when the limits are still exceeded. Validated
   to 3000 metered prefixes on the fallback path.
-- `addSet` chunks element lists at 128 per NEWSETELEM through
-  `SetAddElements`, keeping every message under the 16-bit attribute
-  length; atomicity is unchanged (one batch). The fake kernel gained
+- `addSet` chunks element lists to a wire-size budget per
+  NEWSETELEM through `SetAddElements`, keeping every message under
+  the 16-bit attribute length; atomicity is unchanged (one batch). The fake kernel gained
   `SetAddElements` and the batch-shape pin now shows one
   `add-set-elems` per `add-set`.
 
@@ -68,3 +68,7 @@ Filed from a production run against the per-prefix meters feature
 (2026-10-31). Defect 2 predates the meters work (drop sets with ~900+
 prefixes were silently truncated); the meters' growth in messages
 moved the reported ENOBUFS cliff within reach of real rulesets.
+
+Code-review fix pass on `ticket/ppm-07-review-fixes`: lean comments,
+budgeted element chunks, and the pins moved into the scratch
+namespace with drop-stance coverage at the full 3000 scale.
