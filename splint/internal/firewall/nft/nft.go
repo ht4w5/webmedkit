@@ -719,13 +719,20 @@ func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 	return fams
 }
 
-// addBanRule buffers one ban rule's sets and kernel rules: one
-// target interval set, one kernel rule per reachable family, each
-// kernel rule its target match composed with its terminal.
+// addBanRule buffers one ban rule's sets, Meter chains and kernel
+// rules: one target set (a metered stance's interval verdict map into
+// its per-prefix Meters, a plain interval set otherwise) and one
+// kernel rule per reachable family, each kernel rule its target match
+// composed with its terminal.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
-	terminal, err := terminalExprs(r)
-	if err != nil {
-		return err
+	isMetered := metered(r.Stance)
+	var terminal []expr.Any
+	if !isMetered {
+		var err error
+		terminal, err = terminalExprs(r)
+		if err != nil {
+			return err
+		}
 	}
 	dir, err := d.direction(r.Stance)
 	if err != nil {
@@ -770,14 +777,6 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 	}
 	for _, f := range familyRules {
 		fam := f.family
-		if err := conn.AddSet(&nftables.Set{
-			Table:    table,
-			KeyType:  fam.keyType,
-			Name:     fam.setName(i),
-			Interval: true,
-		}, intervalElements(f.targets)); err != nil {
-			return err
-		}
 		match := []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.proto}},
@@ -798,27 +797,61 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 				&expr.Lookup{SourceRegister: 1, SetName: dir.addrSet(fam, i)},
 			)
 		}
-		match = append(match, targetMatchExprs(dir, fam, i)...)
-		conn.AddRule(&nftables.Rule{
-			Table: table,
-			Chain: chain,
-			// The target match and the terminal compose into the one
-			// kernel rule: either substitutes without the other.
-			Exprs: append(match, terminal...),
-		})
+		match = append(match, targetMatchExprs(dir, fam, i, isMetered)...)
+		if isMetered {
+			// One Meter per effective Target prefix (ADR 0020): the
+			// target set is an interval verdict map whose elements jump
+			// to a slot chain per prefix - each chain holds that prefix's
+			// counter, Meter and drop. The map lookup's jump verdict ends
+			// the rule, so the terminal lives in the chains and nothing
+			// may follow the lookup here.
+			if err := addMeterChains(conn, table, fam, i, r, f.targets); err != nil {
+				return err
+			}
+			if err := conn.AddSet(&nftables.Set{
+				Table:    table,
+				KeyType:  fam.keyType,
+				Name:     fam.setName(i),
+				Interval: true,
+				IsMap:    true,
+				DataType: nftables.TypeVerdict,
+			}, meterElements(f.targets, fam.setName(i))); err != nil {
+				return err
+			}
+			conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})
+			continue
+		}
+		if err := conn.AddSet(&nftables.Set{
+			Table:    table,
+			KeyType:  fam.keyType,
+			Name:     fam.setName(i),
+			Interval: true,
+		}, intervalElements(f.targets)); err != nil {
+			return err
+		}
+		// The target match and the terminal compose into the one
+		// kernel rule: either substitutes without the other.
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: append(match, terminal...)})
 	}
 	return nil
 }
 
 // targetMatchExprs builds a ban rule's target match: the load of the
 // address its direction matches on and the lookup of the family's
-// target set. It composes with terminalExprs into one kernel rule -
-// match first, terminal last.
-func targetMatchExprs(dir banDirection, fam addrFamily, i int) []expr.Any {
+// target set. A verdict map's lookup lands its element's jump verdict
+// in the verdict register - the destination the kernel applies it
+// from. It composes with terminalExprs into one kernel rule - match
+// first, terminal last.
+func targetMatchExprs(dir banDirection, fam addrFamily, i int, verdictMap bool) []expr.Any {
+	lookup := &expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)}
+	if verdictMap {
+		lookup.DestRegister = unix.NFT_REG_VERDICT
+		lookup.IsDestRegSet = true
+	}
 	return []expr.Any{
 		&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
 			Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
-		&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
+		lookup,
 	}
 }
 
@@ -865,8 +898,7 @@ func terminalExprs(r firewall.BanRule) ([]expr.Any, error) {
 
 // verdictExprs maps a stance onto its verdict expressions (unknown
 // stances error loudly). Reject is icmpx admin-prohibited: TCP peers
-// get a reset automatically. The rate meter's Over flag drops only
-// the traffic past the rate. Reject at prerouting needs kernel ~5.9 -
+// get a reset automatically. Reject at prerouting needs kernel ~5.9 -
 // older kernels refuse the batch, the documented floor for --hook
 // prerouting.
 func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
@@ -879,26 +911,73 @@ func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 			Code: unix.NFT_REJECT_ICMPX_ADMIN_PROHIBITED,
 		}}, nil
 	case firewall.StanceLimitPktRate, firewall.StanceLimitBandwidth:
-		if err := checkRate(r); err != nil {
+		lim, err := limitExpr(r)
+		if err != nil {
 			return nil, err
 		}
-		limitType := expr.LimitTypePkts
-		if r.Stance == firewall.StanceLimitBandwidth {
-			limitType = expr.LimitTypePktBytes
-		}
-		return []expr.Any{
-			&expr.Limit{
-				Type:  limitType,
-				Rate:  uint64(*r.Rate),
-				Over:  true,
-				Unit:  expr.LimitTimeSecond,
-				Burst: burstFor(*r.Rate),
-			},
-			&expr.Verdict{Kind: expr.VerdictDrop},
-		}, nil
+		return []expr.Any{lim, &expr.Verdict{Kind: expr.VerdictDrop}}, nil
 	default:
 		return nil, fmt.Errorf("stance %q: not supported", r.Stance)
 	}
+}
+
+// metered reports whether a stance enforces through per-prefix Meters
+// (ADR 0020): its target set is an interval verdict map whose slots
+// jump to per-prefix chains, instead of a plain target set with an
+// inline limit.
+func metered(s firewall.Stance) bool {
+	return s == firewall.StanceLimitPktRate
+}
+
+// addMeterChains buffers one ban rule's Meter chains for a family:
+// one chain per effective Target prefix, named after its verdict-map
+// element slot (map.slot), each holding its prefix's counter, Meter
+// and drop. The chains read no registers - recent kernels refuse a
+// rule reading a register no earlier expression loads.
+func addMeterChains(conn kernelConn, table *nftables.Table, fam addrFamily, i int, r firewall.BanRule, targets []netip.Prefix) error {
+	meter, err := meterChainExprs(r)
+	if err != nil {
+		return err
+	}
+	for slot := range targets {
+		chain := conn.AddChain(&nftables.Chain{Table: table, Name: meterChainName(fam.setName(i), slot)})
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: meter})
+	}
+	return nil
+}
+
+// meterChainExprs builds a Meter chain's one kernel rule: the
+// prefix's counter, its Meter - the limit expression with the stated
+// rate, the derived burst, inverted semantics - and the drop. In-rate
+// traffic matches no limit and falls off the chain end, back into the
+// calling rule walk.
+func meterChainExprs(r firewall.BanRule) ([]expr.Any, error) {
+	lim, err := limitExpr(r)
+	if err != nil {
+		return nil, err
+	}
+	return []expr.Any{&expr.Counter{}, lim, &expr.Verdict{Kind: expr.VerdictDrop}}, nil
+}
+
+// limitExpr is a ban rule's rate limit as one limit expression: the
+// Penalty's stated rate, the derived burst, and inverted ("over")
+// semantics - only the traffic past the rate matches, so the drop
+// applies to the excess alone.
+func limitExpr(r firewall.BanRule) (*expr.Limit, error) {
+	if err := checkRate(r); err != nil {
+		return nil, err
+	}
+	limitType := expr.LimitTypePkts
+	if r.Stance == firewall.StanceLimitBandwidth {
+		limitType = expr.LimitTypePktBytes
+	}
+	return &expr.Limit{
+		Type:  limitType,
+		Rate:  uint64(*r.Rate),
+		Over:  true,
+		Unit:  expr.LimitTimeSecond,
+		Burst: burstFor(*r.Rate),
+	}, nil
 }
 
 // burstFor derives a rate meter's burst: one second's worth of the
@@ -909,6 +988,25 @@ func burstFor(rate int64) uint32 {
 		return math.MaxUint32
 	}
 	return uint32(rate) // rate >= 1 where the compiler emits it
+}
+
+// meterChainName is the chain one verdict-map element jumps to: the
+// map name plus the element's numeric slot suffix (v4_3.1) - the
+// shape chainRuleIndex strips to name the ban rule.
+func meterChainName(mapName string, slot int) string {
+	return fmt.Sprintf("%s.%d", mapName, slot)
+}
+
+// meterElements encodes the effective Target prefixes as a verdict
+// map's element pairs: intervalElements' ranges, each start element
+// carrying the jump into its slot's Meter chain (one element per
+// prefix, slots positional in the target list).
+func meterElements(prefixes []netip.Prefix, mapName string) []nftables.SetElement {
+	elems := intervalElements(prefixes)
+	for slot := range prefixes {
+		elems[2*slot].VerdictData = &expr.Verdict{Kind: expr.VerdictJump, Chain: meterChainName(mapName, slot)}
+	}
+	return elems
 }
 
 // intervalElements encodes masked Target prefixes as an interval
