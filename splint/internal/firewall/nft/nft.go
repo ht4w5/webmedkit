@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
+	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
 
 	"github.com/HT4w5/webmedkit/splint/internal/firewall"
@@ -144,6 +145,7 @@ type kernelConn interface {
 	AddTable(*nftables.Table) *nftables.Table
 	AddChain(*nftables.Chain) *nftables.Chain
 	AddSet(*nftables.Set, []nftables.SetElement) error
+	SetAddElements(*nftables.Set, []nftables.SetElement) error
 	AddRule(*nftables.Rule) *nftables.Rule
 	DelTable(*nftables.Table)
 	Flush() error
@@ -153,6 +155,26 @@ type kernelConn interface {
 }
 
 var _ kernelConn = (*nftables.Conn)(nil)
+
+// elemsPerSetMessage caps one NEWSETELEM's element list: netlink
+// attribute lengths are 16-bit and an oversized list corrupts on the
+// wire, so a big set travels as several messages in the same batch.
+const elemsPerSetMessage = 128
+
+// addSet creates set and fills it in elemsPerSetMessage chunks - one
+// atomic batch either way; AddSet with the elements would pack them
+// all into a single wire message.
+func addSet(conn kernelConn, set *nftables.Set, elems []nftables.SetElement) error {
+	if err := conn.AddSet(set, nil); err != nil {
+		return err
+	}
+	for chunk := range slices.Chunk(elems, elemsPerSetMessage) {
+		if err := conn.SetAddElements(set, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // New builds a driver for one enforcement point. The nsfs handle re-opens on
 // every apply/reset, picking up a recreated container through its stable handle.
@@ -173,7 +195,7 @@ func New(cfg Config) (*Driver, error) {
 // vanished namespace: it wraps firewall.ErrUnreachable.
 func (d *Driver) openNetlink() (kernelConn, io.Closer, error) {
 	if d.netns == "" {
-		conn, err := nftables.New()
+		conn, err := nftables.New(nftables.WithSockOptions(netlinkBuffers))
 		if err != nil {
 			return nil, nil, fmt.Errorf("connect: %w", err)
 		}
@@ -183,12 +205,42 @@ func (d *Driver) openNetlink() (kernelConn, io.Closer, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: open netns %s: %w", firewall.ErrUnreachable, d.netns, err)
 	}
-	conn, err := nftables.New(nftables.WithNetNSFd(int(nsFile.Fd())))
+	conn, err := nftables.New(nftables.WithNetNSFd(int(nsFile.Fd())), nftables.WithSockOptions(netlinkBuffers))
 	if err != nil {
 		nsFile.Close()
 		return nil, nil, fmt.Errorf("%w: connect netns %s: %w", firewall.ErrUnreachable, d.netns, err)
 	}
 	return conn, nsFile, nil
+}
+
+// netlinkBatchBuffer is the requested netlink socket buffer size: one
+// install batch and its per-message acknowledgements must fit (the
+// kernel doubles the request and, without CAP_NET_ADMIN, caps it).
+const netlinkBatchBuffer = 32 << 20
+
+// netlinkBuffers sizes the netlink socket so one atomic install batch
+// and its acknowledgements fit - at default sizes the ACK stream
+// overflows the receive buffer at a few hundred messages ("recvmsg: no
+// buffer space available") and the batch write exceeds the send
+// buffer at a few thousand. FORCE needs CAP_NET_ADMIN, which the
+// daemon already needs to program nftables; the plain calls are the
+// capped fallback. Best effort: a failure keeps the kernel default.
+func netlinkBuffers(c *netlink.Conn) error {
+	raw, err := c.SyscallConn()
+	if err != nil {
+		return nil
+	}
+	_ = raw.Control(func(fd uintptr) {
+		for _, opt := range []struct{ force, plain int }{
+			{unix.SO_RCVBUFFORCE, unix.SO_RCVBUF},
+			{unix.SO_SNDBUFFORCE, unix.SO_SNDBUF},
+		} {
+			if unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.force, netlinkBatchBuffer) != nil {
+				_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, opt.plain, netlinkBatchBuffer)
+			}
+		}
+	})
+	return nil
 }
 
 func ownedTable() *nftables.Table {
@@ -502,6 +554,9 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 		}
 	}
 	if err := conn.Flush(); err != nil {
+		if errors.Is(err, unix.ENOBUFS) || errors.Is(err, unix.EMSGSIZE) {
+			return firewall.Outcome{}, fmt.Errorf("apply: install batch exceeds the netlink socket buffers: %w", err)
+		}
 		return firewall.Outcome{}, fmt.Errorf("apply: %w", err)
 	}
 	d.hash, d.installed = plan.Hash, true
@@ -856,7 +911,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 	}
 	// The protocol gate is always present (the tcp,udp default when
 	// unscoped); gate and ports are family-independent, built once per rule.
-	if err := conn.AddSet(&nftables.Set{
+	if err := addSet(conn, &nftables.Set{
 		Table:   table,
 		KeyType: nftables.TypeInetProto,
 		Name:    dir.protoSet(i),
@@ -868,7 +923,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		&expr.Lookup{SourceRegister: 1, SetName: dir.protoSet(i)},
 	}
 	if len(dir.scope.Ports) > 0 {
-		if err := conn.AddSet(&nftables.Set{
+		if err := addSet(conn, &nftables.Set{
 			Table:   table,
 			KeyType: nftables.TypeInetService,
 			Name:    dir.portSet(i),
@@ -891,7 +946,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		}
 		match = append(match, scopeExprs...)
 		if len(f.scopeAddrs) > 0 {
-			if err := conn.AddSet(&nftables.Set{
+			if err := addSet(conn, &nftables.Set{
 				Table:    table,
 				KeyType:  fam.keyType,
 				Name:     dir.addrSet(fam, i),
@@ -912,7 +967,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			if err := addMeterChains(conn, table, fam, i, r, f.targets); err != nil {
 				return err
 			}
-			if err := conn.AddSet(&nftables.Set{
+			if err := addSet(conn, &nftables.Set{
 				Table:    table,
 				KeyType:  fam.keyType,
 				Name:     fam.setName(i),
@@ -925,7 +980,7 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})
 			continue
 		}
-		if err := conn.AddSet(&nftables.Set{
+		if err := addSet(conn, &nftables.Set{
 			Table:    table,
 			KeyType:  fam.keyType,
 			Name:     fam.setName(i),
