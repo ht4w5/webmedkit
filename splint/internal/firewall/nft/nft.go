@@ -190,6 +190,13 @@ func ownedTable() *nftables.Table {
 	return &nftables.Table{Family: nftables.TableFamilyINet, Name: tableName}
 }
 
+// chainOfTable reports whether a listed chain belongs to the given
+// table: chain listings span the family, and only the owned table's
+// chains hold the driver's own counters.
+func chainOfTable(chain *nftables.Chain, table *nftables.Table) bool {
+	return chain.Table != nil && chain.Table.Name == table.Name && chain.Table.Family == table.Family
+}
+
 // tableExists probes for the owned table: a delete of a missing
 // table aborts the whole batch with ENOENT, so only a present
 // table's delete may join the batch.
@@ -513,7 +520,7 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 	}
 	byRule := map[int]firewall.Hit{}
 	for _, chain := range chains {
-		if chain.Table == nil || chain.Table.Name != table.Name || chain.Table.Family != table.Family {
+		if !chainOfTable(chain, table) {
 			continue // not a chain of the owned table
 		}
 		krules, err := conn.GetRules(table, chain)
@@ -579,7 +586,7 @@ func ruleIndex(r *nftables.Rule) (int, bool) {
 // ruleIndex reads from a kernel rule's set names. A name without a
 // slot segment (the base chains) names no ban rule.
 func chainRuleIndex(name string) (int, bool) {
-	dot := strings.LastIndex(name, ".")
+	dot := strings.LastIndex(name, meterSlotSep)
 	if dot < 0 {
 		return 0, false
 	}
@@ -799,12 +806,8 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		}
 		match = append(match, targetMatchExprs(dir, fam, i, isMetered)...)
 		if isMetered {
-			// One Meter per effective Target prefix (ADR 0020): the
-			// target set is an interval verdict map whose elements jump
-			// to a slot chain per prefix - each chain holds that prefix's
-			// counter, Meter and drop. The map lookup's jump verdict ends
-			// the rule, so the terminal lives in the chains and nothing
-			// may follow the lookup here.
+			// One Meter per effective Target prefix (ADR 0020). The
+			// jump ends the rule: the terminal lives in the slot chains.
 			if err := addMeterChains(conn, table, fam, i, r, f.targets); err != nil {
 				return err
 			}
@@ -896,11 +899,11 @@ func terminalExprs(r firewall.BanRule) ([]expr.Any, error) {
 	return append([]expr.Any{&expr.Counter{}}, verdict...), nil
 }
 
-// verdictExprs maps a stance onto its verdict expressions (unknown
-// stances error loudly). Reject is icmpx admin-prohibited: TCP peers
-// get a reset automatically. Reject at prerouting needs kernel ~5.9 -
-// older kernels refuse the batch, the documented floor for --hook
-// prerouting.
+// verdictExprs maps a terminal stance onto its verdict tail: drop
+// and reject only (unknown stances error loudly). Reject is icmpx
+// admin-prohibited: TCP peers get a reset automatically. Reject at
+// prerouting needs kernel ~5.9 - older kernels refuse the batch, the
+// documented floor for --hook prerouting.
 func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 	switch r.Stance {
 	case firewall.StanceDrop:
@@ -910,13 +913,11 @@ func verdictExprs(r firewall.BanRule) ([]expr.Any, error) {
 			Type: unix.NFT_REJECT_ICMPX_UNREACH,
 			Code: unix.NFT_REJECT_ICMPX_ADMIN_PROHIBITED,
 		}}, nil
-	case firewall.StanceLimitPktRate, firewall.StanceLimitBandwidth:
-		lim, err := limitExpr(r)
-		if err != nil {
-			return nil, err
-		}
-		return []expr.Any{lim, &expr.Verdict{Kind: expr.VerdictDrop}}, nil
 	default:
+		if metered(r.Stance) {
+			// An inline limit would share one budget across the prefixes.
+			return nil, fmt.Errorf("stance %q: terminates in its Meter chains, never at the rule", r.Stance)
+		}
 		return nil, fmt.Errorf("stance %q: not supported", r.Stance)
 	}
 }
@@ -991,11 +992,15 @@ func burstFor(rate int64) uint32 {
 	return uint32(rate) // rate >= 1 where the compiler emits it
 }
 
+// meterSlotSep is the one separator in a Meter chain's map.slot name
+// (v4_3.1): meterChainName builds the shape chainRuleIndex parses.
+const meterSlotSep = "."
+
 // meterChainName is the chain one verdict-map element jumps to: the
-// map name plus the element's numeric slot suffix (v4_3.1) - the
-// shape chainRuleIndex strips to name the ban rule.
+// map name plus the element's numeric slot suffix - the shape
+// chainRuleIndex strips to name the ban rule.
 func meterChainName(mapName string, slot int) string {
-	return fmt.Sprintf("%s.%d", mapName, slot)
+	return mapName + meterSlotSep + strconv.Itoa(slot)
 }
 
 // meterElements encodes the effective Target prefixes as a verdict
