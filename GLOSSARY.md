@@ -180,3 +180,10 @@ The pluggable backend that enforces ban rules at its enforcement
 surface - a kernel firewall like nftables, or another surface such as a
 web server or a WAF; it applies each Penalty as stated or declines it.
 _Avoid_: backend, adapter
+
+**Meter**:
+The rate-limit state a limit Penalty installs at the enforcement
+surface: one per Target prefix and dimension (packet rate or response
+bandwidth), carrying the Penalty's stated rate and aggregating over the
+whole prefix rather than each host inside it.
+_Avoid_: bucket, rate limiter
