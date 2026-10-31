@@ -238,10 +238,10 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	t.Helper()
 	// The kernel rules, in install order.
 	ingressRules := []wantRule{
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", l4Set: "il4_0", tail: dropTail},                                // 203.0.113.0/24 + 198.51.100.7/32
-		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_1", l4Set: "il4_1", tail: rejectTail},                              // 2001:db8::/32
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", tail: limitTail(expr.LimitTypePkts, 250, 250)}, // 198.51.100.9/32
-		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_4", l4Set: "il4_4", tail: dropTail},                                // 255.255.255.0/24
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", l4Set: "il4_0", tail: dropTail},   // 203.0.113.0/24 + 198.51.100.7/32
+		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_1", l4Set: "il4_1", tail: rejectTail}, // 2001:db8::/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", metered: true},    // 198.51.100.9/32, one Meter per prefix
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_4", l4Set: "il4_4", tail: dropTail},   // 255.255.255.0/24
 	}
 	egressRules := []wantRule{
 		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
@@ -250,9 +250,12 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 	// null end (its "end 0.0.0.0" element). Every rule's protocol gate
 	// holds the unscoped ban's tcp and udp default.
 	wantSets := map[string]wantSet{
-		"v4_0":  {interval: true, elems: []string{"end 198.51.100.8", "end 203.0.114.0", "start 198.51.100.7", "start 203.0.113.0"}},
-		"v6_1":  {interval: true, elems: []string{"end 2001:db9::", "start 2001:db8::"}},
-		"v4_2":  {interval: true, elems: []string{"end 198.51.100.10", "start 198.51.100.9"}},
+		"v4_0": {interval: true, elems: []string{"end 198.51.100.8", "end 203.0.114.0", "start 198.51.100.7", "start 203.0.113.0"}},
+		"v6_1": {interval: true, elems: []string{"end 2001:db9::", "start 2001:db8::"}},
+		// v4_2 is the metered rule's verdict map. The read-back reports
+		// its element keys; each element's jump into its slot's Meter
+		// chain is pinned at the fake seam.
+		"v4_2":  {isMap: true, interval: true, elems: []string{"end 198.51.100.10", "start 198.51.100.9"}},
 		"v4_3":  {interval: true, elems: []string{"end 203.0.113.10", "start 203.0.113.9"}},
 		"v4_4":  {interval: true, elems: []string{"end 0.0.0.0", "start 255.255.255.0"}},
 		"il4_0": {elems: []string{"17", "6"}}, // udp and tcp; sorted as strings
@@ -261,7 +264,10 @@ func assertUnscopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 		"il4_4": {elems: []string{"17", "6"}},
 		"el4_3": {elems: []string{"17", "6"}},
 	}
-	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets)
+	wantMeters := map[string]tailCheck{
+		"v4_2.0": meterTail(expr.LimitTypePkts, 250, 250),
+	}
+	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets, wantMeters)
 }
 
 // assertScopedKernelState reads the owned table back and asserts the
@@ -311,7 +317,7 @@ func assertScopedKernelState(t *testing.T, conn *nftables.Conn, hook Hook) {
 		"el4_1":  {elems: []string{"17"}},          // the egress scope gates on udp alone
 		"esp_1":  {elems: []string{"53"}},          // the egress scope's sport
 	}
-	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets)
+	assertKernelState(t, conn, hook, ingressRules, egressRules, wantSets, nil)
 }
 
 // assertEmptyKernelState asserts a rebuild that installed nothing:
@@ -346,8 +352,9 @@ func assertEmptyKernelState(t *testing.T, conn *nftables.Conn) {
 
 // assertKernelState asserts the shared encoding shape the wrappers
 // above hand-write their wants for: chains at their hooks, each
-// wanted rule's match order ending in its verdict tail, and the sets.
-func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRules, egressRules []wantRule, wantSets map[string]wantSet) {
+// wanted rule's match order ending in its verdict tail, the sets, and
+// the Meter chains (one per effective Target prefix, nothing else).
+func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRules, egressRules []wantRule, wantSets map[string]wantSet, wantMeters map[string]tailCheck) {
 	t.Helper()
 	table, err := conn.ListTableOfFamily(tableName, nftables.TableFamilyINet)
 	if err != nil {
@@ -378,12 +385,53 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 			t.Fatalf("chain %s rules = %d, want %d: %v", chain.Name, len(krules), len(want), krules)
 		}
 		for i, w := range want {
-			tail := assertMatch(t, krules[i], w)
-			w.tail(t, tail)
+			assertRule(t, krules[i], w)
 		}
 	}
 	assertRules(t, ingress, ingressRules)
 	assertRules(t, egress, egressRules)
+
+	// The chains: the two base chains plus one Meter chain per
+	// effective Target prefix - no chain this fixture did not name.
+	chains, err := conn.ListChainsOfTableFamily(nftables.TableFamilyINet)
+	if err != nil {
+		t.Fatalf("read chains back: %v", err)
+	}
+	chainByName := map[string]*nftables.Chain{}
+	var gotChains []string
+	for _, c := range chains {
+		if c.Table == nil || c.Table.Name != tableName || c.Table.Family != nftables.TableFamilyINet {
+			continue // not a chain of the owned table
+		}
+		gotChains = append(gotChains, c.Name)
+		chainByName[c.Name] = c
+	}
+	slices.Sort(gotChains)
+	wantChains := []string{egressName, ingressName}
+	for name := range wantMeters {
+		wantChains = append(wantChains, name)
+	}
+	slices.Sort(wantChains)
+	if !slices.Equal(gotChains, wantChains) {
+		t.Errorf("chains = %v, want %v (one Meter chain per effective Target prefix, no more)", gotChains, wantChains)
+	}
+	for name, tail := range wantMeters {
+		chain, ok := chainByName[name]
+		if !ok {
+			continue // its absence is named above
+		}
+		if chain.Hooknum != nil {
+			t.Errorf("chain %s hooks at %d, want a plain Meter chain", name, *chain.Hooknum)
+		}
+		krules, err := conn.GetRules(table, chain)
+		if err != nil {
+			t.Fatalf("read %s rules back: %v", name, err)
+		}
+		if len(krules) != 1 {
+			t.Fatalf("chain %s carries %d kernel rules, want exactly 1 (the prefix's counter, Meter and drop)", name, len(krules))
+		}
+		tail(t, krules[0].Exprs)
+	}
 
 	sets, err := conn.GetSets(table)
 	if err != nil {
@@ -397,6 +445,9 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 		if !ok {
 			t.Errorf("unexpected kernel set %q", s.Name)
 			continue
+		}
+		if s.IsMap != w.isMap {
+			t.Errorf("set %q map = %v, want %v", s.Name, s.IsMap, w.isMap)
 		}
 		if s.Interval != w.interval {
 			t.Errorf("set %q interval = %v, want %v", s.Name, s.Interval, w.interval)
@@ -413,7 +464,10 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 }
 
 // wantRule is one expected kernel rule: the match prefix in order -
-// family gate, scope (protocol gate, ports, addresses), target match, counter.
+// family gate, scope (protocol gate, ports, addresses), target match -
+// then its terminal. A metered rule's target set is its verdict map:
+// the map lookup ends the rule and its counter and verdict live in the
+// map's slot chains (wantMeters).
 type wantRule struct {
 	proto   byte
 	off     uint32 // the target-match load: source on ingress, destination on egress
@@ -427,12 +481,14 @@ type wantRule struct {
 	scopeOff uint32
 	scopeLen uint32
 
-	tail tailCheck
+	metered bool // the target set is the ban rule's verdict map
+	tail    tailCheck
 }
 
-// wantSet is one expected kernel set: interval flag and elements,
-// already sorted as strings.
+// wantSet is one expected kernel set: map and interval flags and
+// elements, already sorted as strings.
 type wantSet struct {
+	isMap    bool
 	interval bool
 	elems    []string
 }
@@ -455,20 +511,26 @@ func assertChain(t *testing.T, conn *nftables.Conn, table *nftables.Table, name 
 	return chain
 }
 
-// tailCheck asserts a kernel rule's verdict tail.
+// tailCheck asserts a kernel rule's tail: its verdict expressions, or
+// the counter and verdict of a Meter chain's one rule.
 type tailCheck func(t *testing.T, exprs []expr.Any)
 
-// assertMatch asserts the match prefix in wantRule's order, then the
-// counter immediately before the verdict, returning the verdict tail.
-func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
+// assertRule asserts one kernel rule end to end: the match prefix in
+// wantRule's order, then the terminal - the counter and the verdict
+// tail, or for a metered rule the bare verdict-map lookup the rule
+// ends on.
+func assertRule(t *testing.T, r *nftables.Rule, w wantRule) {
 	t.Helper()
 	exprs := r.Exprs
-	wantLen := 7 // family gate, protocol gate, target match, counter
+	wantLen := 6 // family gate, protocol gate, target match
 	if w.portSet != "" {
 		wantLen += 2
 	}
 	if w.scopeSet != "" {
 		wantLen += 2
+	}
+	if !w.metered {
+		wantLen++ // the counter before the verdict
 	}
 	if len(exprs) < wantLen {
 		t.Fatalf("rule exprs = %d, want at least %d: %v", len(exprs), wantLen, exprs)
@@ -493,12 +555,24 @@ func assertMatch(t *testing.T, r *nftables.Rule, w wantRule) []expr.Any {
 	assertPayload(t, "target-address load", exprs[i], expr.PayloadBaseNetworkHeader, w.off, w.length)
 	i++
 	assertLookup(t, "target set", exprs[i], w.setName)
+	if w.metered {
+		// The verdict map's lookup lands its element's jump verdict in
+		// the verdict register; the jump ends the rule, so no counter
+		// may follow the lookup.
+		if l, ok := exprs[i].(*expr.Lookup); !ok || !l.IsDestRegSet || l.DestRegister != unix.NFT_REG_VERDICT {
+			t.Errorf("map lookup = %+v, want the verdict-map lookup into the verdict register", exprs[i])
+		}
+		if len(exprs) != i+1 {
+			t.Errorf("rule exprs = %d, want %d (a metered rule ends at its verdict-map lookup): %v", len(exprs), i+1, exprs)
+		}
+		return
+	}
 	i++
 	if _, ok := exprs[i].(*expr.Counter); !ok {
 		t.Errorf("rule counter = %+v, want the packet/byte counter before the verdict", exprs[i])
 	}
 	i++
-	return exprs[i:]
+	w.tail(t, exprs[i:])
 }
 
 func dropTail(t *testing.T, exprs []expr.Any) {
@@ -520,6 +594,22 @@ func rejectTail(t *testing.T, exprs []expr.Any) {
 	rej, ok := exprs[0].(*expr.Reject)
 	if !ok || rej.Type != unix.NFT_REJECT_ICMPX_UNREACH || rej.Code != unix.NFT_REJECT_ICMPX_ADMIN_PROHIBITED {
 		t.Errorf("verdict = %+v, want reject with icmpx admin-prohibited", exprs[0])
+	}
+}
+
+// meterTail asserts a Meter chain's one kernel rule: the prefix's
+// counter, then its Meter and the drop - the three expressions, in
+// order, and nothing more.
+func meterTail(limitType expr.LimitType, rate uint64, burst uint32) tailCheck {
+	return func(t *testing.T, exprs []expr.Any) {
+		t.Helper()
+		if len(exprs) != 3 {
+			t.Fatalf("meter chain rule exprs = %d, want 3: %v", len(exprs), exprs)
+		}
+		if _, ok := exprs[0].(*expr.Counter); !ok {
+			t.Errorf("meter counter = %+v, want the packet/byte counter first", exprs[0])
+		}
+		limitTail(limitType, rate, burst)(t, exprs[1:])
 	}
 }
 
@@ -590,7 +680,12 @@ func elementStrings(s *nftables.Set, elems []nftables.SetElement) []string {
 			if e.IntervalEnd {
 				kind = "end"
 			}
-			got = append(got, fmt.Sprintf("%s %s", kind, net.IP(e.Key)))
+			entry := fmt.Sprintf("%s %s", kind, net.IP(e.Key))
+			if e.VerdictData != nil {
+				// A verdict map's element: the jump into its slot's chain.
+				entry += fmt.Sprintf(" -> jump %s", e.VerdictData.Chain)
+			}
+			got = append(got, entry)
 		}
 	}
 	slices.Sort(got)
