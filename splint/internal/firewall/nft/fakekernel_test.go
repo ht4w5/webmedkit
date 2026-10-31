@@ -82,6 +82,20 @@ func (k *fakeKernel) AddSet(s *nftables.Set, vals []nftables.SetElement) error {
 	return nil
 }
 
+func (k *fakeKernel) SetAddElements(s *nftables.Set, vals []nftables.SetElement) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.batch = append(k.batch, kernelOp{kind: "add-set-elems"})
+	for i := range k.pendingSets {
+		if k.pendingSets[i].set.Name == s.Name {
+			k.pendingSets[i].elems = append(k.pendingSets[i].elems, vals...)
+			return nil
+		}
+	}
+	k.pendingSets = append(k.pendingSets, setRecord{set: s, elems: vals})
+	return nil
+}
+
 func (k *fakeKernel) AddRule(r *nftables.Rule) *nftables.Rule {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -1010,8 +1024,8 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 		}
 		want := []string{
 			"del-table", "add-table", "add-chain", "add-chain",
-			"add-set", "add-set", "add-rule", // the protocol gate and the target of ban rule 0
-			"add-set", "add-chain", "add-rule", "add-set", "add-rule", // ban rule 1: its gate, its Meter chain and rule, its verdict map, its rule
+			"add-set", "add-set-elems", "add-set", "add-set-elems", "add-rule", // the protocol gate and the target of ban rule 0
+			"add-set", "add-set-elems", "add-chain", "add-rule", "add-set", "add-set-elems", "add-rule", // ban rule 1: its gate, its Meter chain and rule, its verdict map, its rule
 		}
 		if !reflect.DeepEqual(kinds, want) {
 			t.Errorf("batch = %v, want %v", kinds, want)
@@ -1052,7 +1066,10 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 		for _, op := range kernel.lastFlush() {
 			kinds = append(kinds, op.kind)
 		}
-		want := []string{"add-table", "add-chain", "add-chain", "add-set", "add-set", "add-set", "add-set", "add-rule"}
+		want := []string{
+			"add-table", "add-chain", "add-chain",
+			"add-set", "add-set-elems", "add-set", "add-set-elems", "add-set", "add-set-elems", "add-set", "add-set-elems", "add-rule",
+		}
 		if !reflect.DeepEqual(kinds, want) {
 			t.Errorf("batch = %v, want %v", kinds, want)
 		}
