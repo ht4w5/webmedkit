@@ -97,7 +97,8 @@ func (u *Updater) applyAll(rules []firewall.BanRule) error {
 			u.log.Info().Str("point", name).Str("hash", hash).Msg("ban rules unchanged; skipping install")
 		} else {
 			// Hits are the nonzero counters of the rules just replaced -
-			// the previous apply's input rules, by index.
+			// the previous apply's input rules, by index. Each prefix's own
+			// Meter reading follows its rule's total line.
 			for _, h := range out.Hits {
 				u.log.Info().
 					Str("point", name).
@@ -105,6 +106,15 @@ func (u *Updater) applyAll(rules []firewall.BanRule) error {
 					Uint64("packets", h.Packets).
 					Uint64("bytes", h.Bytes).
 					Msg("ban rule hit in the replaced ruleset")
+				for _, p := range h.Prefixes {
+					u.log.Info().
+						Str("point", name).
+						Int("rule", h.Rule).
+						Str("prefix", p.Target).
+						Uint64("packets", p.Packets).
+						Uint64("bytes", p.Bytes).
+						Msg("meter hit in the replaced ruleset")
+				}
 			}
 			u.log.Info().Str("point", name).Int("rules", len(rules)).Int("declined", len(out.Declined)).Str("hash", hash).Msg("installed ban rules")
 		}

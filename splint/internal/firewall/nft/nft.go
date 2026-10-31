@@ -82,6 +82,11 @@ type Driver struct {
 	// marks a succeeded apply (the zero hash is a legal hash).
 	hash      uint32
 	installed bool
+
+	// prevRules are the last install's input rules - the ruleset the
+	// hit read-back reports on; without them a Meter reading's prefix
+	// cannot be named.
+	prevRules []firewall.BanRule
 }
 
 var _ firewall.Driver = (*Driver)(nil)
@@ -475,7 +480,7 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 	}
 	var hits []firewall.Hit
 	if exists {
-		hits, err = ruleHits(conn, table)
+		hits, err = ruleHits(conn, table, d.prevRules)
 		if err != nil {
 			return firewall.Outcome{}, fmt.Errorf("apply: read rule counters: %w", err)
 		}
@@ -500,7 +505,28 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 		return firewall.Outcome{}, fmt.Errorf("apply: %w", err)
 	}
 	d.hash, d.installed = plan.Hash, true
+	d.prevRules = slices.Clone(rules)
 	return firewall.Outcome{Hash: plan.Hash, Hits: hits, Declined: plan.Declined}, nil
+}
+
+// ruleRead accumulates one ban rule's counter readings as the
+// read-back walks the owned table; prefixes are its Meter readings
+// keyed by the effective Target prefix they meter.
+type ruleRead struct {
+	packets  uint64
+	bytes    uint64
+	prefixes map[string]*prefixRead
+}
+
+// prefixRead is one prefix's Meter reading with the coordinates its
+// entries sort by: the rule's effective-target order (family, then
+// slot in the family's target list).
+type prefixRead struct {
+	target  string
+	fam     int
+	slot    int
+	packets uint64
+	bytes   uint64
 }
 
 // ruleHits reads the owned table's per-rule counters back, one hit
@@ -508,9 +534,10 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 // named after its ban rule (a verdict-map element slot chain) names
 // the ban rule outright, a base chain's kernel rule carries its index
 // in its set names - either way the readings aggregate onto the ban
-// rule they count, the ruleset being replaced. Only nonzero readings
-// come back.
-func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
+// rule they count, the ruleset being replaced (prev). A metered rule's
+// Meter readings also break down per effective Target prefix. Only
+// nonzero readings come back.
+func ruleHits(conn kernelConn, table *nftables.Table, prev []firewall.BanRule) ([]firewall.Hit, error) {
 	chains, err := conn.ListChainsOfTableFamily(table.Family)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -518,11 +545,12 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 		}
 		return nil, err
 	}
-	byRule := map[int]firewall.Hit{}
+	byRule := map[int]*ruleRead{}
 	for _, chain := range chains {
 		if !chainOfTable(chain, table) {
 			continue // not a chain of the owned table
 		}
+		mapName, slot, isSlotChain := meterChainSlot(chain.Name)
 		krules, err := conn.GetRules(table, chain)
 		if err != nil {
 			return nil, err
@@ -539,12 +567,43 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 			if !ok {
 				continue // not a kernel rule this driver wrote
 			}
-			h := byRule[i]
-			byRule[i] = firewall.Hit{Rule: i, Packets: h.Packets + c.Packets, Bytes: h.Bytes + c.Bytes}
+			read := byRule[i]
+			if read == nil {
+				read = &ruleRead{prefixes: map[string]*prefixRead{}}
+				byRule[i] = read
+			}
+			read.packets += c.Packets
+			read.bytes += c.Bytes
+			if !isSlotChain {
+				continue
+			}
+			if target, fam, ok := meterTarget(prev, i, mapName, slot); ok {
+				p := read.prefixes[target]
+				if p == nil {
+					p = &prefixRead{target: target, fam: fam, slot: slot}
+					read.prefixes[target] = p
+				}
+				p.packets += c.Packets
+				p.bytes += c.Bytes
+			}
 		}
 	}
 	hits := make([]firewall.Hit, 0, len(byRule))
-	for _, h := range byRule {
+	for i, read := range byRule {
+		h := firewall.Hit{Rule: i, Packets: read.packets, Bytes: read.bytes}
+		reads := make([]*prefixRead, 0, len(read.prefixes))
+		for _, p := range read.prefixes {
+			reads = append(reads, p)
+		}
+		slices.SortFunc(reads, func(a, b *prefixRead) int {
+			if a.fam != b.fam {
+				return a.fam - b.fam
+			}
+			return a.slot - b.slot
+		})
+		for _, p := range reads {
+			h.Prefixes = append(h.Prefixes, firewall.PrefixHit{Target: p.target, Packets: p.packets, Bytes: p.bytes})
+		}
 		hits = append(hits, h)
 	}
 	slices.SortFunc(hits, func(a, b firewall.Hit) int { return a.Rule - b.Rule })
@@ -579,25 +638,63 @@ func ruleIndex(r *nftables.Rule) (int, bool) {
 	return 0, false
 }
 
-// chainRuleIndex reads a ban rule's index out of an owned chain's
-// name: a chain named after its verdict-map element slot (the map
-// name plus a numeric slot suffix, e.g. v4_3.1) strips its trailing
-// slot segment and takes the index its map name carries - the index
-// ruleIndex reads from a kernel rule's set names. A name without a
-// slot segment (the base chains) names no ban rule.
-func chainRuleIndex(name string) (int, bool) {
+// meterChainSlot splits an owned chain's name at its slot separator
+// (v4_3.1: verdict map v4_3, slot 1); a name without a numeric slot
+// segment (the base chains) names no Meter chain.
+func meterChainSlot(name string) (mapName string, slot int, ok bool) {
 	dot := strings.LastIndex(name, meterSlotSep)
 	if dot < 0 {
+		return "", 0, false
+	}
+	slot, err := strconv.Atoi(name[dot+1:])
+	if err != nil {
+		return "", 0, false
+	}
+	return name[:dot], slot, true
+}
+
+// chainRuleIndex reads a ban rule's index out of an owned chain's
+// name: a chain named after its verdict-map element slot strips its
+// trailing slot segment and takes the index its map name carries -
+// the index ruleIndex reads from a kernel rule's set names. A name
+// without a slot segment (the base chains) names no ban rule.
+func chainRuleIndex(name string) (int, bool) {
+	mapName, _, ok := meterChainSlot(name)
+	if !ok {
 		return 0, false
 	}
-	if _, err := strconv.Atoi(name[dot+1:]); err != nil {
-		return 0, false // the trailing segment is not a slot
-	}
-	i, err := strconv.Atoi(name[strings.LastIndex(name[:dot], "_")+1 : dot])
+	i, err := strconv.Atoi(mapName[strings.LastIndex(mapName, "_")+1:])
 	if err != nil {
 		return 0, false
 	}
 	return i, true
+}
+
+// meterTarget names the effective Target prefix one Meter chain
+// meters, through the ruleset being replaced (prev): the chain's
+// verdict map names the ban rule and address family, its slot the
+// prefix's position in that family's target list. Only a metered rule
+// owns Meters - anything else matches no prefix. The returned family
+// position orders entries like the rule's effective targets.
+func meterTarget(prev []firewall.BanRule, rule int, mapName string, slot int) (string, int, bool) {
+	if rule < 0 || rule >= len(prev) {
+		return "", 0, false
+	}
+	r := prev[rule]
+	if !metered(r.Stance) {
+		return "", 0, false
+	}
+	for fam, f := range families {
+		if f.setName(rule) != mapName {
+			continue
+		}
+		targets := familyPrefixes(r.Targets, f)
+		if slot < 0 || slot >= len(targets) {
+			return "", 0, false
+		}
+		return targets[slot].String(), fam, true
+	}
+	return "", 0, false
 }
 
 // Reset removes the owned table with everything in it, tolerating the
@@ -617,6 +714,7 @@ func (d *Driver) Reset() error {
 		return fmt.Errorf("reset: %w", err)
 	}
 	d.installed = false
+	d.prevRules = nil
 	return nil
 }
 

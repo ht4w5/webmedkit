@@ -187,7 +187,8 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 // read-back's chain-name attribution against a real kernel: a counter
 // in a chain named after its ban rule's map slot comes back as that
 // ban rule's hit, aggregated with the base chains' readings per ban
-// rule. The scratch namespace is born empty, so the seeded readings
+// rule - and a metered rule's hit breaks down per effective Target
+// prefix. The scratch namespace is born empty, so the seeded readings
 // are the only counters and every number is exact.
 func TestKernelAttributesOwnedChainCountersByChainName(t *testing.T) {
 	if os.Geteuid() != 0 {
@@ -246,13 +247,17 @@ func TestKernelAttributesOwnedChainCountersByChainName(t *testing.T) {
 	seed("v4_0.0", chainOnlyCounter(7, 700).Exprs)
 	seed("v4_0.0", chainOnlyCounter(3, 30).Exprs)
 	seed("v6_2.4", chainOnlyCounter(4, 40).Exprs)
+	seed("v6_2.0", chainOnlyCounter(2, 20).Exprs) // rule 2's own v6 slot 0 = 2001:db8::9/128
 	if err := nsConn.Flush(); err != nil {
 		t.Fatalf("seed readings: %v", err)
 	}
 
 	// A changed ruleset replaces the table and reports the replaced
 	// rules' counters: rule 1's reading by its set name, the slot
-	// chains' by chain name - one hit per ban rule.
+	// chains' by chain name - one hit per ban rule. Rule 2 is metered,
+	// so its hit names the prefix its reading meters; rule 0's slot
+	// name sits under a drop rule (no Meters) and rule 2's slot 4
+	// names no prefix - both keep totals only.
 	out, err := d.Apply([]firewall.BanRule{dropFixture("203.0.113.8/32")})
 	if err != nil {
 		t.Fatalf("rebuild Apply: %v", err)
@@ -260,7 +265,9 @@ func TestKernelAttributesOwnedChainCountersByChainName(t *testing.T) {
 	want := []firewall.Hit{
 		{Rule: 0, Packets: 10, Bytes: 730},
 		{Rule: 1, Packets: 5, Bytes: 50},
-		{Rule: 2, Packets: 4, Bytes: 40},
+		{Rule: 2, Packets: 6, Bytes: 60, Prefixes: []firewall.PrefixHit{
+			{Target: "2001:db8::9/128", Packets: 2, Bytes: 20},
+		}},
 	}
 	if !reflect.DeepEqual(out.Hits, want) {
 		t.Errorf("hits = %+v, want %+v (aggregated per ban rule from every owned chain)", out.Hits, want)

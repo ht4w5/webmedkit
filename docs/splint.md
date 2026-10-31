@@ -561,7 +561,9 @@ interfere. Meters carry a derived burst of one second's worth of the
 rate (floored), so legitimate micro-bursts survive enforcement. Every ban rule carries a packet/byte counter on
 the traffic the rule matches - never the traffic the enforcement scope
 or Target match lets past; nonzero hits are logged at each install - "since the
-last change" (see the cycle logs below).
+last change" (see the cycle logs below). A metered rule's hit also
+breaks down per effective Target prefix - one `meter hit` line per
+prefix - so the log shows which limited prefix is consuming its budget.
 
 #### Known limitation: first-match meter stances
 
@@ -634,10 +636,10 @@ cannot reset - see the caveats.)
 
 A full session as captured against a scratch endpoint (timestamps
 omitted; the hash and counter values are that run's - yours follow
-your own document and traffic; the document held a `drop` Report and
-a `limit-req-rate` Report, ten packets arrived from the ban rule's
+your own document and traffic; the document held a `limit-pkt-rate`
+Report and a `limit-req-rate` Report, ten packets arrived from the ban rule's
 Target between installs, the endpoint went down before one cycle and
-came back with one more `drop` Report, and SIGTERM ended the run):
+came back with one more `limit-pkt-rate` Report, and SIGTERM ended the run):
 
 ```text
 INF compiled ban rules reports=2 rules=2 skipped=0
@@ -647,6 +649,7 @@ INF startup test install ok
 ERR update failed; keeping last installed rules error="fetch: Get \"http://127.0.0.1:18090/reports\": dial tcp 127.0.0.1:18090: connect: connection refused"
 INF compiled ban rules reports=3 rules=2 skipped=0
 INF ban rule hit in the replaced ruleset bytes=2280 packets=10 point=current rule=0
+INF meter hit in the replaced ruleset bytes=2280 packets=10 point=current prefix=203.0.113.7/32 rule=0
 INF installed ban rules declined=1 hash=96ce7fd4 point=current rules=2
 WRN declined ban rule feature feature=limit-req-rate point=current reason="application-layer intent; never faked at the packet layer" rule=1
 INF compiled ban rules reports=3 rules=2 skipped=0
@@ -655,7 +658,7 @@ WRN declined ban rule feature feature=limit-req-rate point=current reason="appli
 INF reset and exit
 ```
 
-`compiled ban rules` logs every cycle's counts (the two `drop` Reports
+`compiled ban rules` logs every cycle's counts (the two `limit-pkt-rate` Reports
 group into one ban rule, hence `reports=3 rules=2`); `installed ban
 rules` a changed install with its ruleset hash and its `declined`
 count; `declined ban rule feature` the lost enforcement of every
@@ -663,7 +666,13 @@ declined feature, logged each cycle; `ban rule hit in the replaced
 ruleset` the nonzero counters of the rules the install replaced -
 `rule=` indexes that replaced ruleset (the previous install's ban
 rules), not the ruleset just installed - the ten packets the ban rule
-dropped since the last change; `update failed; keeping last installed
+counted since the last change; `meter hit in the replaced ruleset` the
+per-prefix Meter readings behind a metered rule's total, one line per
+nonzero prefix right after its rule's hit line - `prefix=` names the
+effective Target prefix as the plan shows it (never an internal chain
+name) and `packets`/`bytes` are that prefix's own Meter counter since
+the last change (drop and reject rules carry no per-prefix lines);
+`update failed; keeping last installed
 rules` a failed fetch (the `error` field carries the cause);
 `ban rules unchanged; skipping install` the skip-if-unchanged path;
 `reset and exit` the clean shutdown. A skipped Report looks like `WRN

@@ -19,9 +19,24 @@ type Point struct {
 // Hit is one ban rule's nonzero counter reading at the install that
 // replaces it: Rule is the ban rule's index in the ruleset the driver
 // replaced (the previous apply's input rules, in --dry-run JSON order),
-// Packets and Bytes the reading since the last change.
+// Packets and Bytes the reading since the last change. Prefixes holds
+// a metered rule's nonzero per-prefix Meter readings in its
+// effective-target order (ADR 0020); drop and reject rules - and a
+// ruleset the driver never installed - carry none.
 type Hit struct {
-	Rule    int
+	Rule     int
+	Packets  uint64
+	Bytes    uint64
+	Prefixes []PrefixHit
+}
+
+// PrefixHit is one effective Target prefix's own Meter counter reading
+// behind its ban rule's Hit, since the last change like the total.
+// Target names the prefix as the plan shows it - the replaced ruleset's
+// CIDR string, never an internal chain name - so logs can say which
+// limited prefix is consuming its budget.
+type PrefixHit struct {
+	Target  string
 	Packets uint64
 	Bytes   uint64
 }
@@ -58,8 +73,10 @@ type Plan struct {
 // unchanged-skip (the plan's hash matched the last applied hash and
 // the owned ruleset still exists); otherwise the install happened,
 // Hash identifies it, and Hits holds the nonzero counters of the rules
-// it replaced, over the period since the last change. Declines are
-// reported on every outcome, skipped cycles included.
+// it replaced, over the period since the last change - per-ban-rule
+// totals (as always), broken down per prefix behind a metered rule's
+// Meters (see Hit). Declines are reported on every outcome, skipped
+// cycles included.
 type Outcome struct {
 	Skipped  bool
 	Hash     uint32

@@ -73,9 +73,13 @@ func TestKernelSaturatingOneMeterLeavesItsSiblingUnaffected(t *testing.T) {
 		t.Fatalf("rebuild Apply: %v", err)
 	}
 	// Both Meters count every datagram sent at them (20 + 5); only the
-	// in-rate ones fell through - a shared budget would read 25/5.
+	// in-rate ones fell through - a shared budget would read 25/5. The
+	// outcome breaks the total down per prefix - the plan's CIDR text.
 	want := []firewall.Hit{
-		{Rule: 0, Packets: 25, Bytes: 25 * datagramBytes},
+		{Rule: 0, Packets: 25, Bytes: 25 * datagramBytes, Prefixes: []firewall.PrefixHit{
+			{Target: "203.0.113.7/32", Packets: 20, Bytes: 20 * datagramBytes},
+			{Target: "198.51.100.7/32", Packets: 5, Bytes: 5 * datagramBytes},
+		}},
 		{Rule: 1, Packets: 10, Bytes: 10 * datagramBytes},
 	}
 	if !reflect.DeepEqual(out.Hits, want) {
@@ -114,7 +118,9 @@ func TestKernelInRateMeteredTrafficFallsThroughUnchanged(t *testing.T) {
 	// The Meter counted all 5 and dropped none: all fell through to
 	// the drop below - a Meter swallowing in-rate traffic reads 5/0.
 	want := []firewall.Hit{
-		{Rule: 0, Packets: 5, Bytes: 5 * datagramBytes},
+		{Rule: 0, Packets: 5, Bytes: 5 * datagramBytes, Prefixes: []firewall.PrefixHit{
+			{Target: "203.0.113.7/32", Packets: 5, Bytes: 5 * datagramBytes},
+		}},
 		{Rule: 1, Packets: 5, Bytes: 5 * datagramBytes},
 	}
 	if !reflect.DeepEqual(out.Hits, want) {
@@ -159,9 +165,15 @@ func TestKernelSaturatingOneByteMeterLeavesItsSiblingUnaffected(t *testing.T) {
 	}
 	// Both Meters count every datagram sent at them (20 + 5); only the
 	// in-budget ones fell through - a shared budget would read 25/10.
+	// The witness rule's own Meter counts what fell through to it.
 	want := []firewall.Hit{
-		{Rule: 0, Packets: 25, Bytes: 25 * datagramBytes},
-		{Rule: 1, Packets: 15, Bytes: 15 * datagramBytes},
+		{Rule: 0, Packets: 25, Bytes: 25 * datagramBytes, Prefixes: []firewall.PrefixHit{
+			{Target: "203.0.113.7/32", Packets: 20, Bytes: 20 * datagramBytes},
+			{Target: "198.51.100.7/32", Packets: 5, Bytes: 5 * datagramBytes},
+		}},
+		{Rule: 1, Packets: 15, Bytes: 15 * datagramBytes, Prefixes: []firewall.PrefixHit{
+			{Target: "0.0.0.0/0", Packets: 15, Bytes: 15 * datagramBytes},
+		}},
 	}
 	if !reflect.DeepEqual(out.Hits, want) {
 		t.Errorf("hits = %+v, want %+v (per-prefix Meters: only the excess dropped, the sibling untouched)", out.Hits, want)

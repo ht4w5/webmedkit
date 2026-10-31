@@ -1391,6 +1391,53 @@ func TestUpdateCycleLogsTheBanRuleHits(t *testing.T) {
 	}
 }
 
+func TestUpdateCycleLogsThePerPrefixMeterHits(t *testing.T) {
+	srv := newDocServer(t)
+	srv.serve(http.StatusOK, canonicalDoc(t))
+	u, stub, logs := newTestUpdater(t, srv)
+	stub.ApplyHits = []firewall.Hit{{
+		Rule: 0, Packets: 25, Bytes: 725,
+		Prefixes: []firewall.PrefixHit{
+			{Target: "203.0.113.7/32", Packets: 20, Bytes: 580},
+			{Target: "198.51.100.7/32", Packets: 5, Bytes: 145},
+		},
+	}}
+
+	if _, err := u.Update(context.Background()); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	logText := logs.String()
+	if !strings.Contains(logText, "ban rule hit in the replaced ruleset") {
+		t.Errorf("the install logs no ban rule hit: %s", logText)
+	}
+	var meterLines []string
+	for _, line := range strings.Split(logText, "\n") {
+		if strings.Contains(line, "meter hit in the replaced ruleset") {
+			meterLines = append(meterLines, line)
+		}
+	}
+	if len(meterLines) != 2 {
+		t.Fatalf("logged %d meter hits, want 2 (one per prefix): %s", len(meterLines), logText)
+	}
+	for i, entry := range []string{
+		`"prefix":"203.0.113.7/32","packets":20,"bytes":580`,
+		`"prefix":"198.51.100.7/32","packets":5,"bytes":145`,
+	} {
+		if !strings.Contains(meterLines[i], entry) {
+			t.Errorf("meter hit %d = %s, want it to carry %s", i, meterLines[i], entry)
+		}
+		if !strings.Contains(meterLines[i], `"point":"current"`) || !strings.Contains(meterLines[i], `"rule":0`) {
+			t.Errorf("meter hit %d does not carry its point and rule: %s", i, meterLines[i])
+		}
+	}
+	// The per-prefix lines follow their rule's total line.
+	total := strings.Index(logText, "ban rule hit in the replaced ruleset")
+	first := strings.Index(logText, "meter hit in the replaced ruleset")
+	if total < 0 || first < total {
+		t.Errorf("the meter hits do not follow their rule's total line: %s", logText)
+	}
+}
+
 func TestUpdateKeepsTheLastInstalledRules(t *testing.T) {
 	keepLast := func(t *testing.T, status int, body string) {
 		t.Helper()
