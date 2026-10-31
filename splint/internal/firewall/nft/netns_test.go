@@ -243,9 +243,9 @@ func TestKernelAttributesOwnedChainCountersByChainName(t *testing.T) {
 		&expr.Lookup{SourceRegister: 1, SetName: "v6_1"},
 		&expr.Counter{Packets: 5, Bytes: 50},
 	})
-	seed("v4_0.0", countingRule(7, 700).Exprs)
-	seed("v4_0.0", countingRule(3, 30).Exprs)
-	seed("v6_2.4", countingRule(4, 40).Exprs)
+	seed("v4_0.0", chainOnlyCounter(7, 700).Exprs)
+	seed("v4_0.0", chainOnlyCounter(3, 30).Exprs)
+	seed("v6_2.4", chainOnlyCounter(4, 40).Exprs)
 	if err := nsConn.Flush(); err != nil {
 		t.Fatalf("seed readings: %v", err)
 	}

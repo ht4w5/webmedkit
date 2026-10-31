@@ -405,7 +405,7 @@ func assertKernelState(t *testing.T, conn *nftables.Conn, hook Hook, ingressRule
 	chainByName := map[string]*nftables.Chain{}
 	var gotChains []string
 	for _, c := range chains {
-		if c.Table == nil || c.Table.Name != tableName || c.Table.Family != nftables.TableFamilyINet {
+		if !chainOfTable(c, table) {
 			continue // not a chain of the owned table
 		}
 		gotChains = append(gotChains, c.Name)
