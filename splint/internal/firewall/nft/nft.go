@@ -143,7 +143,7 @@ type kernelConn interface {
 	DelTable(*nftables.Table)
 	Flush() error
 	ListTableOfFamily(name string, family nftables.TableFamily) (*nftables.Table, error)
-	ListChain(table *nftables.Table, chain string) (*nftables.Chain, error)
+	ListChainsOfTableFamily(family nftables.TableFamily) ([]*nftables.Chain, error)
 	GetRules(table *nftables.Table, chain *nftables.Chain) ([]*nftables.Rule, error)
 }
 
@@ -497,18 +497,24 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 }
 
 // ruleHits reads the owned table's per-rule counters back, one hit
-// per ban rule: the counter position and the set-name index map each
-// reading onto the ban rule it counts - the ruleset being replaced.
-// Only nonzero readings come back.
+// per ban rule. Every chain the owned table holds is read: a chain
+// named after its ban rule (a verdict-map element slot chain) names
+// the ban rule outright, a base chain's kernel rule carries its index
+// in its set names - either way the readings aggregate onto the ban
+// rule they count, the ruleset being replaced. Only nonzero readings
+// come back.
 func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
+	chains, err := conn.ListChainsOfTableFamily(table.Family)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil // the chains are gone with the table
+		}
+		return nil, err
+	}
 	byRule := map[int]firewall.Hit{}
-	for _, name := range []string{ingressName, egressName} {
-		chain, err := conn.ListChain(table, name)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue // the chain is gone with the table
-			}
-			return nil, err
+	for _, chain := range chains {
+		if chain.Table == nil || chain.Table.Name != table.Name || chain.Table.Family != table.Family {
+			continue // not a chain of the owned table
 		}
 		krules, err := conn.GetRules(table, chain)
 		if err != nil {
@@ -519,7 +525,10 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 			if !ok || (c.Packets == 0 && c.Bytes == 0) {
 				continue
 			}
-			i, ok := ruleIndex(r)
+			i, ok := chainRuleIndex(chain.Name) // the chain names its ban rule
+			if !ok {
+				i, ok = ruleIndex(r) // a base chain's rule names its own
+			}
 			if !ok {
 				continue // not a kernel rule this driver wrote
 			}
@@ -561,6 +570,27 @@ func ruleIndex(r *nftables.Rule) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// chainRuleIndex reads a ban rule's index out of an owned chain's
+// name: a chain named after its verdict-map element slot (the map
+// name plus a numeric slot suffix, e.g. v4_3.1) strips its trailing
+// slot segment and takes the index its map name carries - the index
+// ruleIndex reads from a kernel rule's set names. A name without a
+// slot segment (the base chains) names no ban rule.
+func chainRuleIndex(name string) (int, bool) {
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return 0, false
+	}
+	if _, err := strconv.Atoi(name[dot+1:]); err != nil {
+		return 0, false // the trailing segment is not a slot
+	}
+	i, err := strconv.Atoi(name[strings.LastIndex(name[:dot], "_")+1 : dot])
+	if err != nil {
+		return 0, false
+	}
+	return i, true
 }
 
 // Reset removes the owned table with everything in it, tolerating the
