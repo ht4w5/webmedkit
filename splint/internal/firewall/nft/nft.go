@@ -143,7 +143,7 @@ type kernelConn interface {
 	DelTable(*nftables.Table)
 	Flush() error
 	ListTableOfFamily(name string, family nftables.TableFamily) (*nftables.Table, error)
-	ListChain(table *nftables.Table, chain string) (*nftables.Chain, error)
+	ListChainsOfTableFamily(family nftables.TableFamily) ([]*nftables.Chain, error)
 	GetRules(table *nftables.Table, chain *nftables.Chain) ([]*nftables.Rule, error)
 }
 
@@ -497,18 +497,24 @@ func (d *Driver) Apply(rules []firewall.BanRule) (firewall.Outcome, error) {
 }
 
 // ruleHits reads the owned table's per-rule counters back, one hit
-// per ban rule: the counter position and the set-name index map each
-// reading onto the ban rule it counts - the ruleset being replaced.
-// Only nonzero readings come back.
+// per ban rule. Every chain the owned table holds is read: a chain
+// named after its ban rule (a verdict-map element slot chain) names
+// the ban rule outright, a base chain's kernel rule carries its index
+// in its set names - either way the readings aggregate onto the ban
+// rule they count, the ruleset being replaced. Only nonzero readings
+// come back.
 func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
+	chains, err := conn.ListChainsOfTableFamily(table.Family)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil // the chains are gone with the table
+		}
+		return nil, err
+	}
 	byRule := map[int]firewall.Hit{}
-	for _, name := range []string{ingressName, egressName} {
-		chain, err := conn.ListChain(table, name)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue // the chain is gone with the table
-			}
-			return nil, err
+	for _, chain := range chains {
+		if chain.Table == nil || chain.Table.Name != table.Name || chain.Table.Family != table.Family {
+			continue // not a chain of the owned table
 		}
 		krules, err := conn.GetRules(table, chain)
 		if err != nil {
@@ -519,7 +525,10 @@ func ruleHits(conn kernelConn, table *nftables.Table) ([]firewall.Hit, error) {
 			if !ok || (c.Packets == 0 && c.Bytes == 0) {
 				continue
 			}
-			i, ok := ruleIndex(r)
+			i, ok := chainRuleIndex(chain.Name) // the chain names its ban rule
+			if !ok {
+				i, ok = ruleIndex(r) // a base chain's rule names its own
+			}
 			if !ok {
 				continue // not a kernel rule this driver wrote
 			}
@@ -561,6 +570,27 @@ func ruleIndex(r *nftables.Rule) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// chainRuleIndex reads a ban rule's index out of an owned chain's
+// name: a chain named after its verdict-map element slot (the map
+// name plus a numeric slot suffix, e.g. v4_3.1) strips its trailing
+// slot segment and takes the index its map name carries - the index
+// ruleIndex reads from a kernel rule's set names. A name without a
+// slot segment (the base chains) names no ban rule.
+func chainRuleIndex(name string) (int, bool) {
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return 0, false
+	}
+	if _, err := strconv.Atoi(name[dot+1:]); err != nil {
+		return 0, false // the trailing segment is not a slot
+	}
+	i, err := strconv.Atoi(name[strings.LastIndex(name[:dot], "_")+1 : dot])
+	if err != nil {
+		return 0, false
+	}
+	return i, true
 }
 
 // Reset removes the owned table with everything in it, tolerating the
@@ -690,9 +720,10 @@ func ruleFamilies(r firewall.BanRule, scope Scope) []familyRule {
 }
 
 // addBanRule buffers one ban rule's sets and kernel rules: one
-// target interval set, one kernel rule per reachable family.
+// target interval set, one kernel rule per reachable family, each
+// kernel rule its target match composed with its terminal.
 func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egress *nftables.Chain, i int, r firewall.BanRule) error {
-	verdict, err := verdictExprs(r)
+	terminal, err := terminalExprs(r)
 	if err != nil {
 		return err
 	}
@@ -747,11 +778,11 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 		}, intervalElements(f.targets)); err != nil {
 			return err
 		}
-		exprs := []expr.Any{
+		match := []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.proto}},
 		}
-		exprs = append(exprs, scopeExprs...)
+		match = append(match, scopeExprs...)
 		if len(f.scopeAddrs) > 0 {
 			if err := conn.AddSet(&nftables.Set{
 				Table:    table,
@@ -761,28 +792,34 @@ func (d *Driver) addBanRule(conn kernelConn, table *nftables.Table, ingress, egr
 			}, intervalElements(f.scopeAddrs)); err != nil {
 				return err
 			}
-			exprs = append(exprs,
+			match = append(match,
 				&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
 					Base: expr.PayloadBaseNetworkHeader, Offset: dir.scopeOff(fam), Len: fam.srcLen},
 				&expr.Lookup{SourceRegister: 1, SetName: dir.addrSet(fam, i)},
 			)
 		}
-		exprs = append(exprs,
-			&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
-				Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
-			&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
-			// The counter sits after every match and immediately before
-			// the verdict, so it counts only the ban rule's own hits.
-			&expr.Counter{},
-		)
-		exprs = append(exprs, verdict...)
+		match = append(match, targetMatchExprs(dir, fam, i)...)
 		conn.AddRule(&nftables.Rule{
 			Table: table,
 			Chain: chain,
-			Exprs: exprs,
+			// The target match and the terminal compose into the one
+			// kernel rule: either substitutes without the other.
+			Exprs: append(match, terminal...),
 		})
 	}
 	return nil
+}
+
+// targetMatchExprs builds a ban rule's target match: the load of the
+// address its direction matches on and the lookup of the family's
+// target set. It composes with terminalExprs into one kernel rule -
+// match first, terminal last.
+func targetMatchExprs(dir banDirection, fam addrFamily, i int) []expr.Any {
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
+			Base: expr.PayloadBaseNetworkHeader, Offset: dir.targetOff(fam), Len: fam.srcLen},
+		&expr.Lookup{SourceRegister: 1, SetName: fam.setName(i)},
+	}
 }
 
 func familyPrefixes(prefixes []netip.Prefix, fam addrFamily) []netip.Prefix {
@@ -812,6 +849,18 @@ func portElements(ports []uint16) []nftables.SetElement {
 		elems = append(elems, nftables.SetElement{Key: []byte{byte(p >> 8), byte(p)}})
 	}
 	return elems
+}
+
+// terminalExprs builds a ban rule's terminal: the counter and the
+// stance's verdict tail. The counter sits after every match and
+// immediately before the verdict, so it counts only the ban rule's
+// own hits.
+func terminalExprs(r firewall.BanRule) ([]expr.Any, error) {
+	verdict, err := verdictExprs(r)
+	if err != nil {
+		return nil, err
+	}
+	return append([]expr.Any{&expr.Counter{}}, verdict...), nil
 }
 
 // verdictExprs maps a stance onto its verdict expressions (unknown

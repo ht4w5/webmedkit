@@ -122,16 +122,15 @@ func (k *fakeKernel) ListTableOfFamily(name string, family nftables.TableFamily)
 	return k.table, nil
 }
 
-func (k *fakeKernel) ListChain(t *nftables.Table, name string) (*nftables.Chain, error) {
+func (k *fakeKernel) ListChainsOfTableFamily(family nftables.TableFamily) ([]*nftables.Chain, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if k.table == nil {
-		return nil, fmt.Errorf("chain %s: %w", name, fs.ErrNotExist)
+	// A dump lists what matches and never fails on an absent table.
+	var chains []*nftables.Chain
+	for name := range k.chains {
+		chains = append(chains, &nftables.Chain{Name: name, Table: k.table})
 	}
-	if _, ok := k.chains[name]; !ok {
-		return nil, fmt.Errorf("chain %s: %w", name, fs.ErrNotExist)
-	}
-	return &nftables.Chain{Name: name, Table: k.table}, nil
+	return chains, nil
 }
 
 func (k *fakeKernel) GetRules(t *nftables.Table, c *nftables.Chain) ([]*nftables.Rule, error) {
@@ -186,6 +185,14 @@ func (k *fakeKernel) rulesIn(chain string) int {
 	return len(k.chains[chain])
 }
 
+// recordedRules serves the flushed kernel rules of one chain - the
+// installed shape the fake keeps for the seam's assertions.
+func (k *fakeKernel) recordedRules(chain string) []*nftables.Rule {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]*nftables.Rule(nil), k.chains[chain]...)
+}
+
 func (k *fakeKernel) probeCount() int {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -197,6 +204,14 @@ func (k *fakeKernel) probeCount() int {
 func counterRule(setName string, packets, bytes uint64) *nftables.Rule {
 	return &nftables.Rule{Exprs: []expr.Any{
 		&expr.Lookup{SourceRegister: 1, SetName: setName},
+		&expr.Counter{Packets: packets, Bytes: bytes},
+	}}
+}
+
+// countingRule builds a reading whose only attribution is the chain
+// carrying it: no lookup names a ban rule, so the chain name must.
+func countingRule(packets, bytes uint64) *nftables.Rule {
+	return &nftables.Rule{Exprs: []expr.Any{
 		&expr.Counter{Packets: packets, Bytes: bytes},
 	}}
 }
@@ -728,6 +743,93 @@ func TestApplyReadsTheCountersOfWhatItReplaced(t *testing.T) {
 	})
 }
 
+func TestApplyAttributesCountersFromAnyOwnedChain(t *testing.T) {
+	rules := []firewall.BanRule{
+		dropFixture("203.0.113.7/32"),
+		dropFixture("2001:db8::7/128"),
+		bandwidthFixture(1000000, "198.51.100.9/32", "2001:db8::9/128"),
+	}
+
+	t.Run("a counter in a chain named after its ban rule comes back as that ban rule's hit", func(t *testing.T) {
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			"v4_2.0": {countingRule(7, 700)},
+		})
+		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		want := []firewall.Hit{{Rule: 2, Packets: 7, Bytes: 700}}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (the chain name names the ban rule)", out.Hits, want)
+		}
+	})
+
+	t.Run("the trailing slot segment is stripped before the ban rule index is read", func(t *testing.T) {
+		// Slot 9 of rule 2's map: reading the whole name would map the
+		// counter onto a ban rule 9.
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			"v4_2.9": {countingRule(7, 700)},
+		})
+		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		want := []firewall.Hit{{Rule: 2, Packets: 7, Bytes: 700}}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (the slot suffix never leaks into the index)", out.Hits, want)
+		}
+	})
+
+	t.Run("named chains and the base chains aggregate into one hit per ban rule", func(t *testing.T) {
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			ingressName: {counterRule("v4_2", 5, 50)},
+			"v4_2.0":    {countingRule(3, 30)},
+			"v6_2.1":    {countingRule(4, 40)},
+		})
+		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		want := []firewall.Hit{{Rule: 2, Packets: 12, Bytes: 120}}
+		if !reflect.DeepEqual(out.Hits, want) {
+			t.Errorf("hits = %+v, want %+v (one hit per ban rule, summed over every owned chain)", out.Hits, want)
+		}
+	})
+
+	t.Run("a counter no name attributes is left unread", func(t *testing.T) {
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			"stray.0":    {countingRule(9, 90)},
+			"stray":      {countingRule(8, 80)},
+			"v4_2.alpha": {countingRule(7, 70)},
+		})
+		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if len(out.Hits) != 0 {
+			t.Errorf("hits = %+v, want none (a counter that names no ban rule is not a hit)", out.Hits)
+		}
+	})
+
+	t.Run("a zero counter in a named chain is not a hit worth reporting", func(t *testing.T) {
+		kernel := newFakeKernel()
+		kernel.seed(map[string][]*nftables.Rule{
+			"v4_2.0": {countingRule(0, 0)},
+		})
+		out, err := newFakeDriver(t, HookInput, kernel).Apply(rules)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if len(out.Hits) != 0 {
+			t.Errorf("hits = %+v, want none (no traffic: not a hit worth reporting)", out.Hits)
+		}
+	})
+}
+
 func TestApplyReportsDeclines(t *testing.T) {
 	kernel := newFakeKernel()
 	d := newFakeDriver(t, HookInput, kernel)
@@ -822,6 +924,51 @@ func TestApplyBuildsOneAtomicBatch(t *testing.T) {
 			t.Errorf("batch = %v, want %v", kinds, want)
 		}
 	})
+}
+
+// TestApplyComposesTheTargetMatchAndTheTerminal pins the rule
+// builder's seam at the installed shape: every kernel rule is its ban
+// rule's target match - family gate, scope gates, target-address
+// match - followed whole by its terminal (the counter and the
+// stance's verdict tail). Either half substitutes without the other.
+// The wants are hand-written like the kernel suite's, whose shape
+// assertions need root; this pin runs on the fake kernel.
+func TestApplyComposesTheTargetMatchAndTheTerminal(t *testing.T) {
+	kernel := newFakeKernel()
+	rules := []firewall.BanRule{
+		{Targets: []netip.Prefix{
+			netip.MustParsePrefix("203.0.113.0/24"),
+			netip.MustParsePrefix("2001:db8::/32"),
+		}, Stance: firewall.StanceDrop},
+		{Targets: []netip.Prefix{netip.MustParsePrefix("198.51.100.7/32")}, Stance: firewall.StanceReject},
+		{Targets: []netip.Prefix{netip.MustParsePrefix("198.51.100.9/32")}, Stance: firewall.StanceLimitPktRate, Rate: ratePtr(250)},
+		bandwidthFixture(1000000, "203.0.113.9/32"),
+	}
+	if _, err := newFakeDriver(t, HookInput, kernel).Apply(rules); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	ingressRules := []wantRule{
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_0", l4Set: "il4_0", tail: dropTail},                                // 203.0.113.0/24
+		{proto: unix.NFPROTO_IPV6, off: 8, length: 16, setName: "v6_0", l4Set: "il4_0", tail: dropTail},                                // 2001:db8::/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_1", l4Set: "il4_1", tail: rejectTail},                              // 198.51.100.7/32
+		{proto: unix.NFPROTO_IPV4, off: 12, length: 4, setName: "v4_2", l4Set: "il4_2", tail: limitTail(expr.LimitTypePkts, 250, 250)}, // 198.51.100.9/32
+	}
+	egressRules := []wantRule{
+		{proto: unix.NFPROTO_IPV4, off: 16, length: 4, setName: "v4_3", l4Set: "el4_3", tail: limitTail(expr.LimitTypePktBytes, 1000000, 1000000)}, // 203.0.113.9/32
+	}
+	assertRecorded := func(chain string, want []wantRule) {
+		t.Helper()
+		recorded := kernel.recordedRules(chain)
+		if len(recorded) != len(want) {
+			t.Fatalf("chain %s carries %d kernel rules, want %d", chain, len(recorded), len(want))
+		}
+		for i, w := range want {
+			tail := assertMatch(t, recorded[i], w)
+			w.tail(t, tail)
+		}
+	}
+	assertRecorded(ingressName, ingressRules)
+	assertRecorded(egressName, egressRules)
 }
 
 func TestResetToleratesAnAbsentRuleset(t *testing.T) {

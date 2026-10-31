@@ -7,10 +7,12 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 
 	"github.com/HT4w5/webmedkit/splint/internal/firewall"
@@ -178,6 +180,90 @@ func TestKernelInstallInAScratchNetNS(t *testing.T) {
 	}
 	if _, err := d.Apply(rules); !errors.Is(err, firewall.ErrUnreachable) {
 		t.Errorf("Apply into a vanished namespace = %v, want a firewall.ErrUnreachable", err)
+	}
+}
+
+// TestKernelAttributesOwnedChainCountersByChainName pins the hit
+// read-back's chain-name attribution against a real kernel: a counter
+// in a chain named after its ban rule's map slot comes back as that
+// ban rule's hit, aggregated with the base chains' readings per ban
+// rule. The scratch namespace is born empty, so the seeded readings
+// are the only counters and every number is exact.
+func TestKernelAttributesOwnedChainCountersByChainName(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root: netlink requires CAP_NET_ADMIN")
+	}
+	if reason := netlinkUnusable(); reason != "" {
+		t.Skip(reason)
+	}
+	unshare, err := exec.LookPath("unshare")
+	if err != nil {
+		t.Skip("needs unshare(1) to create the scratch network namespace")
+	}
+	path, _ := startScratchNetNS(t, unshare)
+	d, err := New(Config{Hook: HookInput, NetNSPath: path})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rules := []firewall.BanRule{
+		{Targets: []netip.Prefix{netip.MustParsePrefix("203.0.113.7/32")}, Stance: firewall.StanceDrop},
+		{Targets: []netip.Prefix{netip.MustParsePrefix("2001:db8::7/128")}, Stance: firewall.StanceDrop},
+		{Targets: []netip.Prefix{
+			netip.MustParsePrefix("198.51.100.9/32"),
+			netip.MustParsePrefix("2001:db8::9/128"),
+		}, Stance: firewall.StanceLimitBandwidth, Rate: ratePtr(1000000)},
+	}
+	if _, err := d.Apply(rules); err != nil {
+		t.Fatalf("Apply into the scratch namespace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := d.Reset(); err != nil {
+			t.Errorf("cleanup reset: %v", err)
+		}
+	})
+
+	// Seed readings behind the driver's back, as if the install being
+	// replaced had been counting traffic: a chain named after its ban
+	// rule's map slot carries its own counter; a base chain's kernel
+	// rule names its ban rule by set name. The kernel refuses a lookup
+	// of a register no earlier expression loads, so the base chain's
+	// reading is hand-written like a real target match: load, lookup,
+	// reading.
+	table := ownedTable()
+	nsConn := scratchConn(t, path)
+	for _, name := range []string{"v4_0.0", "v6_2.4"} {
+		nsConn.AddChain(&nftables.Chain{Table: table, Name: name})
+	}
+	seed := func(chain string, exprs []expr.Any) {
+		nsConn.AddRule(&nftables.Rule{Table: table, Chain: &nftables.Chain{Name: chain, Table: table}, Exprs: exprs})
+	}
+	seed(ingressName, []expr.Any{
+		&expr.Payload{DestRegister: 1, OperationType: expr.PayloadLoad,
+			Base: expr.PayloadBaseNetworkHeader, Offset: 8, Len: 16},
+		&expr.Lookup{SourceRegister: 1, SetName: "v6_1"},
+		&expr.Counter{Packets: 5, Bytes: 50},
+	})
+	seed("v4_0.0", countingRule(7, 700).Exprs)
+	seed("v4_0.0", countingRule(3, 30).Exprs)
+	seed("v6_2.4", countingRule(4, 40).Exprs)
+	if err := nsConn.Flush(); err != nil {
+		t.Fatalf("seed readings: %v", err)
+	}
+
+	// A changed ruleset replaces the table and reports the replaced
+	// rules' counters: rule 1's reading by its set name, the slot
+	// chains' by chain name - one hit per ban rule.
+	out, err := d.Apply([]firewall.BanRule{dropFixture("203.0.113.8/32")})
+	if err != nil {
+		t.Fatalf("rebuild Apply: %v", err)
+	}
+	want := []firewall.Hit{
+		{Rule: 0, Packets: 10, Bytes: 730},
+		{Rule: 1, Packets: 5, Bytes: 50},
+		{Rule: 2, Packets: 4, Bytes: 40},
+	}
+	if !reflect.DeepEqual(out.Hits, want) {
+		t.Errorf("hits = %+v, want %+v (aggregated per ban rule from every owned chain)", out.Hits, want)
 	}
 }
 
