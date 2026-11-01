@@ -19,8 +19,7 @@ import (
 
 // nginxLineAgent is nginxLine with the optional agent field.
 func nginxLineAgent(t, client, method, path string, status int, sent int64, agent string) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"agent":%q}`,
-		t, client, method, path, status, sent, agent)
+	return nginxLineFields(t, client, method, path, status, sent, agentMember(agent))
 }
 
 // marks returns the captured MARK log-action messages in emission order.

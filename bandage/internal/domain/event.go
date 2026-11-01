@@ -28,11 +28,10 @@ type Event struct {
 	// aggregated Target; it renders in the wire form in text form, the
 	// zero Addr as the empty string (netip.Addr's text marshalling).
 	RemoteAddr netip.Addr `json:"remote_addr"`
-	// Method is the request method.
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Agent  string `json:"agent"`
-	Status int    `json:"status"`
+	Method     string     `json:"method"`
+	Path       string     `json:"path"`
+	Agent      string     `json:"agent"`
+	Status     int        `json:"status"`
 	// SentBytes renders under its contract key "sent_bytes", the
 	// response payload bytes sent.
 	SentBytes int64 `json:"sent_bytes"`

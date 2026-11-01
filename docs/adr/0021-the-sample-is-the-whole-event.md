@@ -22,11 +22,13 @@ guarantee - the address is already in the access log).
 
 Consequences: `Event` now carries the report contract's wire shape
 (JSON tags, RFC 3339 UTC second-precision timestamps), a coupling that
-is deliberate; new Event fields appear in reports by construction, and
-the byte-for-byte canonical-example test in `docs/reports.md` forces
-the contract document to be updated with them; served documents
-disclose the unaggregated client address; rows persisted before the
-change read back with zeroed renamed and added fields (zero means
-absent - no dual-read). Recorded because the sample's completeness is
+is deliberate; that contract wire form is the Event's sole JSON form,
+so anything marshalling an Event - the log action's `event` attribute
+included - renders it; new Event fields appear in reports by
+construction, and the byte-for-byte canonical-example test in
+`docs/reports.md` forces the contract document to be updated with
+them; served documents disclose the unaggregated client address; rows
+persisted before the change read back with zeroed renamed and added
+fields (zero means absent - no dual-read). Recorded because the sample's completeness is
 a stance a future reader will be tempted to "optimize" back into a
 projection.

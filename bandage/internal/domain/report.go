@@ -73,18 +73,21 @@ func (e Event) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON is the inverse of MarshalJSON (persistence round-trip);
-// absent sample fields read as zero (zero means absent).
+// absent sample fields read as zero (zero means absent), so a missing
+// or empty "time" reads as the zero time.
 func (e *Event) UnmarshalJSON(b []byte) error {
 	var w sampleJSON
 	if err := json.Unmarshal(b, &w); err != nil {
 		return err
 	}
-	t, err := parseTime(w.Time)
-	if err != nil {
-		return err
-	}
 	ev := Event(w.sampleWire)
-	ev.Time = t
+	if w.Time != "" {
+		t, err := parseTime(w.Time)
+		if err != nil {
+			return err
+		}
+		ev.Time = t
+	}
 	*e = ev
 	return nil
 }

@@ -120,14 +120,85 @@ func TestSampleRoundTrip(t *testing.T) {
 			}
 			wantBack := tt.orig
 			wantBack.Time = time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC)
-			if !back.Time.Equal(wantBack.Time) || back.RemoteAddr != wantBack.RemoteAddr ||
-				back.Method != wantBack.Method || back.Path != wantBack.Path || back.Agent != wantBack.Agent ||
-				back.Status != wantBack.Status || back.SentBytes != wantBack.SentBytes ||
-				back.ContentLength != wantBack.ContentLength || back.ContentRangeTotal != wantBack.ContentRangeTotal ||
-				back.SizeBytes != wantBack.SizeBytes {
-				t.Errorf("round trip = %+v, want %+v", back, wantBack)
-			}
+			checkSample(t, back, wantBack)
 		})
+	}
+}
+
+// TestSampleUnmarshalAbsentTime pins the absent-field convention at the
+// timestamp: a missing or empty "time" reads as the zero time (absent
+// sample fields read as zero - zero means absent), while a present
+// value still parses at the wire's second precision.
+func TestSampleUnmarshalAbsentTime(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		in      string
+		want    Event
+		wantErr bool
+	}{
+		{
+			name: "a missing time member reads as the zero time",
+			in:   `{"path":"/releases/24.04.iso","status":200}`,
+			want: Event{Path: "/releases/24.04.iso", Status: 200},
+		},
+		{
+			name: "an empty time reads as the zero time",
+			in:   `{"time":"","path":"/releases/24.04.iso"}`,
+			want: Event{Path: "/releases/24.04.iso"},
+		},
+		{
+			name: "a present time parses at second precision",
+			in:   `{"time":"2025-10-17T18:29:40Z"}`,
+			want: Event{Time: time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC)},
+		},
+		{
+			name:    "a malformed time still errors",
+			in:      `{"time":"yesterday"}`,
+			wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got Event
+			err := json.Unmarshal([]byte(tt.in), &got)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Unmarshal(%s) = %+v, want an encoding error", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unmarshal(%s): %v", tt.in, err)
+			}
+			checkSample(t, got, tt.want)
+		})
+	}
+}
+
+// checkSample reports every sample field that differs from want as
+// "sample <field> = ..., want ..." - the field-by-field comparison
+// behind the sample assertions.
+func checkSample(t *testing.T, got, want Event) {
+	t.Helper()
+	if !got.Time.Equal(want.Time) {
+		t.Errorf("sample time = %v, want %v", got.Time, want.Time)
+	}
+	for _, f := range []struct {
+		name      string
+		got, want any
+	}{
+		{"remote_addr", got.RemoteAddr, want.RemoteAddr},
+		{"method", got.Method, want.Method},
+		{"path", got.Path, want.Path},
+		{"agent", got.Agent, want.Agent},
+		{"status", got.Status, want.Status},
+		{"sent_bytes", got.SentBytes, want.SentBytes},
+		{"content_length", got.ContentLength, want.ContentLength},
+		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
+		{"size_bytes", got.SizeBytes, want.SizeBytes},
+	} {
+		if f.got != f.want {
+			t.Errorf("sample %s = %v, want %v", f.name, f.got, f.want)
+		}
 	}
 }
 
