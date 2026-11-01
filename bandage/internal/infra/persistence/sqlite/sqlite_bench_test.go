@@ -28,7 +28,7 @@ func benchUpsertReport() domain.Report {
 		UpdatedAt: now,
 		ExpiresAt: now.Add(time.Hour),
 		Tracker:   domain.TrackerReading{Track: "bandwidth", Value: 11000, Leak: 1000, Volume: 10000},
-		Sample:    domain.Sample{Time: now, Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200, Sent: 6000},
+		Sample:    domain.Event{Time: now, Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200, SentBytes: 6000},
 	}
 }
 
