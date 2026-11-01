@@ -11,4 +11,15 @@ state the exception explicitly.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
+
+## Comments
+
+Context: resolved on branch `ticket/dc-06-agent-docs-drift` (spec
+`../spec.md`, Q8-iv/Q8-v). `docs/agents/triage-labels.md` now carries a
+single label column - the `mattpocock/skills` mapping header and the
+closing "edit the column" template line are gone (the five-role
+vocabulary is settled per AGENTS.md). `docs/agents/issue-tracker.md`
+scopes the `spec.md` convention to new feature dirs and states the
+`.scratch/rename/` exception (predates it, holds only `handoff.md`).
+`make test` green (docs-only; the doc-pinning suites still pass).
