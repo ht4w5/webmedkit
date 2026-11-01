@@ -56,7 +56,7 @@ The `tracker` reading:
 The `sample` is the whole event that justified the report's current
 stance - never a curated subset of its fields. Absent observations
 render under one zero-means-absent convention: `content_length`,
-`content_range_total` and `size` read `0`, and `remote_addr` and `agent`
+`content_range_total` and `size_bytes` read `0`, and `remote_addr` and `agent`
 read empty.
 
 | field | type | meaning |
@@ -67,10 +67,10 @@ read empty.
 | `path` | string | the request path |
 | `agent` | string | the user agent; empty when the log line carried none |
 | `status` | number | the response status |
-| `sent` | number | response payload bytes sent |
+| `sent_bytes` | number | response payload bytes sent |
 | `content_length` | number | the response's `Content-Length` as the server reported it; `0` when absent or unusable |
 | `content_range_total` | number | the file's total size extracted from the response's `Content-Range`; `0` when absent or unusable |
-| `size` | number | the estimated total size of `path` in bytes; `0` when unknown |
+| `size_bytes` | number | the estimated total size of `path` in bytes; `0` when unknown |
 
 ### Lifecycle
 
@@ -147,7 +147,7 @@ The intent of each action:
 | `drop` | discard the Target's traffic silently (no `rate`) |
 | `reject` | refuse the Target's traffic with an error signal (no `rate`) |
 | `limit-pkt-rate` | throttle the Target to `rate` packets per second |
-| `limit-bandwidth` | throttle the Target to `rate` response-payload bytes per second - the bytes the sample's `sent` counts |
+| `limit-bandwidth` | throttle the Target to `rate` response-payload bytes per second - the bytes the sample's `sent_bytes` counts |
 | `limit-req-rate` | throttle the Target to `rate` requests per second |
 
 Every limit is an aggregate over the report's `target`: the number governs
@@ -223,10 +223,10 @@ within one leak second:
         "path": "/releases/24.04.iso",
         "agent": "Wget/1.21",
         "status": 206,
-        "sent": 6000,
+        "sent_bytes": 6000,
         "content_length": 6000,
         "content_range_total": 3000000,
-        "size": 0
+        "size_bytes": 0
       },
       "penalty": {
         "action": "limit-bandwidth",

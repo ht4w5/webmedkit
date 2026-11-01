@@ -57,7 +57,7 @@ func TestReportMarshalJSON(t *testing.T) {
 		"updated_at": "2025-10-17T18:29:40Z",
 		"expires_at": "2025-10-24T18:29:40Z",
 		"tracker": {"track": "bandwidth", "value": 102400000, "leak": 1000000, "volume": 100000000},
-		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent": 123456, "content_length": 123456, "content_range_total": 1234567890, "size": 1234567890},
+		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent_bytes": 123456, "content_length": 123456, "content_range_total": 1234567890, "size_bytes": 1234567890},
 		"penalty": {"action": "limit-bandwidth", "rate": 1000000}
 	}`
 	if compact(string(got)) != compact(want) {
@@ -91,7 +91,7 @@ func TestSampleRoundTrip(t *testing.T) {
 				ContentRangeTotal: 3000000,
 				SizeBytes:         3000000,
 			},
-			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":206,"sent":6000,"content_length":6000,"content_range_total":3000000,"size":3000000}`,
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":206,"sent_bytes":6000,"content_length":6000,"content_range_total":3000000,"size_bytes":3000000}`,
 		},
 		{
 			name: "absent observations render as zeroes",
@@ -103,7 +103,7 @@ func TestSampleRoundTrip(t *testing.T) {
 				SentBytes: 123456,
 				SizeBytes: FilesizeUnknown, // absent: zero on the wire and back
 			},
-			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"","method":"","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":123456,"content_length":0,"content_range_total":0,"size":0}`,
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"","method":"","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":123456,"content_length":0,"content_range_total":0,"size_bytes":0}`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

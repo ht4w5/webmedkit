@@ -15,16 +15,16 @@ example and would conflict textually if run in parallel.)
 
 **Status:** ready-for-agent
 
-- [ ] Every mention of the sample keys `sent` and `size` in the
+- [x] Every mention of the sample keys `sent` and `size` in the
   contract and consumer surface is now `sent_bytes` / `size_bytes`,
   mirroring the Event's field names; the sample key order follows
   the Event's field order
-- [ ] A report body written in the pre-reshape shape reads back with
+- [x] A report body written in the pre-reshape shape reads back with
   `sent_bytes` and `size_bytes` zero (zero means absent); no code
   reads the old keys for compatibility
-- [ ] The byte-for-byte contract test is green against the
+- [x] The byte-for-byte contract test is green against the
   regenerated canonical example
-- [ ] The `limit-bandwidth` stance is documented against the bytes
+- [x] The `limit-bandwidth` stance is documented against the bytes
   the sample counts under `sent_bytes`
-- [ ] No report document, persisted report body, or fixture carries
+- [x] No report document, persisted report body, or fixture carries
   the old key names
