@@ -267,8 +267,9 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
 		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
 		Sample: domain.Event{
-			Time: base, Path: "/releases/24.04.iso", Agent: "Wget/1.21",
-			Status: 200, SentBytes: 6000,
+			Time: base, RemoteAddr: netip.MustParseAddr("203.0.113.7"), Method: "GET",
+			Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200, SentBytes: 6000,
+			ContentLength: 6000, ContentRangeTotal: 3000000,
 		},
 		Penalty: &domain.Penalty{Action: domain.PenaltyLimitBandwidth, Rate: &rate},
 	}
@@ -300,8 +301,10 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 		p.Rate == nil || *p.Rate != rate {
 		t.Errorf("penalty after reopen = %+v, want limit-bandwidth at %d", got[0].Penalty, rate)
 	}
-	if s := got[0].Sample; !s.Time.Equal(base) || s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" ||
-		s.Status != 200 || s.SentBytes != 6000 || s.SizeBytes != 0 {
+	if s := got[0].Sample; !s.Time.Equal(base) || s.RemoteAddr != rec.Sample.RemoteAddr || s.Method != "GET" ||
+		s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" ||
+		s.Status != 200 || s.SentBytes != 6000 || s.ContentLength != 6000 || s.ContentRangeTotal != 3000000 ||
+		s.SizeBytes != 0 {
 		t.Errorf("sample after reopen = %+v, want the written sample", s)
 	}
 }
@@ -332,8 +335,8 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	rec := domain.Report{
 		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
 		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
-		// The whole Event is the sample; the parked fields stay out of
-		// the contract until the whole-Event fields land (ticket 02).
+		// The whole Event is the sample; every field - the content
+		// observations included - is part of the contract (ticket 02).
 		Sample: domain.Event{
 			Time:              base,
 			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
@@ -366,7 +369,7 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	}
 	docSample := sampleJSONof(t, string(doc))
 
-	want := []byte(`{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"size":0}`)
+	want := []byte(`{"time":"2025-10-17T18:00:00Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"content_length":6000,"content_range_total":3000000,"size":0}`)
 	if !bytes.Equal(bodySample, docSample) {
 		t.Errorf("body sample = %s\ndocument sample = %s\nwant one wire form", bodySample, docSample)
 	}
@@ -383,8 +386,11 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %+v, want one", got)
 	}
-	if s := got[0].Sample; !s.Time.Equal(base) || s.Path != rec.Sample.Path || s.Agent != rec.Sample.Agent ||
-		s.Status != rec.Sample.Status || s.SentBytes != rec.Sample.SentBytes || s.SizeBytes != 0 {
+	if s := got[0].Sample; !s.Time.Equal(base) || s.RemoteAddr != rec.Sample.RemoteAddr || s.Method != rec.Sample.Method ||
+		s.Path != rec.Sample.Path || s.Agent != rec.Sample.Agent ||
+		s.Status != rec.Sample.Status || s.SentBytes != rec.Sample.SentBytes ||
+		s.ContentLength != rec.Sample.ContentLength || s.ContentRangeTotal != rec.Sample.ContentRangeTotal ||
+		s.SizeBytes != 0 {
 		t.Errorf("sample through the body blob = %+v, want %+v", s, rec.Sample)
 	}
 }

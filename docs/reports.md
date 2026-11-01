@@ -53,15 +53,23 @@ The `tracker` reading:
 | `leak` | number | the per-second decay applied to `value` |
 | `volume` | number | the overflow threshold `value` exceeded |
 
-The `sample`:
+The `sample` is the whole event that justified the report's current
+stance - never a curated subset of its fields. Absent observations
+render under one zero-means-absent convention: `content_length`,
+`content_range_total` and `size` read `0`, and `remote_addr` and `agent`
+read empty.
 
 | field | type | meaning |
 |---|---|---|
 | `time` | string | the event's access-log timestamp, RFC 3339 UTC |
+| `remote_addr` | string | the exact client address the event came from, in text form; empty when absent |
+| `method` | string | the request method |
 | `path` | string | the request path |
 | `agent` | string | the user agent; empty when the log line carried none |
 | `status` | number | the response status |
 | `sent` | number | response payload bytes sent |
+| `content_length` | number | the response's `Content-Length` as the server reported it; `0` when absent or unusable |
+| `content_range_total` | number | the file's total size extracted from the response's `Content-Range`; `0` when absent or unusable |
 | `size` | number | the estimated total size of `path` in bytes; `0` when unknown |
 
 ### Lifecycle
@@ -186,7 +194,8 @@ returns (one trailing newline included), and the test compares the bytes.
 
 The canonical example, from a driven run of the idiomatic pairing - a
 bandwidth tracker recommending `limit-bandwidth` and its rate, over a
-client that downloaded two 6000-byte files within one leak second:
+client that downloaded two 6000-byte chunks of a 3000000-byte file
+within one leak second:
 
 ```json
 {
@@ -209,10 +218,14 @@ client that downloaded two 6000-byte files within one leak second:
       },
       "sample": {
         "time": "2025-10-17T17:59:35Z",
+        "remote_addr": "203.0.113.7",
+        "method": "GET",
         "path": "/releases/24.04.iso",
         "agent": "Wget/1.21",
-        "status": 200,
+        "status": 206,
         "sent": 6000,
+        "content_length": 6000,
+        "content_range_total": 3000000,
         "size": 0
       },
       "penalty": {

@@ -391,7 +391,7 @@ chains:
 	}
 
 	clock.Advance(30 * time.Minute) // 18:30
-	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big2", 200, 100))
+	d.send(nginxLineCrange(eventTime2, "203.0.113.7", "GET", "/big2", 200, 100, "100", "bytes 0-99/3000"))
 	d.waitProcessed(t, 2)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -404,8 +404,10 @@ chains:
 	if r.Tracker.Value != 160 || r.Tracker.Volume != 150 {
 		t.Errorf("tracker reading = %+v, want value 160 with the overriding rung's threshold 150", r.Tracker)
 	}
-	if r.Sample.Time != eventTime2At || r.Sample.Path != "/big2" || r.Sample.SentBytes != 100 {
-		t.Errorf("sample = %+v, want the overriding event (the report's current stance is what it justifies)", r.Sample)
+	if r.Sample.Time != eventTime2At || r.Sample.RemoteAddr != "203.0.113.7" || r.Sample.Method != "GET" ||
+		r.Sample.Path != "/big2" || r.Sample.SentBytes != 100 ||
+		r.Sample.ContentLength != 100 || r.Sample.ContentRangeTotal != 3000 {
+		t.Errorf("sample = %+v, want the overriding event whole - client address, method and content observations included (the report's current stance is what it justifies)", r.Sample)
 	}
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T18:30:00Z" || r.ExpiresAt != "2025-10-17T20:30:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 18:30 write with the 2h ttl",
@@ -413,7 +415,7 @@ chains:
 	}
 
 	clock.Advance(30 * time.Minute) // 19:00
-	d.send(nginxLine("1734345936.123", "203.0.113.7", "GET", "/big3", 200, 120))
+	d.send(nginxLineCrange("1734345936.123", "203.0.113.7", "GET", "/big3", 200, 120, "120", "bytes 0-119/5000"))
 	d.waitProcessed(t, 3)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -426,8 +428,10 @@ chains:
 	if r.Tracker.Value != 280 || r.Tracker.Volume != 250 {
 		t.Errorf("tracker reading = %+v, want value 280 with the overriding rung's threshold 250", r.Tracker)
 	}
-	if r.Sample.Time != "2024-12-16T10:45:36Z" || r.Sample.Path != "/big3" || r.Sample.SentBytes != 120 {
-		t.Errorf("sample = %+v, want the overriding event", r.Sample)
+	if r.Sample.Time != "2024-12-16T10:45:36Z" || r.Sample.RemoteAddr != "203.0.113.7" || r.Sample.Method != "GET" ||
+		r.Sample.Path != "/big3" || r.Sample.SentBytes != 120 ||
+		r.Sample.ContentLength != 120 || r.Sample.ContentRangeTotal != 5000 {
+		t.Errorf("sample = %+v, want the overriding event whole", r.Sample)
 	}
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T19:00:00Z" || r.ExpiresAt != "2025-10-18T19:00:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 19:00 write with the 24h ttl",

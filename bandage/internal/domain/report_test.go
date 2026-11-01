@@ -27,9 +27,9 @@ func TestReportMarshalJSON(t *testing.T) {
 			Leak:   1000000,
 			Volume: 100000000,
 		},
-		// The whole Event is the sample (ADR 0021): the parked fields
-		// are set here and must stay out of the document (they enter
-		// the contract with the whole-Event fields; ticket 02).
+		// The whole Event is the sample (ADR 0021): every field set
+		// here renders in the document, the content observations under
+		// the zero-means-absent convention (ticket 02).
 		Sample: Event{
 			Time:              time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // sub-second truncated in document
 			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
@@ -57,7 +57,7 @@ func TestReportMarshalJSON(t *testing.T) {
 		"updated_at": "2025-10-17T18:29:40Z",
 		"expires_at": "2025-10-24T18:29:40Z",
 		"tracker": {"track": "bandwidth", "value": 102400000, "leak": 1000000, "volume": 100000000},
-		"sample": {"time": "2025-10-17T18:29:40Z", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent": 123456, "size": 1234567890},
+		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent": 123456, "content_length": 123456, "content_range_total": 1234567890, "size": 1234567890},
 		"penalty": {"action": "limit-bandwidth", "rate": 1000000}
 	}`
 	if compact(string(got)) != compact(want) {
@@ -72,31 +72,62 @@ func TestReportMarshalJSON(t *testing.T) {
 // at second precision with sub-second truncated, and absent values
 // round-trip as zero (zero means absent).
 func TestSampleRoundTrip(t *testing.T) {
-	orig := Event{
-		Time:      time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // truncated to the second on the wire
-		Path:      "/releases/24.04.iso",
-		Agent:     "Wget/1.21",
-		Status:    200,
-		SentBytes: 123456,
-		SizeBytes: FilesizeUnknown, // absent: zero on the wire and back
-	}
-	b, err := json.Marshal(orig)
-	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
-	}
-	want := `{"time":"2025-10-17T18:29:40Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":123456,"size":0}`
-	if compact(string(b)) != compact(want) {
-		t.Errorf("Marshal = %s\nwant %s", b, compact(want))
-	}
-	var back Event
-	if err := json.Unmarshal(b, &back); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
-	}
-	wantBack := orig
-	wantBack.Time = time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC)
-	if !back.Time.Equal(wantBack.Time) || back.Path != wantBack.Path || back.Agent != wantBack.Agent ||
-		back.Status != wantBack.Status || back.SentBytes != wantBack.SentBytes || back.SizeBytes != wantBack.SizeBytes {
-		t.Errorf("round trip = %+v, want %+v", back, wantBack)
+	for _, tt := range []struct {
+		name string
+		orig Event
+		want string
+	}{
+		{
+			name: "a fully populated sample carries the whole Event",
+			orig: Event{
+				Time:              time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // truncated to the second on the wire
+				RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
+				Method:            "GET",
+				Path:              "/releases/24.04.iso",
+				Agent:             "Wget/1.21",
+				Status:            206,
+				SentBytes:         6000,
+				ContentLength:     6000,
+				ContentRangeTotal: 3000000,
+				SizeBytes:         3000000,
+			},
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":206,"sent":6000,"content_length":6000,"content_range_total":3000000,"size":3000000}`,
+		},
+		{
+			name: "absent observations render as zeroes",
+			orig: Event{
+				Time:      time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC),
+				Path:      "/releases/24.04.iso",
+				Agent:     "Wget/1.21",
+				Status:    200,
+				SentBytes: 123456,
+				SizeBytes: FilesizeUnknown, // absent: zero on the wire and back
+			},
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"","method":"","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":123456,"content_length":0,"content_range_total":0,"size":0}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(tt.orig)
+			if err != nil {
+				t.Fatalf("Marshal error: %v", err)
+			}
+			if compact(string(b)) != compact(tt.want) {
+				t.Errorf("Marshal = %s\nwant %s", b, compact(tt.want))
+			}
+			var back Event
+			if err := json.Unmarshal(b, &back); err != nil {
+				t.Fatalf("Unmarshal error: %v", err)
+			}
+			wantBack := tt.orig
+			wantBack.Time = time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC)
+			if !back.Time.Equal(wantBack.Time) || back.RemoteAddr != wantBack.RemoteAddr ||
+				back.Method != wantBack.Method || back.Path != wantBack.Path || back.Agent != wantBack.Agent ||
+				back.Status != wantBack.Status || back.SentBytes != wantBack.SentBytes ||
+				back.ContentLength != wantBack.ContentLength || back.ContentRangeTotal != wantBack.ContentRangeTotal ||
+				back.SizeBytes != wantBack.SizeBytes {
+				t.Errorf("round trip = %+v, want %+v", back, wantBack)
+			}
+		})
 	}
 }
 

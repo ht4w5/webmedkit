@@ -84,6 +84,14 @@ func nginxLineCrange(t, client, method, path string, status int, sent int64, cle
 		fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
 }
 
+// nginxLineAgentCrange is nginxLineCrange with the optional agent field:
+// the full log shape for a rich sample (agent plus both content
+// observations).
+func nginxLineAgentCrange(t, client, method, path string, status int, sent int64, agent, clen, crange string) string {
+	return nginxLineFields(t, client, method, path, status, sent,
+		fmt.Sprintf(`"agent":%q`, agent), fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
+}
+
 // nginxLineFields renders one raw nginx JSON line: the mapped base fields
 // plus the given already-rendered JSON members (`"key":value`) in order.
 func nginxLineFields(t, client, method, path string, status int, sent int64, extra ...string) string {
@@ -356,12 +364,16 @@ type reportEntry struct {
 		Volume float64 `json:"volume"`
 	} `json:"tracker"`
 	Sample struct {
-		Time      string `json:"time"`
-		Path      string `json:"path"`
-		Agent     string `json:"agent"`
-		Status    int    `json:"status"`
-		SentBytes int64  `json:"sent"`
-		SizeBytes int64  `json:"size"`
+		Time              string `json:"time"`
+		RemoteAddr        string `json:"remote_addr"`
+		Method            string `json:"method"`
+		Path              string `json:"path"`
+		Agent             string `json:"agent"`
+		Status            int    `json:"status"`
+		SentBytes         int64  `json:"sent"`
+		ContentLength     int64  `json:"content_length"`
+		ContentRangeTotal int64  `json:"content_range_total"`
+		SizeBytes         int64  `json:"size"`
 	} `json:"sample"`
 	Penalty *penaltyEntry `json:"penalty"`
 }
@@ -1819,7 +1831,7 @@ chains:
           - report: {reason: overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+	d.send(nginxLineCrange(eventTime1, "203.0.113.7", "GET", "/big", 200, 150, "150", "bytes 0-149/9000"))
 	d.waitProcessed(t, 1)
 
 	wantTime := time.Unix(1734345934, 0) // eventTime1 as the Event's wire form renders it: RFC 3339 UTC, second precision (ADR 0021 couples the Event to the report contract's wire shape)
@@ -1843,10 +1855,11 @@ chains:
 		attrInto(t, rec, "event", &ev)
 		// The logged event renders in the Event's wire form - the
 		// deliberate Event-to-wire coupling ADR 0021 records - so the
-		// record carries the contract's sample fields; the parked fields
-		// (method, client address) join the wire form in ticket 02.
-		if ev.Path != "/big" || ev.Status != 200 || ev.SentBytes != 150 ||
-			ev.SizeBytes != 0 || !ev.Time.Equal(wantTime) {
+		// record carries the contract's whole sample: the client address,
+		// method and content observations included (ticket 02).
+		if ev.RemoteAddr.String() != "203.0.113.7" || ev.Method != "GET" || ev.Path != "/big" ||
+			ev.Status != 200 || ev.SentBytes != 150 || ev.ContentLength != 150 ||
+			ev.ContentRangeTotal != 9000 || ev.SizeBytes != 0 || !ev.Time.Equal(wantTime) {
 			t.Errorf("%q logged event = %+v, want the parsed /big event in its wire form", msg, ev)
 		}
 		var tracker domain.TrackerReading

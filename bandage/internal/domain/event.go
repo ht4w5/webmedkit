@@ -24,14 +24,12 @@ type Event struct {
 	// Time renders in the wire form as RFC 3339 UTC at second
 	// precision (the renderer truncates sub-second).
 	Time time.Time `json:"time"`
-	// RemoteAddr is parked out of the report contract until the
-	// whole-Event fields land (whole-event-sample ticket 02); once
-	// un-parked it renders in text form, the zero Addr as the empty
-	// string (netip.Addr's text marshalling).
-	RemoteAddr netip.Addr `json:"-"`
-	// Method is parked out of the report contract until the
-	// whole-Event fields land (whole-event-sample ticket 02).
-	Method string `json:"-"`
+	// RemoteAddr is the exact client address behind the report's
+	// aggregated Target; it renders in the wire form in text form, the
+	// zero Addr as the empty string (netip.Addr's text marshalling).
+	RemoteAddr netip.Addr `json:"remote_addr"`
+	// Method is the request method.
+	Method string `json:"method"`
 	Path   string `json:"path"`
 	Agent  string `json:"agent"`
 	Status int    `json:"status"`
@@ -40,15 +38,12 @@ type Event struct {
 	// ticket 03).
 	SentBytes int64 `json:"sent"`
 	// ContentLength is the response's Content-Length as the server
-	// reported it; 0 means absent or unusable. Parked out of the
-	// report contract until the whole-Event fields land
-	// (whole-event-sample ticket 02).
-	ContentLength int64 `json:"-"`
+	// reported it; 0 means absent or unusable (the wire form renders
+	// the same zero-means-absent convention).
+	ContentLength int64 `json:"content_length"`
 	// ContentRangeTotal is the file's total size extracted from the
-	// response's Content-Range; 0 means absent or unusable. Parked out
-	// of the report contract until the whole-Event fields land
-	// (whole-event-sample ticket 02).
-	ContentRangeTotal int64 `json:"-"`
+	// response's Content-Range; 0 means absent or unusable.
+	ContentRangeTotal int64 `json:"content_range_total"`
 
 	// Derived fields, set by enrichment.
 	// SizeBytes renders under its v0 contract key "size"; the key
