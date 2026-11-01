@@ -33,10 +33,9 @@ type Event struct {
 	Path   string `json:"path"`
 	Agent  string `json:"agent"`
 	Status int    `json:"status"`
-	// SentBytes renders under its v0 contract key "sent"; the key
-	// becomes sent_bytes with the contract reshape (whole-event-sample
-	// ticket 03).
-	SentBytes int64 `json:"sent"`
+	// SentBytes renders under its contract key "sent_bytes", the
+	// response payload bytes sent.
+	SentBytes int64 `json:"sent_bytes"`
 	// ContentLength is the response's Content-Length as the server
 	// reported it; 0 means absent or unusable (the wire form renders
 	// the same zero-means-absent convention).
@@ -46,8 +45,7 @@ type Event struct {
 	ContentRangeTotal int64 `json:"content_range_total"`
 
 	// Derived fields, set by enrichment.
-	// SizeBytes renders under its v0 contract key "size"; the key
-	// becomes size_bytes with the contract reshape (whole-event-sample
-	// ticket 03).
-	SizeBytes int64 `json:"size"`
+	// SizeBytes renders under its contract key "size_bytes", the
+	// estimated total size of Path in bytes.
+	SizeBytes int64 `json:"size_bytes"`
 }

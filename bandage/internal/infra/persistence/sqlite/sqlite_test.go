@@ -369,7 +369,7 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	}
 	docSample := sampleJSONof(t, string(doc))
 
-	want := []byte(`{"time":"2025-10-17T18:00:00Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"content_length":6000,"content_range_total":3000000,"size":0}`)
+	want := []byte(`{"time":"2025-10-17T18:00:00Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":6000,"content_length":6000,"content_range_total":3000000,"size_bytes":0}`)
 	if !bytes.Equal(bodySample, docSample) {
 		t.Errorf("body sample = %s\ndocument sample = %s\nwant one wire form", bodySample, docSample)
 	}
@@ -392,6 +392,51 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 		s.ContentLength != rec.Sample.ContentLength || s.ContentRangeTotal != rec.Sample.ContentRangeTotal ||
 		s.SizeBytes != 0 {
 		t.Errorf("sample through the body blob = %+v, want %+v", s, rec.Sample)
+	}
+}
+
+// TestPreReshapeBodyKeepsServing: a report body written before the
+// sample reshape - the pre-feature six-key sample - keeps serving
+// through List after a daemon upgrade: the renamed and added sample
+// fields read zero (zero means absent; the old keys are never
+// dual-read), while the surviving keys keep their values.
+func TestPreReshapeBodyKeepsServing(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
+	// The row is hand-written: no current code path can emit the
+	// pre-reshape shape any more. The sample carries the pre-feature
+	// six keys only.
+	const legacyBody = `{"chain":"c","reason":"why","tracker":{"track":"bandwidth","value":11000,"leak":1000,"volume":10000},"sample":{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"size":3000000},"penalty":{"action":"limit-bandwidth","rate":1000000}}`
+	if _, err := repo.write.ExecContext(ctx,
+		`INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body) VALUES (?, ?, ?, ?, ?, ?)`,
+		"r", "203.0.113.7/32", base.UnixNano(), base.UnixNano(), base.Add(time.Hour).UnixNano(), legacyBody,
+	); err != nil {
+		t.Fatalf("insert pre-reshape row: %v", err)
+	}
+
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want the one pre-reshape row", got)
+	}
+	rec := got[0]
+	if rec.Rule != "r" || rec.Target != "203.0.113.7/32" || rec.Chain != "c" || rec.Reason != "why" {
+		t.Errorf("record = %+v, want the pre-reshape row's identity kept", rec)
+	}
+	if p := rec.Penalty; p == nil || p.Action != domain.PenaltyLimitBandwidth || p.Rate == nil || *p.Rate != 1000000 {
+		t.Errorf("penalty = %+v, want the pre-reshape row's penalty kept", rec.Penalty)
+	}
+	s := rec.Sample
+	if !s.Time.Equal(base) || s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" || s.Status != 200 {
+		t.Errorf("sample = %+v, want the surviving keys' values kept", s)
+	}
+	if s.SentBytes != 0 || s.SizeBytes != 0 || s.Method != "" || s.RemoteAddr.IsValid() ||
+		s.ContentLength != 0 || s.ContentRangeTotal != 0 {
+		t.Errorf("sample = %+v, want the renamed and added fields zero (zero means absent)", s)
 	}
 }
 
