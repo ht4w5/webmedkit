@@ -76,8 +76,8 @@ chains:
 	if r.Sample.Path != "/files/a.iso" {
 		t.Errorf("sample path = %q, want /files/a.iso", r.Sample.Path)
 	}
-	if r.Sample.Size != 1000 {
-		t.Errorf("sample size = %d, want 1000", r.Sample.Size)
+	if r.Sample.SizeBytes != 1000 {
+		t.Errorf("sample size = %d, want 1000", r.Sample.SizeBytes)
 	}
 	_, stats = d.getStats(t)
 	for field, want := range map[string]float64{"gets": 14, "sets": 14, "misses": 2, "size": 2} {
@@ -122,8 +122,8 @@ chains:
 	if r.Tracker.Value != 120 {
 		t.Errorf("tracker value = %v, want 120 (evaluation ran for the unmatched event)", r.Tracker.Value)
 	}
-	if r.Sample.Size != 0 {
-		t.Errorf("sample size = %d, want the default 0 (never the path's stale estimate)", r.Sample.Size)
+	if r.Sample.SizeBytes != 0 {
+		t.Errorf("sample size = %d, want the default 0 (never the path's stale estimate)", r.Sample.SizeBytes)
 	}
 	// The POST touched no enrichment state: its single cache update is
 	// the bandwidth tracker's.
@@ -192,8 +192,8 @@ chains:
 			if r.Tracker.Value != 3 {
 				t.Errorf("tracker value = %v, want 3 (three unit fractions at trigger)", r.Tracker.Value)
 			}
-			if r.Sample.Size != tt.wantSize {
-				t.Errorf("sample size = %d, want %d", r.Sample.Size, tt.wantSize)
+			if r.Sample.SizeBytes != tt.wantSize {
+				t.Errorf("sample size = %d, want %d", r.Sample.SizeBytes, tt.wantSize)
 			}
 		})
 	}

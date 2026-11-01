@@ -253,8 +253,10 @@ func TestReplayDecayAndOverflow(t *testing.T) {
 	// Full-file downloads (fraction 1 each): 1 at t=100; 2-1=1 at t=102;
 	// 2 at t=102; 3-1=2 at t=104; 3 at t=104 overflows (3 > 2).
 	at := []int64{100, 102, 102, 104, 104}
+	var last *domain.Event
 	for i, ts := range at {
-		h.evaluate(t, event(ts, "/a", 100, 100))
+		last = event(ts, "/a", 100, 100)
+		h.evaluate(t, last)
 		wantReport := i == len(at)-1
 		if got := len(h.sink.upserts) != 0; got != wantReport {
 			t.Fatalf("after event %d: report = %v, want %v (value vs volume 2)", i, got, wantReport)
@@ -266,8 +268,10 @@ func TestReplayDecayAndOverflow(t *testing.T) {
 	if rec.Tracker != want {
 		t.Errorf("tracker reading = %+v, want %+v", rec.Tracker, want)
 	}
-	if rec.Sample.Size != 100 || rec.Sample.Sent != 100 || rec.Sample.Path != "/a" {
-		t.Errorf("sample = %+v, want the triggering transfer with size 100", rec.Sample)
+	// The sample is the triggering Event whole (ADR 0021), never a
+	// projection of selected fields.
+	if rec.Sample != *last {
+		t.Errorf("sample = %+v, want the triggering event %+v", rec.Sample, *last)
 	}
 }
 

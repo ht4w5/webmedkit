@@ -19,8 +19,7 @@ import (
 
 // nginxLineAgent is nginxLine with the optional agent field.
 func nginxLineAgent(t, client, method, path string, status int, sent int64, agent string) string {
-	return fmt.Sprintf(`{"time":%q,"client":%q,"method":%q,"url":%q,"status":%d,"sent":%d,"agent":%q}`,
-		t, client, method, path, status, sent, agent)
+	return nginxLineFields(t, client, method, path, status, sent, agentMember(agent))
 }
 
 // marks returns the captured MARK log-action messages in emission order.
@@ -515,7 +514,7 @@ chains:
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
 		t.Errorf("iso-replay tracker = %+v, want {replay 2 0 1}", r.Tracker)
 	}
-	if r.Sample.Size != 1000 || r.Sample.Sent != 1000 {
+	if r.Sample.SizeBytes != 1000 || r.Sample.SentBytes != 1000 {
 		t.Errorf("iso-replay sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
 	}
 

@@ -391,7 +391,7 @@ chains:
 	}
 
 	clock.Advance(30 * time.Minute) // 18:30
-	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big2", 200, 100))
+	d.send(nginxLineCrange(eventTime2, "203.0.113.7", "GET", "/big2", 200, 100, "100", "bytes 0-99/3000"))
 	d.waitProcessed(t, 2)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -404,16 +404,20 @@ chains:
 	if r.Tracker.Value != 160 || r.Tracker.Volume != 150 {
 		t.Errorf("tracker reading = %+v, want value 160 with the overriding rung's threshold 150", r.Tracker)
 	}
-	if r.Sample.Time != eventTime2At || r.Sample.Path != "/big2" || r.Sample.Sent != 100 {
-		t.Errorf("sample = %+v, want the overriding event (the report's current stance is what it justifies)", r.Sample)
-	}
+	// The overriding event whole - client address, method and content
+	// observations included (the report's current stance is what it
+	// justifies).
+	checkSample(t, r.Sample, sampleEntry{
+		Time: eventTime2At, RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big2",
+		Status: 200, SentBytes: 100, ContentLength: 100, ContentRangeTotal: 3000,
+	})
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T18:30:00Z" || r.ExpiresAt != "2025-10-17T20:30:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 18:30 write with the 2h ttl",
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt)
 	}
 
 	clock.Advance(30 * time.Minute) // 19:00
-	d.send(nginxLine("1734345936.123", "203.0.113.7", "GET", "/big3", 200, 120))
+	d.send(nginxLineCrange("1734345936.123", "203.0.113.7", "GET", "/big3", 200, 120, "120", "bytes 0-119/5000"))
 	d.waitProcessed(t, 3)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -426,9 +430,11 @@ chains:
 	if r.Tracker.Value != 280 || r.Tracker.Volume != 250 {
 		t.Errorf("tracker reading = %+v, want value 280 with the overriding rung's threshold 250", r.Tracker)
 	}
-	if r.Sample.Time != "2024-12-16T10:45:36Z" || r.Sample.Path != "/big3" || r.Sample.Sent != 120 {
-		t.Errorf("sample = %+v, want the overriding event", r.Sample)
-	}
+	// The overriding event whole.
+	checkSample(t, r.Sample, sampleEntry{
+		Time: "2024-12-16T10:45:36Z", RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big3",
+		Status: 200, SentBytes: 120, ContentLength: 120, ContentRangeTotal: 5000,
+	})
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T19:00:00Z" || r.ExpiresAt != "2025-10-18T19:00:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 19:00 write with the 24h ttl",
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt)

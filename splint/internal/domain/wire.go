@@ -42,14 +42,21 @@ type Tracker struct {
 	Volume float64 `json:"volume"`
 }
 
-// Sample is the most recent event that created a report.
+// Sample is the most recent event that created a report: the whole
+// event the contract's sample carries (docs/reports.md "The sample"),
+// mirrored field for field but acted on by nothing - ban-rule
+// derivation stays Target and Penalty only.
 type Sample struct {
-	Time   string `json:"time"`
-	Path   string `json:"path"`
-	Agent  string `json:"agent"`
-	Status int    `json:"status"`
-	Sent   int64  `json:"sent"`
-	Size   int64  `json:"size"`
+	Time              string `json:"time"`
+	RemoteAddr        string `json:"remote_addr"`
+	Method            string `json:"method"`
+	Path              string `json:"path"`
+	Agent             string `json:"agent"`
+	Status            int    `json:"status"`
+	SentBytes         int64  `json:"sent_bytes"`
+	ContentLength     int64  `json:"content_length"`
+	ContentRangeTotal int64  `json:"content_range_total"`
+	SizeBytes         int64  `json:"size_bytes"`
 }
 
 // Penalty is the advisory enforcement stance a report carries

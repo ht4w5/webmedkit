@@ -111,11 +111,13 @@ CREATE INDEX IF NOT EXISTS idx_reports_expires_at ON reports (expires_at);
 `
 
 // body is the JSON record body: everything but the indexed columns.
+// Sample carries the Event whole, rendered by the same wire form as
+// the report document's sample (one wire form for serve and store).
 type body struct {
 	Chain   string                `json:"chain"`
 	Reason  string                `json:"reason"`
 	Tracker domain.TrackerReading `json:"tracker"`
-	Sample  domain.Sample         `json:"sample"`
+	Sample  domain.Event          `json:"sample"`
 	Penalty *domain.Penalty       `json:"penalty,omitempty"`
 }
 

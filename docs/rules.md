@@ -165,7 +165,7 @@ number ≥ 1: a fractional count (`1.5`) is refused, while a fractional
 human size (`1.5MB` = 1500000) is accepted - the serialized rate is an
 integer. The penalty name states the unit: the rate of
 `limit-bandwidth` counts response-payload bytes, the bytes the report's
-Sample records as `sent`. Every limit is aggregate over the
+Sample records as `sent_bytes`. Every limit is aggregate over the
 report's Target - the whole prefix, not each host inside it.
 
 `bandage -t` prints the penalty and rate of every report action, so

@@ -109,7 +109,7 @@ chains:
 		if r.Tracker.Track != "replay" || r.Tracker.Value != 3 || r.Tracker.Leak != 0 || r.Tracker.Volume != 2 {
 			t.Errorf("report for %s tracker = %+v, want {replay 3 0 2} (the writing rung's threshold 2 as volume)", target, r.Tracker)
 		}
-		if r.Sample.Path != sample.path || r.Sample.Sent != sample.size || r.Sample.Size != sample.size {
+		if r.Sample.Path != sample.path || r.Sample.SentBytes != sample.size || r.Sample.SizeBytes != sample.size {
 			t.Errorf("report for %s sample = %+v, want %s with size %d", target, r.Sample, sample.path, sample.size)
 		}
 	}
@@ -278,7 +278,7 @@ chains:
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want a %s write with the rung's 1h ttl",
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt, wallBase)
 	}
-	if r.Sample.Path != "/releases.iso" || r.Sample.Sent != 1000 || r.Sample.Size != 1000 {
+	if r.Sample.Path != "/releases.iso" || r.Sample.SentBytes != 1000 || r.Sample.SizeBytes != 1000 {
 		t.Errorf("sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
 	}
 	if r.Penalty == nil || r.Penalty.Action != "drop" || r.Penalty.Rate != nil {

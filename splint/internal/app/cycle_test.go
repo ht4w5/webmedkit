@@ -317,6 +317,35 @@ func TestUpdateCycleCompilesTheCanonicalExample(t *testing.T) {
 	assertApplies(t, stub, []firewall.BanRule{banRule(firewall.StanceLimitBandwidth, ratePtr(1000000), "203.0.113.7/32")})
 }
 
+// TestParseDocumentMirrorsTheCanonicalExampleSample: the consumer's
+// report type mirrors the canonical example's whole sample - the
+// whole-Event fields included - while acting on none of it (ban rules
+// stay Target + Penalty only).
+func TestParseDocumentMirrorsTheCanonicalExampleSample(t *testing.T) {
+	doc, err := domain.ParseDocument([]byte(canonicalDoc(t)))
+	if err != nil {
+		t.Fatalf("ParseDocument: %v", err)
+	}
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want the canonical example's one entry", doc.Reports)
+	}
+	want := domain.Sample{
+		Time:              "2025-10-17T17:59:35Z",
+		RemoteAddr:        "203.0.113.7",
+		Method:            "GET",
+		Path:              "/releases/24.04.iso",
+		Agent:             "Wget/1.21",
+		Status:            206,
+		SentBytes:         6000,
+		ContentLength:     6000,
+		ContentRangeTotal: 3000000,
+		SizeBytes:         0,
+	}
+	if s := doc.Reports[0].Sample; s != want {
+		t.Errorf("sample = %+v, want %+v (the mirror decodes every contract key)", s, want)
+	}
+}
+
 // Each case drives one update cycle: a non-empty wantErr refuses it,
 // otherwise wantRules installs and wantSkipped records are counted out.
 func TestUpdateCycleValidations(t *testing.T) {

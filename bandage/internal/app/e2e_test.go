@@ -74,15 +74,25 @@ func nginxLine(t, client, method, path string, status int, sent int64) string {
 // nginxLineClen builds one raw line in the current bandage log format:
 // nginxLine plus the rendered $sent_http_content_length ("" = not sent).
 func nginxLineClen(t, client, method, path string, status int, sent int64, clen string) string {
-	return nginxLineFields(t, client, method, path, status, sent, fmt.Sprintf(`"clen":%q`, clen))
+	return nginxLineFields(t, client, method, path, status, sent, clenMember(clen))
 }
 
 // nginxLineCrange builds one raw line in the current bandage log format:
 // nginxLineClen plus the rendered $sent_http_content_range ("" = not sent).
 func nginxLineCrange(t, client, method, path string, status int, sent int64, clen, crange string) string {
 	return nginxLineFields(t, client, method, path, status, sent,
-		fmt.Sprintf(`"clen":%q`, clen), fmt.Sprintf(`"crange":%q`, crange))
+		clenMember(clen), crangeMember(crange))
 }
+
+// The optional line observations as named JSON members for
+// nginxLineFields (agent, $sent_http_content_length, and
+// $sent_http_content_range). A line carrying any combination - like the
+// canonical example's rich sample - passes the members to
+// nginxLineFields directly instead of growing the helper family with
+// another positional variant.
+func agentMember(agent string) string   { return fmt.Sprintf(`"agent":%q`, agent) }
+func clenMember(clen string) string     { return fmt.Sprintf(`"clen":%q`, clen) }
+func crangeMember(crange string) string { return fmt.Sprintf(`"crange":%q`, crange) }
 
 // nginxLineFields renders one raw nginx JSON line: the mapped base fields
 // plus the given already-rendered JSON members (`"key":value`) in order.
@@ -340,6 +350,47 @@ type penaltyEntry struct {
 	Rate   *int64 `json:"rate"`
 }
 
+// sampleEntry mirrors the report entry's nested sample object: the
+// contract's whole sample in its wire shape.
+type sampleEntry struct {
+	Time              string `json:"time"`
+	RemoteAddr        string `json:"remote_addr"`
+	Method            string `json:"method"`
+	Path              string `json:"path"`
+	Agent             string `json:"agent"`
+	Status            int    `json:"status"`
+	SentBytes         int64  `json:"sent_bytes"`
+	ContentLength     int64  `json:"content_length"`
+	ContentRangeTotal int64  `json:"content_range_total"`
+	SizeBytes         int64  `json:"size_bytes"`
+}
+
+// checkSample reports every sample field that differs from want as
+// "sample <field> = ..., want ..." - the field-by-field comparison
+// behind the whole-sample assertions.
+func checkSample(t *testing.T, got, want sampleEntry) {
+	t.Helper()
+	for _, f := range []struct {
+		name      string
+		got, want any
+	}{
+		{"time", got.Time, want.Time},
+		{"remote_addr", got.RemoteAddr, want.RemoteAddr},
+		{"method", got.Method, want.Method},
+		{"path", got.Path, want.Path},
+		{"agent", got.Agent, want.Agent},
+		{"status", got.Status, want.Status},
+		{"sent_bytes", got.SentBytes, want.SentBytes},
+		{"content_length", got.ContentLength, want.ContentLength},
+		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
+		{"size_bytes", got.SizeBytes, want.SizeBytes},
+	} {
+		if f.got != f.want {
+			t.Errorf("sample %s = %v, want %v", f.name, f.got, f.want)
+		}
+	}
+}
+
 // reportEntry mirrors the version-0 report document entry.
 type reportEntry struct {
 	Rule      string `json:"rule"`
@@ -355,14 +406,7 @@ type reportEntry struct {
 		Leak   float64 `json:"leak"`
 		Volume float64 `json:"volume"`
 	} `json:"tracker"`
-	Sample struct {
-		Time   string `json:"time"`
-		Path   string `json:"path"`
-		Agent  string `json:"agent"`
-		Status int    `json:"status"`
-		Sent   int64  `json:"sent"`
-		Size   int64  `json:"size"`
-	} `json:"sample"`
+	Sample  sampleEntry   `json:"sample"`
 	Penalty *penaltyEntry `json:"penalty"`
 }
 
@@ -562,10 +606,12 @@ func TestE2EOverflowWritesReport(t *testing.T) {
 	if r.Tracker.Track != "bandwidth" || r.Tracker.Value != 11000 || r.Tracker.Leak != 1000 || r.Tracker.Volume != 10000 {
 		t.Errorf("tracker = %+v, want {bandwidth 11000 1000 10000}", r.Tracker)
 	}
-	if r.Sample.Time != eventTime2At || r.Sample.Path != "/releases/24.04.iso" ||
-		r.Sample.Agent != "" || r.Sample.Status != 200 || r.Sample.Sent != 6000 || r.Sample.Size != 0 {
-		t.Errorf("sample = %+v", r.Sample)
-	}
+	// The sample is the whole Event (ADR 0021): every field, the
+	// absent observations as zeroes (zero means absent).
+	checkSample(t, r.Sample, sampleEntry{
+		Time: eventTime2At, RemoteAddr: "203.0.113.7", Method: "GET",
+		Path: "/releases/24.04.iso", Status: 200, SentBytes: 6000,
+	})
 }
 
 // TestE2ERateOverflowStrictlyAboveVolume: the tracker overflows strictly
@@ -1819,10 +1865,16 @@ chains:
           - report: {reason: overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+	d.send(nginxLineCrange(eventTime1, "203.0.113.7", "GET", "/big", 200, 150, "150", "bytes 0-149/9000"))
 	d.waitProcessed(t, 1)
 
-	wantTime := time.Unix(1734345934, 123000000) // eventTime1 as parsed
+	wantEvent := sampleEntry{
+		// eventTime1 as the Event's wire form renders it: RFC 3339 UTC at
+		// second precision (ADR 0021 couples the Event to the report
+		// contract's wire shape).
+		Time: eventTime1At, RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big",
+		Status: 200, SentBytes: 150, ContentLength: 150, ContentRangeTotal: 9000,
+	}
 	checkLog := func(msg string, level zerolog.Level, wantRule, wantTarget string, wantTracker domain.TrackerReading) {
 		t.Helper()
 		recs := d.logs.withMessage(msg)
@@ -1839,12 +1891,13 @@ chains:
 		if rec.Attrs["target"] != wantTarget {
 			t.Errorf("%q target = %v, want %q", msg, rec.Attrs["target"], wantTarget)
 		}
-		var ev domain.Event
+		var ev sampleEntry
 		attrInto(t, rec, "event", &ev)
-		if ev.RemoteAddr.String() != "203.0.113.7" || ev.Method != "GET" || ev.Path != "/big" ||
-			ev.Status != 200 || ev.SentBytes != 150 || !ev.Time.Equal(wantTime) {
-			t.Errorf("%q logged event = %+v, want the parsed /big event", msg, ev)
-		}
+		// The logged event renders in the Event's wire form - the
+		// deliberate Event-to-wire coupling ADR 0021 records - so the
+		// record carries the contract's whole sample: the client address,
+		// method and content observations included (ticket 02).
+		checkSample(t, ev, wantEvent)
 		var tracker domain.TrackerReading
 		attrInto(t, rec, "tracker", &tracker)
 		if tracker != wantTracker {
@@ -2219,7 +2272,7 @@ chains:
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 3 || r.Tracker.Leak != 0 || r.Tracker.Volume != 2 {
 		t.Errorf("tracker = %+v, want {replay 3 0 2} (value, leak and volume at trigger)", r.Tracker)
 	}
-	if r.Sample.Size != 1000 || r.Sample.Sent != 1000 {
+	if r.Sample.SizeBytes != 1000 || r.Sample.SentBytes != 1000 {
 		t.Errorf("sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
 	}
 }
@@ -2260,7 +2313,7 @@ chains:
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
 		t.Errorf("tracker = %+v, want {replay 2 0 1} (volume_low at size 100)", r.Tracker)
 	}
-	if r.Sample.Path != "/small.iso" || r.Sample.Size != 100 {
+	if r.Sample.Path != "/small.iso" || r.Sample.SizeBytes != 100 {
 		t.Errorf("sample = %+v, want /small.iso with enriched size 100", r.Sample)
 	}
 }
@@ -2304,11 +2357,11 @@ chains:
 	if r.Tracker.Value != 2.5 {
 		t.Errorf("tracker value = %v, want 2.5 (nine half-downloads; the revalidations added none)", r.Tracker.Value)
 	}
-	if r.Sample.Size != 1000 {
-		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.Size)
+	if r.Sample.SizeBytes != 1000 {
+		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.SizeBytes)
 	}
-	if r.Sample.Sent != 500 {
-		t.Errorf("sample sent = %d, want 500", r.Sample.Sent)
+	if r.Sample.SentBytes != 500 {
+		t.Errorf("sample sent = %d, want 500", r.Sample.SentBytes)
 	}
 }
 
@@ -2370,8 +2423,8 @@ chains:
 			if r.Tracker.Value != 3 {
 				t.Errorf("tracker value = %v, want 3 (three unit fractions at trigger)", r.Tracker.Value)
 			}
-			if r.Sample.Size != tt.wantSize {
-				t.Errorf("sample size = %d, want %d", r.Sample.Size, tt.wantSize)
+			if r.Sample.SizeBytes != tt.wantSize {
+				t.Errorf("sample size = %d, want %d", r.Sample.SizeBytes, tt.wantSize)
 			}
 		})
 	}
@@ -2446,11 +2499,11 @@ chains:
 	if r.Tracker.Volume != 2 {
 		t.Errorf("tracker volume = %v, want 2 (volume_high at the exact total 1000, not at the 250-byte chunk)", r.Tracker.Volume)
 	}
-	if r.Sample.Size != 1000 {
-		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.Size)
+	if r.Sample.SizeBytes != 1000 {
+		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.SizeBytes)
 	}
-	if r.Sample.Sent != 250 {
-		t.Errorf("sample sent = %d, want 250", r.Sample.Sent)
+	if r.Sample.SentBytes != 250 {
+		t.Errorf("sample sent = %d, want 250", r.Sample.SentBytes)
 	}
 }
 

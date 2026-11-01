@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -263,6 +266,11 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 	rec := domain.Report{
 		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
 		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+		Sample: domain.Event{
+			Time: base, RemoteAddr: netip.MustParseAddr("203.0.113.7"), Method: "GET",
+			Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200, SentBytes: 6000,
+			ContentLength: 6000, ContentRangeTotal: 3000000,
+		},
 		Penalty: &domain.Penalty{Action: domain.PenaltyLimitBandwidth, Rate: &rate},
 	}
 
@@ -292,6 +300,157 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 	if p := got[0].Penalty; p == nil || p.Action != domain.PenaltyLimitBandwidth ||
 		p.Rate == nil || *p.Rate != rate {
 		t.Errorf("penalty after reopen = %+v, want limit-bandwidth at %d", got[0].Penalty, rate)
+	}
+	checkSample(t, got[0].Sample, rec.Sample)
+}
+
+// rawSampleMember returns the raw "sample" member of a JSON object, so a
+// body blob and a document can be compared member for member.
+func rawSampleMember(t *testing.T, doc string) json.RawMessage {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(doc), &obj); err != nil {
+		t.Fatalf("unmarshal %q: %v", doc, err)
+	}
+	s, ok := obj["sample"]
+	if !ok {
+		t.Fatalf("%q has no sample member", doc)
+	}
+	return s
+}
+
+// TestBodyAndDocumentRenderTheSampleIdentically: the report body a
+// Trigger persists and the report document the daemon serves draw the
+// sample from one wire form - byte for byte - so storage and serving
+// cannot disagree about what a sample is (ADR 0021).
+func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	rec := domain.Report{
+		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+		// The whole Event is the sample; every field - the content
+		// observations included - is part of the contract (ticket 02).
+		Sample: domain.Event{
+			Time:              base,
+			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
+			Method:            "GET",
+			Path:              "/releases/24.04.iso",
+			Agent:             "Wget/1.21",
+			Status:            200,
+			SentBytes:         6000,
+			ContentLength:     6000,
+			ContentRangeTotal: 3000000,
+		},
+	}
+	if err := repo.Upsert(ctx, rec); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// The persisted body's sample, straight from the body blob.
+	var rawBody string
+	if err := repo.read.QueryRow(
+		`SELECT body FROM reports WHERE rule = ? AND target = ?`, rec.Rule, rec.Target,
+	).Scan(&rawBody); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	bodySample := rawSampleMember(t, rawBody)
+
+	// The served document's sample, straight from the report entry.
+	doc, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal document entry: %v", err)
+	}
+	docSample := rawSampleMember(t, string(doc))
+
+	want := []byte(`{"time":"2025-10-17T18:00:00Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":6000,"content_length":6000,"content_range_total":3000000,"size_bytes":0}`)
+	if !bytes.Equal(bodySample, docSample) {
+		t.Errorf("body sample = %s\ndocument sample = %s\nwant one wire form", bodySample, docSample)
+	}
+	if !bytes.Equal(bodySample, want) {
+		t.Errorf("body sample = %s\nwant %s", bodySample, want)
+	}
+
+	// The sample survives the body blob: List hands the document the
+	// same sample the Trigger persisted.
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+	checkSample(t, got[0].Sample, rec.Sample)
+}
+
+// TestPreReshapeBodyKeepsServing: a report body written before the
+// sample reshape - the pre-feature six-key sample - keeps serving
+// through List after a daemon upgrade: the renamed and added sample
+// fields read zero (zero means absent; the old keys are never
+// dual-read), while the surviving keys keep their values.
+func TestPreReshapeBodyKeepsServing(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
+	// The row is hand-written: no current code path can emit the
+	// pre-reshape shape any more. The sample carries the pre-feature
+	// six keys only.
+	const legacyBody = `{"chain":"c","reason":"why","tracker":{"track":"bandwidth","value":11000,"leak":1000,"volume":10000},"sample":{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"size":3000000},"penalty":{"action":"limit-bandwidth","rate":1000000}}`
+	if _, err := repo.write.ExecContext(ctx,
+		`INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body) VALUES (?, ?, ?, ?, ?, ?)`,
+		"r", "203.0.113.7/32", base.UnixNano(), base.UnixNano(), base.Add(time.Hour).UnixNano(), legacyBody,
+	); err != nil {
+		t.Fatalf("insert pre-reshape row: %v", err)
+	}
+
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want the one pre-reshape row", got)
+	}
+	rec := got[0]
+	if rec.Rule != "r" || rec.Target != "203.0.113.7/32" || rec.Chain != "c" || rec.Reason != "why" {
+		t.Errorf("record = %+v, want the pre-reshape row's identity kept", rec)
+	}
+	if p := rec.Penalty; p == nil || p.Action != domain.PenaltyLimitBandwidth || p.Rate == nil || *p.Rate != 1000000 {
+		t.Errorf("penalty = %+v, want the pre-reshape row's penalty kept", rec.Penalty)
+	}
+	// The surviving keys keep their values; the renamed and added fields
+	// read zero (zero means absent).
+	checkSample(t, rec.Sample, domain.Event{
+		Time: base, Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200,
+	})
+}
+
+// checkSample reports every sample field that differs from want as
+// "sample <field> = ..., want ..." - the field-by-field comparison
+// behind the sample assertions.
+func checkSample(t *testing.T, got, want domain.Event) {
+	t.Helper()
+	if !got.Time.Equal(want.Time) {
+		t.Errorf("sample time = %v, want %v", got.Time, want.Time)
+	}
+	for _, f := range []struct {
+		name      string
+		got, want any
+	}{
+		{"remote_addr", got.RemoteAddr, want.RemoteAddr},
+		{"method", got.Method, want.Method},
+		{"path", got.Path, want.Path},
+		{"agent", got.Agent, want.Agent},
+		{"status", got.Status, want.Status},
+		{"sent_bytes", got.SentBytes, want.SentBytes},
+		{"content_length", got.ContentLength, want.ContentLength},
+		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
+		{"size_bytes", got.SizeBytes, want.SizeBytes},
+	} {
+		if f.got != f.want {
+			t.Errorf("sample %s = %v, want %v", f.name, f.got, f.want)
+		}
 	}
 }
 
