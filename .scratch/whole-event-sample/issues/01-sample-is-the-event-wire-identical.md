@@ -11,7 +11,7 @@ easy: the sample's field set now follows the Event by construction.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A Report carries the Event value as its Sample; no
   sample-specific field list exists anywhere in the daemon
@@ -27,6 +27,20 @@ easy: the sample's field set now follows the Event by construction.
 - [x] The report body a Trigger persists and the document the daemon
   serves render the sample identically, so a persisted report
   survives a restart unchanged
+
+## Answer
+
+Implemented on `ticket/whole-event-01-sample-is-the-event` (commit
+`a0493c4`), merged into `integration/whole-event-sample` (`f9516d5`).
+`domain.Sample` is gone; `Report.Sample` is `domain.Event`; the sample's
+JSON form is derived from the Event (defined-type shim, tags, timestamp
+renderer) with the six keys byte-for-byte identical and
+`docs/reports.md` untouched. Two resolution notes are recorded under
+Comments: the checklist's address clause becomes observable at the
+document seams when ticket 02 un-parks the fields (wire-identity is the
+spec's "wire-identical prefactor" intent), and the Event<->wire
+coupling also shapes the log action's `event` attribute - its
+consequence is recorded in ADR 0021 by the review fix pass `bd2d5fe`.
 
 ## Comments
 

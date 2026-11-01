@@ -12,7 +12,7 @@ and still ingests the example green.
 
 **Blocked by:** 01 - The Sample is the Event, wire-identical
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The served sample object carries `method`, `remote_addr`,
   `content_length` and `content_range_total`, taken from the
@@ -27,6 +27,18 @@ and still ingests the example green.
 - [x] A higher rung's Trigger overrides a live report with the whole
   sample - including the new fields - moving to the overriding rung's
   Event, while `created_at` stays frozen
+
+## Answer
+
+Implemented on `ticket/whole-event-02-whole-event-fields` (commits
+`ab10c7a`, `18a3d6c`), merged into `integration/whole-event-sample`
+(`5cbbc49`). The four fields un-park into the served sample in the
+Event's field order; the canonical example is regenerated from a
+driven run with populated content observations; splint mirrors the
+fields mirrored-but-inert; the override assertions pin the whole
+sample - new fields included - moving to the overriding rung's Event
+with `created_at` frozen. See Comments for the example scenario and
+why `size` renders 0 faithfully (enricher warm-up gate).
 
 ## Comments
 

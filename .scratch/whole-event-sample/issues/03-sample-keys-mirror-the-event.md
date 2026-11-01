@@ -13,7 +13,7 @@ nothing dual-reads the old keys.
 Work them sequentially anyway - both regenerate the canonical
 example and would conflict textually if run in parallel.)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Every mention of the sample keys `sent` and `size` in the
   contract and consumer surface is now `sent_bytes` / `size_bytes`,
@@ -28,3 +28,16 @@ example and would conflict textually if run in parallel.)
   the sample counts under `sent_bytes`
 - [x] No report document, persisted report body, or fixture carries
   the old key names
+
+## Answer
+
+Implemented on `ticket/whole-event-03-sample-key-renames` (commits
+`178ed93`, `2c8bc1d`), merged into `integration/whole-event-sample`
+(`4a5b4f9`). `sent`/`size` are `sent_bytes`/`size_bytes` across the
+contract document and its regenerated example, splint's mirror, tests
+and fixtures; `TestPreReshapeBodyKeepsServing` pins the legacy-row
+behaviour (a pre-reshape body reads back with the renamed and added
+fields zero - zero means absent - and nothing dual-reads the old
+keys); the `limit-bandwidth` prose in `docs/reports.md` and
+`docs/rules.md` now references `sent_bytes`. Review fix pass through
+`bd2d5fe`.
