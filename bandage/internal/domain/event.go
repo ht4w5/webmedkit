@@ -1,5 +1,5 @@
 // Package domain is the analyzer's domain core: the Event value type flowing through
-// enrichment and evaluation, the rule model, and the Report record that is
+// enrichment and evaluation, the rule model, and the Report entry that is
 // the product of the analyzer.
 package domain
 
