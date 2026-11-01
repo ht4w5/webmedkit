@@ -50,7 +50,11 @@ floodgates:
 The report document is consumed as published: `splint` parses the
 contract, ignores unknown fields, refuses a document `version` it does
 not know (keeping the last installed rules), and skips individual
-malformed Reports with a log and a counter instead of failing the cycle.
+semantically invalid Reports with a log and a counter instead of failing
+the cycle - a record with a missing or unknown Penalty, a bad rate, or
+an unparseable or fully excluded Target. A structurally broken document
+(a JSON type mismatch) fails the whole cycle deliberately: corruption
+is loud, never silently dropped.
 
 ## Engine options
 
@@ -134,8 +138,9 @@ strictest Penalty breaking ties:
 
 Reports group by (address family, prefix length, Penalty) into one ban
 rule per group holding an equal-length prefix set; ban rules order by
-prefix length descending, then strictness, so nftables first-match
-reproduces the policy. The result does not depend on the order of the
+prefix length descending, then strictness; equal-length groups order by
+rate ascending, then family, so nftables first-match reproduces the
+policy. The result does not depend on the order of the
 document's Reports.
 
 ## Exclusions
@@ -473,7 +478,7 @@ view as the destination fields it matches, `scope=egress` the
 post-translation view as the source fields it matches, and the
 placement lines name where each direction enforces -
 `ingress@prerouting` before conntrack, `egress@forward` in the
-response direction. The `drop` discards the banned client's requests
+response direction. The `drop` discards the banned Target's requests
 to the published service and only those: its SSH or monitoring traffic
 to the same host falls outside the ingress scope. The meter throttles
 the response payload the other client downloads - at the container's
