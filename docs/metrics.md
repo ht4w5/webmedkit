@@ -16,9 +16,10 @@ and the implementation cannot drift.
 `GET /stats` remains the human-facing **Statistic**: the same
 cumulative-since-start snapshot for operator eyes, unversioned and with
 no format contract ([ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)).
-Neither surface's contract constrains the other. Where the two are read
-side by side they agree by construction, because one snapshot feeds
-both.
+Neither surface's contract constrains the other. Each endpoint takes
+its own point-in-time snapshot per request, so every response is
+internally consistent - but two separate requests, one per surface, are
+two snapshots and can disagree.
 
 ## Exposition format
 

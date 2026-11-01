@@ -18,7 +18,7 @@ type Document struct {
 	Reports     []Report `json:"reports"`
 }
 
-// Report is one wire report record (docs/reports.md "Report record").
+// Report is one wire report entry (docs/reports.md "Report entry").
 // Fields the consumer does not act on still mirror the contract: the
 // published document is the integration surface.
 type Report struct {
@@ -98,7 +98,7 @@ func (a PenaltyAction) IsLimit() bool {
 // ParseDocument decodes a report document as the published contract,
 // ignoring unknown fields (its evolution policy). A missing envelope
 // field, unknown version or type mismatch refuses the whole cycle -
-// unlike Compile's per-record skips; an empty reports array is valid.
+// unlike Compile's per-report skips; an empty reports array is valid.
 func ParseDocument(data []byte) (Document, error) {
 	var envelope struct {
 		Version     *int      `json:"version"`

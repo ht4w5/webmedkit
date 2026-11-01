@@ -114,7 +114,7 @@ func (s *Store) updateLocked(sh *shard, fullKey, ns, key string, ttl time.Durati
 			sh.l.MoveToFront(el)
 			return e.rec, nil
 		}
-		// Lazy expiry: drop the entry, restart the bucket below.
+		// Lazy expiry: drop the entry, restart accumulation below.
 		sh.remove(el)
 	}
 

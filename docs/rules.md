@@ -21,7 +21,7 @@ Two glossary entries govern what happens at runtime
 
 - **Match** - the rule's filter accepts the Event and its tracker (if
   any) overflows; the rule's actions then run - or, on a ladder, the
-  actions of every rung the value stands above, lowest first. A rule
+  actions of every rung the value exceeds, lowest first. A rule
   without a tracker matches on the filter alone.
 - **Trigger** - a Match that ran the rule's report action. The report
   action is the only write path to reports.
@@ -92,7 +92,7 @@ Every event is evaluated by entering exactly one chain: the **entry
 chain**, the chain named `main` ([GLOSSARY.md](../GLOSSARY.md),
 [ADR 0015](adr/0015-main-chain-entry.md)). Every other chain is a
 subroutine, entered only when a `goto` or `jump` action names it -
-the firewall shape rule authors already know: one pipeline with a
+the firewall shape rule authors already know: one entry chain with a
 single front door, helper chains dispatched on demand.
 
 - `jump` runs the target chain, then resumes this chain at its next
@@ -279,13 +279,13 @@ a runtime surprise.
 How it behaves:
 
 - A ladder rule matches when the filter accepts and the accumulated
-  value stands above a rung. The fired rungs are decided **once** from
+  value exceeds a rung. The fired rungs are decided **once** from
   the post-accumulation value, before any action runs: every rung the
-  value stands above fires, lowest first. Thresholds ascend strictly at
+  value exceeds fires, lowest first. Thresholds ascend strictly at
   load, so the fired rungs are always a prefix of the ladder - a
   transfer that flew past rungs cannot skip the lower responses, and
   actions within the event can never cancel a rung that already fired.
-- Rungs fire on every matching event while the value stays above
+- Rungs fire on every matching event while the value exceeds
   them, and stop as `leak` decays it below. A handoff rung therefore
   feeds its downstream chain continuously, not in flickers.
 - Terminality is declared per rung's action list, and applies only to
@@ -411,7 +411,7 @@ How it behaves:
 
 Rules with a tracker work the same way with one difference in the
 Match semantics: a Match additionally requires the tracker to overflow
-(on a ladder, stand above a rung - then the fired rungs' actions run,
+(on a ladder, exceed a rung - then the fired rungs' actions run,
 lowest first). Nothing empties the tracker on a Trigger, so a deleted
 or expired report is rewritten on the next matching event, its Sample
 and tracker reading reflecting the accumulation as it stands.

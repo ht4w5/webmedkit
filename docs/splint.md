@@ -50,7 +50,11 @@ floodgates:
 The report document is consumed as published: `splint` parses the
 contract, ignores unknown fields, refuses a document `version` it does
 not know (keeping the last installed rules), and skips individual
-malformed Reports with a log and a counter instead of failing the cycle.
+semantically invalid Reports with a log and a counter instead of failing
+the cycle - a report with a missing or unknown Penalty, a bad rate, or
+an unparseable or fully excluded Target. A structurally broken document
+(a JSON type mismatch) fails the whole cycle deliberately: corruption
+is loud, never silently dropped.
 
 ## Engine options
 
@@ -134,9 +138,10 @@ strictest Penalty breaking ties:
 
 Reports group by (address family, prefix length, Penalty) into one ban
 rule per group holding an equal-length prefix set; ban rules order by
-prefix length descending, then strictness, so nftables first-match
-reproduces the policy. The result does not depend on the order of the
-document's Reports.
+prefix length descending, then strictness - prefix length and strictness
+alone are what nftables first-match reproduces. Equal-length groups
+order by rate ascending, then family, for deterministic serialization.
+The result does not depend on the order of the document's Reports.
 
 ## Exclusions
 
@@ -222,7 +227,7 @@ hash=329a9886
 ```
 
 ```text
-WRN skipped report record reason="target: fully excluded (got \"10.0.0.5/32\")" rule=lan-noise target=10.0.0.5/32
+WRN skipped report reason="target: fully excluded (got \"10.0.0.5/32\")" rule=lan-noise target=10.0.0.5/32
 INF compiled ban rules reports=3 rules=2 skipped=1
 ```
 
@@ -473,7 +478,7 @@ view as the destination fields it matches, `scope=egress` the
 post-translation view as the source fields it matches, and the
 placement lines name where each direction enforces -
 `ingress@prerouting` before conntrack, `egress@forward` in the
-response direction. The `drop` discards the banned client's requests
+response direction. The `drop` discards the banned Target's requests
 to the published service and only those: its SSH or monitoring traffic
 to the same host falls outside the ingress scope. The meter throttles
 the response payload the other client downloads - at the container's
@@ -676,7 +681,7 @@ the last change (drop and reject rules carry no per-prefix lines);
 rules` a failed fetch (the `error` field carries the cause);
 `ban rules unchanged; skipping install` the skip-if-unchanged path;
 `reset and exit` the clean shutdown. A skipped Report looks like `WRN
-skipped report record …` with its rule, Target and reason (see the
+skipped report …` with its rule, Target and reason (see the
 dry-run section); an unreachable enforcement point logs `enforcement
 point unreachable; skipping for the cycle` while the others still
 install.

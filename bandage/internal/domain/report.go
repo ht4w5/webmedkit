@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// TrackerReading is the tracker values at trigger time, recorded as
-// report evidence.
+// TrackerReading is the report's tracker reading: the tracker values
+// at trigger time, not its Sample.
 type TrackerReading struct {
 	// Track is the tracker kind: "rate", "bandwidth", or "replay".
 	Track  string  `json:"track"`

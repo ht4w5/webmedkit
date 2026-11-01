@@ -392,7 +392,7 @@ func parseTrackerQuantity(id, field string, node *yaml.Node, kind domain.TrackKi
 }
 
 // parseEscalations builds the rule's ladder: at least two rungs with strictly
-// ascending thresholds, so the rungs a value stands above stay a ladder prefix.
+// ascending thresholds, so the rungs a value exceeds stay a ladder prefix.
 func parseEscalations(id string, raw []rawEscalation, kind domain.TrackKind) ([]domain.Escalation, error) {
 	if len(raw) < 2 {
 		return nil, fmt.Errorf("rules: rule %q: escalations: at least two rungs required", id)

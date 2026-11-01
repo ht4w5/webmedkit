@@ -9,8 +9,12 @@ rules.
 
 - [docs/ingest.md](docs/ingest.md) - ingest transports: choosing
   udp/unixgram/tcp, the tcp framing cost, the UDP kernel-buffer caveat
+- [docs/metrics.md](docs/metrics.md) - the metrics contract at
+  `GET /metrics`: exposition format, metric families, counter
+  semantics and evolution policy; plus the human-facing `GET /stats`
+  Statistic
 - [docs/reports.md](docs/reports.md) - the report document contract:
-  envelope, record fields and penalty, evolution policy
+  envelope, report fields and penalty, evolution policy
 - [docs/rules.md](docs/rules.md) - writing rules, Match/Trigger
   semantics, and the tracker-less tripwire pattern
 - [docs/splint.md](docs/splint.md) - splint, the companion
@@ -21,12 +25,16 @@ rules.
   the files beside the database and backing them up
 
 Example configuration lives in [configs/](configs/) (`bandage.yml`,
-`rules.yml`, and the sample `bandage.service` and `splint.service`
-systemd units). The
+`rules.yml`, the `nginx/bandage_log.conf` log-format snippet, and the
+sample `bandage.service` and `splint.service` systemd units);
+site-specific data lives in the git-ignored `site/` (`site/bandage.yml`,
+`site/rules.yml`). The
 vocabulary of record is [GLOSSARY.md](GLOSSARY.md); accepted decisions
 are recorded
 as ADRs in [docs/adr/](docs/adr/) - [0008](docs/adr/0008-trigger-semantics-one-live-report.md)
-(Trigger semantics) and [0009](docs/adr/0009-wal-with-a-separate-read-path.md)
+(Trigger semantics; [0013](docs/adr/0013-escalation-ladders-in-place-escalation.md)
+(in-place escalation) revises its tracker-reset behavior) and
+[0009](docs/adr/0009-wal-with-a-separate-read-path.md)
 (WAL and the split read path) govern the behavior the operator docs
 describe.
 

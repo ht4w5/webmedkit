@@ -39,7 +39,8 @@ _Avoid_: stage, pipeline
 
 **Entry chain**:
 The chain entered for every event; in the rules format it is the chain
-named main.
+named main. A dispatched chain runs as a subroutine of its dispatching
+chain; the entry chain never does.
 _Avoid_: base chain, subroutine, hook, regular chain
 
 **Dispatch**:
@@ -57,8 +58,8 @@ A step executed when a rule matches: report, log, goto, jump, or stop.
 _Avoid_: statement, command
 
 **Match**:
-When a rule's filter accepts an event and its tracker (if any) stands
-above volume; the actions of the rule - or of every crossed rung,
+When a rule's filter accepts an event and its tracker (if any) exceeds
+volume; the actions of the rule - or of every crossed rung,
 lowest first - then run.
 _Avoid_: fire, hit
 
@@ -78,20 +79,25 @@ _Avoid_: firing, hit
 **Tracker**:
 Leaky-bucket state for one target (per target and path for replay),
 accumulating a quantity (rate, bandwidth, or replay) that decays at a
-configured leak.
+configured leak. "Leaky bucket" names the mechanism; "bucket" alone
+never names the tracker.
 _Avoid_: bucket, counter, analyzer
 
+**Tracker record**:
+The persisted state of one tracker: its accumulated value and leak.
+Unqualified "record" means this, never a Report.
+
 **Overflow**:
-When a tracker's accumulated value stands above a volume: the rule's
+When a tracker's accumulated value exceeds a volume: the rule's
 volume, or an escalation's threshold.
-_Avoid_: exceed, breach
+_Avoid_: breach
 
 **Escalation**:
 A rung on one tracker's ladder: a volume threshold in the tracker's
 quantity paired with its own ordered action list. The accumulation
 crosses a threshold on the climb and the rung fires while the value
-stands above it; strictly ascending thresholds make the fired rungs a
-prefix of the ladder.
+exceeds it; strictly ascending thresholds make the fired rungs a
+prefix of the ladder. A rung fires; a rule matches.
 _Avoid_: tier, stage, level
 
 **Target**:
@@ -112,8 +118,8 @@ _Avoid_: capped drop, drop, expiry
 ### Reports
 
 **Report**:
-The record that a rule matched for a target, carrying its tracker reading,
-sample, and penalty, alive until expiry or deletion.
+The document recording that a rule matched for a target, carrying its
+tracker reading, sample, and penalty, alive until expiry or deletion.
 _Avoid_: finding, record, ban
 
 **Reason**:
