@@ -2,7 +2,7 @@
 
 `GET /reports` serves the canonical, versioned **report document**: the
 contract a report consumer integrates against instead of reverse-engineering
-the code. This document defines version 0 - the envelope, every record
+the code. This document defines version 0 - the envelope, every report
 field including the penalty, the timestamp rules, the canonical
 serialization, and the evolution policy. Its example is reproduced
 byte-for-byte by the daemon and pinned by a test
@@ -19,17 +19,17 @@ implementation cannot drift.
 |---|---|---|
 | `version` | number | format version of the document; `0` |
 | `generated_at` | string | when the document was generated, RFC 3339 UTC |
-| `reports` | array | live report records (below), possibly empty |
+| `reports` | array | live report entries (below), possibly empty |
 
 The reports are ordered by `created_at` descending, then `rule` and
 `target` ascending. Expired reports are never served. The `?rule=` and
 `?target=` query parameters return a subset under the same ordering; they
 do not change the document's shape.
 
-## Report record
+## Report entry
 
-One record per (rule, target). `penalty` is the last key of a record, so
-future additive fields append after it.
+One report entry per (rule, target). `penalty` is the last key of the
+entry, so future additive fields append after it.
 
 | field | type | meaning |
 |---|---|---|
@@ -37,18 +37,18 @@ future additive fields append after it.
 | `chain` | string | the chain that owns the rule |
 | `reason` | string | the namespaced machine-readable trigger code `<prefix>.<code>` (below), the report's downstream identity |
 | `target` | string | the aggregated source prefix the report is about, e.g. `203.0.113.7/32` |
-| `created_at` | string | when the record was first written, RFC 3339 UTC |
-| `updated_at` | string | when the record was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
+| `created_at` | string | when the report entry was first written, RFC 3339 UTC |
+| `updated_at` | string | when the report entry was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
 | `expires_at` | string | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it |
 | `tracker` | object | the tracker reading that justified the report (below) |
 | `sample` | object | the event that justified the report's current stance (below) |
-| `penalty` | object | the advisory enforcement stance (below); present on every canonical record |
+| `penalty` | object | the advisory enforcement stance (below); present on every canonical report entry |
 
 The `tracker` reading:
 
 | field | type | meaning |
 |---|---|---|
-| `track` | string | tracker kind: `rate`, `bandwidth`, or `replay` |
+| `track` | string | tracker kind: `rate`, `bandwidth`, or `replay`; empty `""` and a zeroed reading when the rule is tracker-less |
 | `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents - the tracker kind's quantity) |
 | `leak` | number | the per-second decay applied to `value` |
 | `volume` | number | the overflow threshold `value` exceeded |
@@ -79,7 +79,7 @@ and `expires_at` all move to the overriding rung's values, and
 first flagged
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). The
 `sample` is the event that justified the report's current stance, so
-the evidence always backs the penalty the report carries.
+the sample always backs the penalty the report carries.
 
 The report dies at its `expires_at` or when `DELETE /reports` removes
 it; the next matching event then writes a fresh report at the
@@ -165,13 +165,13 @@ the rules loaded at its write time.
 ## Evolution policy
 
 The version stays `0` across additive changes: new optional fields (at
-the record's end or inside its objects) do not bump `version`, so a
+the report entry's end or inside its objects) do not bump `version`, so a
 consumer must ignore unknown fields. Breaking changes do bump it -
 including new `penalty.action` values: the enum is closed per version, so
 a consumer's switch over the five values is total for version 0.
 
-Records written before the penalty existed lack the `penalty` key; they
-are pre-release and outside this contract.
+Report entries written before the penalty existed lack the `penalty` key;
+they are pre-release and outside this contract.
 
 ## Canonical serialization
 
