@@ -14,7 +14,7 @@ rules.
   semantics and evolution policy; plus the human-facing `GET /stats`
   Statistic
 - [docs/reports.md](docs/reports.md) - the report document contract:
-  envelope, record fields and penalty, evolution policy
+  envelope, report fields and penalty, evolution policy
 - [docs/rules.md](docs/rules.md) - writing rules, Match/Trigger
   semantics, and the tracker-less tripwire pattern
 - [docs/splint.md](docs/splint.md) - splint, the companion

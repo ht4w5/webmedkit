@@ -51,7 +51,7 @@ The report document is consumed as published: `splint` parses the
 contract, ignores unknown fields, refuses a document `version` it does
 not know (keeping the last installed rules), and skips individual
 semantically invalid Reports with a log and a counter instead of failing
-the cycle - a record with a missing or unknown Penalty, a bad rate, or
+the cycle - a report with a missing or unknown Penalty, a bad rate, or
 an unparseable or fully excluded Target. A structurally broken document
 (a JSON type mismatch) fails the whole cycle deliberately: corruption
 is loud, never silently dropped.
