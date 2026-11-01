@@ -640,8 +640,8 @@ func TestUpdateCycleLogsAndCountsSkippedReports(t *testing.T) {
 		t.Errorf("skips[1] = %+v, want the missing-penalty record with a reason", skips[1])
 	}
 	logText := logs.String()
-	if n := strings.Count(logText, "skipped report record"); n != 2 {
-		t.Errorf("logged %d skip records, want 2: %s", n, logText)
+	if n := strings.Count(logText, "skipped report"); n != 2 {
+		t.Errorf("logged %d skip reports, want 2: %s", n, logText)
 	}
 	if !strings.Contains(logText, `"skipped":2`) {
 		t.Errorf("cycle summary does not count the skips: %s", logText)

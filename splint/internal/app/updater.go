@@ -220,7 +220,7 @@ func writePlan(w io.Writer, plan firewall.Plan) error {
 }
 
 // load fetches and compiles one report document, logging every skipped
-// record and the cycle's counts. The ruleset hash is the driver's own.
+// report and the cycle's counts. The ruleset hash is the driver's own.
 func (u *Updater) load(ctx context.Context) ([]firewall.BanRule, []domain.Skip, error) {
 	data, err := u.fetcher.Fetch(ctx)
 	if err != nil {
@@ -236,7 +236,7 @@ func (u *Updater) load(ctx context.Context) ([]firewall.BanRule, []domain.Skip, 
 			Str("rule", s.Rule).
 			Str("target", s.Target).
 			Str("reason", s.Reason).
-			Msg("skipped report record")
+			Msg("skipped report")
 	}
 	u.log.Info().
 		Int("reports", len(doc.Reports)).
