@@ -11,4 +11,15 @@ stay a ladder prefix" -> "exceeds"). GLOSSARY.md is already done.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
+
+## Comments
+
+Context: resolved on branch `ticket/dc-07-rules-vocabulary-sweep` (spec
+`../spec.md`, Overflow vocabulary). `docs/rules.md` now says "one entry
+chain with a single front door" and uses "exceeds" for the state
+throughout ("crosses" kept for the event) - the parseEscalations
+comment at `bandage/internal/app/rules.go:395` swept too. Also changed
+"stays above" -> "exceeds" at rules.md:288 (same state vocabulary,
+matches the glossary's already-applied phrasing). GLOSSARY.md untouched
+(already done). `make test` green (the doc-pinning suites pass).
