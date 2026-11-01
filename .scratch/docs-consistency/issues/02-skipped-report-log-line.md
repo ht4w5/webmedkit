@@ -9,4 +9,15 @@ stays byte-accurate. Check the accompanying skip counter's name for
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
+
+## Comments
+
+Resolved on branch `ticket/dc-02-skipped-report-log-line`. The log
+message is now `Msg("skipped report")`; the `docs/splint.md` sample
+output and prose echo it byte-accurately. The skip counter is named
+`skipped` (no "record" to align) and the test pin in `cycle_test.go`
+follows the rename.
+
+Context: spec `../spec.md` (ticket 02, Q11; glossary: unqualified
+"record" means tracker state, never a Report).

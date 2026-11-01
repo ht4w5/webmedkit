@@ -222,7 +222,7 @@ hash=329a9886
 ```
 
 ```text
-WRN skipped report record reason="target: fully excluded (got \"10.0.0.5/32\")" rule=lan-noise target=10.0.0.5/32
+WRN skipped report reason="target: fully excluded (got \"10.0.0.5/32\")" rule=lan-noise target=10.0.0.5/32
 INF compiled ban rules reports=3 rules=2 skipped=1
 ```
 
@@ -676,7 +676,7 @@ the last change (drop and reject rules carry no per-prefix lines);
 rules` a failed fetch (the `error` field carries the cause);
 `ban rules unchanged; skipping install` the skip-if-unchanged path;
 `reset and exit` the clean shutdown. A skipped Report looks like `WRN
-skipped report record …` with its rule, Target and reason (see the
+skipped report …` with its rule, Target and reason (see the
 dry-run section); an unreachable enforcement point logs `enforcement
 point unreachable; skipping for the cycle` while the others still
 install.
