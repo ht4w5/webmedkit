@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -263,6 +266,10 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 	rec := domain.Report{
 		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
 		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+		Sample: domain.Event{
+			Time: base, Path: "/releases/24.04.iso", Agent: "Wget/1.21",
+			Status: 200, SentBytes: 6000,
+		},
 		Penalty: &domain.Penalty{Action: domain.PenaltyLimitBandwidth, Rate: &rate},
 	}
 
@@ -292,6 +299,93 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 	if p := got[0].Penalty; p == nil || p.Action != domain.PenaltyLimitBandwidth ||
 		p.Rate == nil || *p.Rate != rate {
 		t.Errorf("penalty after reopen = %+v, want limit-bandwidth at %d", got[0].Penalty, rate)
+	}
+	if s := got[0].Sample; !s.Time.Equal(base) || s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" ||
+		s.Status != 200 || s.SentBytes != 6000 || s.SizeBytes != 0 {
+		t.Errorf("sample after reopen = %+v, want the written sample", s)
+	}
+}
+
+// sampleJSONof returns the raw "sample" member of a JSON object, so a
+// body blob and a document can be compared member for member.
+func sampleJSONof(t *testing.T, doc string) json.RawMessage {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(doc), &obj); err != nil {
+		t.Fatalf("unmarshal %q: %v", doc, err)
+	}
+	s, ok := obj["sample"]
+	if !ok {
+		t.Fatalf("%q has no sample member", doc)
+	}
+	return s
+}
+
+// TestBodyAndDocumentRenderTheSampleIdentically: the report body a
+// Trigger persists and the report document the daemon serves draw the
+// sample from one wire form - byte for byte - so storage and serving
+// cannot disagree about what a sample is (ADR 0021).
+func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	rec := domain.Report{
+		Rule: "r", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+		// The whole Event is the sample; the parked fields stay out of
+		// the contract until the whole-Event fields land (ticket 02).
+		Sample: domain.Event{
+			Time:              base,
+			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
+			Method:            "GET",
+			Path:              "/releases/24.04.iso",
+			Agent:             "Wget/1.21",
+			Status:            200,
+			SentBytes:         6000,
+			ContentLength:     6000,
+			ContentRangeTotal: 3000000,
+		},
+	}
+	if err := repo.Upsert(ctx, rec); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// The persisted body's sample, straight from the body blob.
+	var rawBody string
+	if err := repo.read.QueryRow(
+		`SELECT body FROM reports WHERE rule = ? AND target = ?`, rec.Rule, rec.Target,
+	).Scan(&rawBody); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	bodySample := sampleJSONof(t, rawBody)
+
+	// The served document's sample, straight from the report entry.
+	doc, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal document entry: %v", err)
+	}
+	docSample := sampleJSONof(t, string(doc))
+
+	want := []byte(`{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":6000,"size":0}`)
+	if !bytes.Equal(bodySample, docSample) {
+		t.Errorf("body sample = %s\ndocument sample = %s\nwant one wire form", bodySample, docSample)
+	}
+	if !bytes.Equal(bodySample, want) {
+		t.Errorf("body sample = %s\nwant %s", bodySample, want)
+	}
+
+	// The sample survives the body blob: List hands the document the
+	// same sample the Trigger persisted.
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+	if s := got[0].Sample; !s.Time.Equal(base) || s.Path != rec.Sample.Path || s.Agent != rec.Sample.Agent ||
+		s.Status != rec.Sample.Status || s.SentBytes != rec.Sample.SentBytes || s.SizeBytes != 0 {
+		t.Errorf("sample through the body blob = %+v, want %+v", s, rec.Sample)
 	}
 }
 

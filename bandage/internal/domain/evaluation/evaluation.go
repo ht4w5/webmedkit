@@ -246,15 +246,8 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		UpdatedAt: now,
 		ExpiresAt: now.Add(action.TTL),
 		Tracker:   m.reading,
-		Sample: domain.Sample{
-			Time:   m.event.Time,
-			Path:   m.event.Path,
-			Agent:  m.event.Agent,
-			Status: m.event.Status,
-			Sent:   m.event.SentBytes,
-			Size:   m.event.SizeBytes,
-		},
-		Penalty: &penalty,
+		Sample:    *m.event, // the Event whole (ADR 0021), never a projection
+		Penalty:   &penalty,
 	}
 	return s.reports.Trigger(ctx, rec, len(m.rule.Escalations) > 0)
 }

@@ -404,7 +404,7 @@ chains:
 	if r.Tracker.Value != 160 || r.Tracker.Volume != 150 {
 		t.Errorf("tracker reading = %+v, want value 160 with the overriding rung's threshold 150", r.Tracker)
 	}
-	if r.Sample.Time != eventTime2At || r.Sample.Path != "/big2" || r.Sample.Sent != 100 {
+	if r.Sample.Time != eventTime2At || r.Sample.Path != "/big2" || r.Sample.SentBytes != 100 {
 		t.Errorf("sample = %+v, want the overriding event (the report's current stance is what it justifies)", r.Sample)
 	}
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T18:30:00Z" || r.ExpiresAt != "2025-10-17T20:30:00Z" {
@@ -426,7 +426,7 @@ chains:
 	if r.Tracker.Value != 280 || r.Tracker.Volume != 250 {
 		t.Errorf("tracker reading = %+v, want value 280 with the overriding rung's threshold 250", r.Tracker)
 	}
-	if r.Sample.Time != "2024-12-16T10:45:36Z" || r.Sample.Path != "/big3" || r.Sample.Sent != 120 {
+	if r.Sample.Time != "2024-12-16T10:45:36Z" || r.Sample.Path != "/big3" || r.Sample.SentBytes != 120 {
 		t.Errorf("sample = %+v, want the overriding event", r.Sample)
 	}
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T19:00:00Z" || r.ExpiresAt != "2025-10-18T19:00:00Z" {

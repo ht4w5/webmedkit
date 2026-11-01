@@ -515,7 +515,7 @@ chains:
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
 		t.Errorf("iso-replay tracker = %+v, want {replay 2 0 1}", r.Tracker)
 	}
-	if r.Sample.Size != 1000 || r.Sample.Sent != 1000 {
+	if r.Sample.SizeBytes != 1000 || r.Sample.SentBytes != 1000 {
 		t.Errorf("iso-replay sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
 	}
 

@@ -15,16 +15,6 @@ type TrackerReading struct {
 	Volume float64 `json:"volume"`
 }
 
-// Sample is the most recent event that created a report.
-type Sample struct {
-	Time   time.Time
-	Path   string
-	Agent  string
-	Status int
-	Sent   int64
-	Size   int64
-}
-
 // Report is the record that a rule matched for a target, alive until
 // expiry or deletion. Identity is (rule, target).
 type Report struct {
@@ -36,7 +26,9 @@ type Report struct {
 	UpdatedAt time.Time
 	ExpiresAt time.Time
 	Tracker   TrackerReading
-	Sample    Sample
+	// Sample is the most recent Event that created the report, carried
+	// whole (ADR 0021): there is no sample-specific field list to rot.
+	Sample Event
 	// Penalty is the advisory enforcement stance the report recommends
 	// for the target (ADR 0010); nil only for rows written before the
 	// penalty existed (outside the canonical contract).
@@ -58,50 +50,42 @@ func parseTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
-// MarshalJSON renders the sample in the report document shape.
-func (s Sample) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Time   string `json:"time"`
-		Path   string `json:"path"`
-		Agent  string `json:"agent"`
-		Status int    `json:"status"`
-		Sent   int64  `json:"sent"`
-		Size   int64  `json:"size"`
-	}{
-		Time:   formatTime(s.Time),
-		Path:   s.Path,
-		Agent:  s.Agent,
-		Status: s.Status,
-		Sent:   s.Sent,
-		Size:   s.Size,
+// sampleWire is a defined-type shim over Event: the sample's JSON
+// form is derived from the Event's field set and tags by construction,
+// so the emitted keys can never lag the type (ADR 0021).
+type sampleWire Event
+
+// sampleJSON is the sample's rendered form: the derived field set,
+// with Time shadowed by its rendered timestamp. The shadow must carry
+// the same JSON name ("time") to dominate the derived Time.
+type sampleJSON struct {
+	Time string `json:"time"` // shadows sampleWire.Time (the timestamp renderer)
+	sampleWire
+}
+
+// MarshalJSON renders the Event in the report document's sample shape
+// (also the persisted report body's sample shape - one wire form).
+func (e Event) MarshalJSON() ([]byte, error) {
+	return json.Marshal(sampleJSON{
+		Time:       formatTime(e.Time),
+		sampleWire: sampleWire(e),
 	})
 }
 
-// UnmarshalJSON is the inverse of MarshalJSON (persistence round-trip).
-func (s *Sample) UnmarshalJSON(b []byte) error {
-	var wire struct {
-		Time   string `json:"time"`
-		Path   string `json:"path"`
-		Agent  string `json:"agent"`
-		Status int    `json:"status"`
-		Sent   int64  `json:"sent"`
-		Size   int64  `json:"size"`
-	}
-	if err := json.Unmarshal(b, &wire); err != nil {
+// UnmarshalJSON is the inverse of MarshalJSON (persistence round-trip);
+// absent sample fields read as zero (zero means absent).
+func (e *Event) UnmarshalJSON(b []byte) error {
+	var w sampleJSON
+	if err := json.Unmarshal(b, &w); err != nil {
 		return err
 	}
-	t, err := parseTime(wire.Time)
+	t, err := parseTime(w.Time)
 	if err != nil {
 		return err
 	}
-	*s = Sample{
-		Time:   t,
-		Path:   wire.Path,
-		Agent:  wire.Agent,
-		Status: wire.Status,
-		Sent:   wire.Sent,
-		Size:   wire.Size,
-	}
+	ev := Event(w.sampleWire)
+	ev.Time = t
+	*e = ev
 	return nil
 }
 
@@ -116,7 +100,7 @@ func (r Report) MarshalJSON() ([]byte, error) {
 		UpdatedAt string         `json:"updated_at"`
 		ExpiresAt string         `json:"expires_at"`
 		Tracker   TrackerReading `json:"tracker"`
-		Sample    Sample         `json:"sample"`
+		Sample    Event          `json:"sample"`
 		Penalty   *Penalty       `json:"penalty,omitempty"`
 	}{
 		Rule:      r.Rule,

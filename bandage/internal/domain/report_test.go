@@ -3,6 +3,7 @@ package domain
 import (
 	"bytes"
 	"encoding/json"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -26,13 +27,20 @@ func TestReportMarshalJSON(t *testing.T) {
 			Leak:   1000000,
 			Volume: 100000000,
 		},
-		Sample: Sample{
-			Time:   time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC),
-			Path:   "/releases/24.04.iso",
-			Agent:  "Wget/1.21",
-			Status: 200,
-			Sent:   123456,
-			Size:   1234567890,
+		// The whole Event is the sample (ADR 0021): the parked fields
+		// are set here and must stay out of the document (they enter
+		// the contract with the whole-Event fields; ticket 02).
+		Sample: Event{
+			Time:              time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // sub-second truncated in document
+			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
+			Method:            "GET",
+			Path:              "/releases/24.04.iso",
+			Agent:             "Wget/1.21",
+			Status:            200,
+			SentBytes:         123456,
+			ContentLength:     123456,
+			ContentRangeTotal: 1234567890,
+			SizeBytes:         1234567890,
 		},
 		Penalty: &Penalty{Action: PenaltyLimitBandwidth, Rate: int64Ptr(1000000)},
 	}
@@ -57,27 +65,38 @@ func TestReportMarshalJSON(t *testing.T) {
 	}
 }
 
+// TestSampleRoundTrip checks the sample's JSON form - the one wire
+// form behind the served document and the persisted body (the sqlite
+// adapter round-trips the sample through it): the contract's keys come
+// from the Event's field set and tags, timestamps render RFC 3339 UTC
+// at second precision with sub-second truncated, and absent values
+// round-trip as zero (zero means absent).
 func TestSampleRoundTrip(t *testing.T) {
-	// The sqlite adapter round-trips the sample through its JSON form.
-	orig := Sample{
-		Time:   time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC),
-		Path:   "/releases/24.04.iso",
-		Agent:  "Wget/1.21",
-		Status: 200,
-		Sent:   123456,
-		Size:   0,
+	orig := Event{
+		Time:      time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // truncated to the second on the wire
+		Path:      "/releases/24.04.iso",
+		Agent:     "Wget/1.21",
+		Status:    200,
+		SentBytes: 123456,
+		SizeBytes: FilesizeUnknown, // absent: zero on the wire and back
 	}
 	b, err := json.Marshal(orig)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
-	var back Sample
+	want := `{"time":"2025-10-17T18:29:40Z","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent":123456,"size":0}`
+	if compact(string(b)) != compact(want) {
+		t.Errorf("Marshal = %s\nwant %s", b, compact(want))
+	}
+	var back Event
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
-	if !back.Time.Equal(orig.Time) || back.Path != orig.Path || back.Agent != orig.Agent ||
-		back.Status != orig.Status || back.Sent != orig.Sent || back.Size != orig.Size {
-		t.Errorf("round trip = %+v, want %+v", back, orig)
+	wantBack := orig
+	wantBack.Time = time.Date(2025, 10, 17, 18, 29, 40, 0, time.UTC)
+	if !back.Time.Equal(wantBack.Time) || back.Path != wantBack.Path || back.Agent != wantBack.Agent ||
+		back.Status != wantBack.Status || back.SentBytes != wantBack.SentBytes || back.SizeBytes != wantBack.SizeBytes {
+		t.Errorf("round trip = %+v, want %+v", back, wantBack)
 	}
 }
 
