@@ -11,6 +11,16 @@ equal-length groups order by rate ascending, then family. (c) :476
 "the banned client's requests" -> "the banned Target's requests"
 (Target is a prefix, not a host).
 
+## Comments
+
+Context: docs-only fix on branch `ticket/dc-03-splint-md-doc-fixes`.
+All three edits verified against `splint/internal/domain/compile.go`
+(skip reasons in `parseReport`/`compileReport`; `compareGroups` order:
+prefix length descending, strictness, rate ascending, then family) and
+`wire.go` (`ParseDocument` refuses a type mismatch for the whole cycle,
+"unlike Compile's per-record skips"). "client" is _Avoid_ for Target in
+`GLOSSARY.md`. No code changes; `make test` green.
+
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
