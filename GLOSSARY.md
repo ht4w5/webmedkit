@@ -137,8 +137,9 @@ decides how to apply it.
 _Avoid_: sanction, remedy, enforcement action
 
 **Sample**:
-The event that justified the report's current stance.
-_Avoid_: example, evidence
+The complete Event that justified the report's current stance - carried
+whole in the report, never a projection of selected fields.
+_Avoid_: excerpt, summary, example, evidence
 
 ### Operations
 
