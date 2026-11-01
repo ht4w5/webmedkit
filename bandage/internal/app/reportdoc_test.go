@@ -114,9 +114,12 @@ func TestE2EReportsDocumentMatchesDocsExample(t *testing.T) {
 	// 6000 + 6000 - 1000 = 11000 > 10000: the second event overflows and
 	// its sample ends up in the report. Both events are 6000-byte ranges
 	// of a 3000000-byte file, so the sample carries the whole Event's
-	// content observations (clen/crange) too.
-	d.send(nginxLineAgentCrange(docEventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 206, 6000, "Wget/1.21", "6000", "bytes 0-5999/3000000"))
-	d.send(nginxLineAgentCrange(docEventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 206, 6000, "Wget/1.21", "6000", "bytes 0-5999/3000000"))
+	// content observations (clen/crange) too. The line is the full log
+	// shape for a rich sample: agent plus both content observations.
+	d.send(nginxLineFields(docEventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 206, 6000,
+		agentMember("Wget/1.21"), clenMember("6000"), crangeMember("bytes 0-5999/3000000")))
+	d.send(nginxLineFields(docEventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 206, 6000,
+		agentMember("Wget/1.21"), clenMember("6000"), crangeMember("bytes 0-5999/3000000")))
 	d.waitProcessed(t, 2)
 
 	body := d.getReportsRaw(t)

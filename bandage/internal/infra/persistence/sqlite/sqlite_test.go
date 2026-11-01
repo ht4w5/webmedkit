@@ -301,17 +301,12 @@ func TestWrittenReportSurvivesReopen(t *testing.T) {
 		p.Rate == nil || *p.Rate != rate {
 		t.Errorf("penalty after reopen = %+v, want limit-bandwidth at %d", got[0].Penalty, rate)
 	}
-	if s := got[0].Sample; !s.Time.Equal(base) || s.RemoteAddr != rec.Sample.RemoteAddr || s.Method != "GET" ||
-		s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" ||
-		s.Status != 200 || s.SentBytes != 6000 || s.ContentLength != 6000 || s.ContentRangeTotal != 3000000 ||
-		s.SizeBytes != 0 {
-		t.Errorf("sample after reopen = %+v, want the written sample", s)
-	}
+	checkSample(t, got[0].Sample, rec.Sample)
 }
 
-// sampleJSONof returns the raw "sample" member of a JSON object, so a
+// rawSampleMember returns the raw "sample" member of a JSON object, so a
 // body blob and a document can be compared member for member.
-func sampleJSONof(t *testing.T, doc string) json.RawMessage {
+func rawSampleMember(t *testing.T, doc string) json.RawMessage {
 	t.Helper()
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(doc), &obj); err != nil {
@@ -360,14 +355,14 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	).Scan(&rawBody); err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	bodySample := sampleJSONof(t, rawBody)
+	bodySample := rawSampleMember(t, rawBody)
 
 	// The served document's sample, straight from the report entry.
 	doc, err := json.Marshal(rec)
 	if err != nil {
 		t.Fatalf("marshal document entry: %v", err)
 	}
-	docSample := sampleJSONof(t, string(doc))
+	docSample := rawSampleMember(t, string(doc))
 
 	want := []byte(`{"time":"2025-10-17T18:00:00Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":6000,"content_length":6000,"content_range_total":3000000,"size_bytes":0}`)
 	if !bytes.Equal(bodySample, docSample) {
@@ -386,13 +381,7 @@ func TestBodyAndDocumentRenderTheSampleIdentically(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %+v, want one", got)
 	}
-	if s := got[0].Sample; !s.Time.Equal(base) || s.RemoteAddr != rec.Sample.RemoteAddr || s.Method != rec.Sample.Method ||
-		s.Path != rec.Sample.Path || s.Agent != rec.Sample.Agent ||
-		s.Status != rec.Sample.Status || s.SentBytes != rec.Sample.SentBytes ||
-		s.ContentLength != rec.Sample.ContentLength || s.ContentRangeTotal != rec.Sample.ContentRangeTotal ||
-		s.SizeBytes != 0 {
-		t.Errorf("sample through the body blob = %+v, want %+v", s, rec.Sample)
-	}
+	checkSample(t, got[0].Sample, rec.Sample)
 }
 
 // TestPreReshapeBodyKeepsServing: a report body written before the
@@ -430,13 +419,38 @@ func TestPreReshapeBodyKeepsServing(t *testing.T) {
 	if p := rec.Penalty; p == nil || p.Action != domain.PenaltyLimitBandwidth || p.Rate == nil || *p.Rate != 1000000 {
 		t.Errorf("penalty = %+v, want the pre-reshape row's penalty kept", rec.Penalty)
 	}
-	s := rec.Sample
-	if !s.Time.Equal(base) || s.Path != "/releases/24.04.iso" || s.Agent != "Wget/1.21" || s.Status != 200 {
-		t.Errorf("sample = %+v, want the surviving keys' values kept", s)
+	// The surviving keys keep their values; the renamed and added fields
+	// read zero (zero means absent).
+	checkSample(t, rec.Sample, domain.Event{
+		Time: base, Path: "/releases/24.04.iso", Agent: "Wget/1.21", Status: 200,
+	})
+}
+
+// checkSample reports every sample field that differs from want as
+// "sample <field> = ..., want ..." - the field-by-field comparison
+// behind the sample assertions.
+func checkSample(t *testing.T, got, want domain.Event) {
+	t.Helper()
+	if !got.Time.Equal(want.Time) {
+		t.Errorf("sample time = %v, want %v", got.Time, want.Time)
 	}
-	if s.SentBytes != 0 || s.SizeBytes != 0 || s.Method != "" || s.RemoteAddr.IsValid() ||
-		s.ContentLength != 0 || s.ContentRangeTotal != 0 {
-		t.Errorf("sample = %+v, want the renamed and added fields zero (zero means absent)", s)
+	for _, f := range []struct {
+		name      string
+		got, want any
+	}{
+		{"remote_addr", got.RemoteAddr, want.RemoteAddr},
+		{"method", got.Method, want.Method},
+		{"path", got.Path, want.Path},
+		{"agent", got.Agent, want.Agent},
+		{"status", got.Status, want.Status},
+		{"sent_bytes", got.SentBytes, want.SentBytes},
+		{"content_length", got.ContentLength, want.ContentLength},
+		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
+		{"size_bytes", got.SizeBytes, want.SizeBytes},
+	} {
+		if f.got != f.want {
+			t.Errorf("sample %s = %v, want %v", f.name, f.got, f.want)
+		}
 	}
 }
 

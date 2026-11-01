@@ -57,4 +57,4 @@ escalation override assertions pin that a higher rung's Trigger moves
 the whole sample - new fields included - to the overriding rung's
 Event while `created_at` stays frozen, and the log-action contract
 test pins the logged Event's whole wire form at second-precision time
-(the ADR 0021 Event↔wire coupling the ticket 01 notes flagged).
+(the ADR 0021 Event<->wire coupling the ticket 01 notes flagged).

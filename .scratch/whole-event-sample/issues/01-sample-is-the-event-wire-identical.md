@@ -42,7 +42,7 @@ body still carry exactly the six keys `time, path, agent, status,
 sent, size`, byte-for-byte (docs/reports.md untouched).
 
 On the checklist's address clause: the address-rendering machinery
-(netip.Addr in text form, zero ↔ empty string - netip's text
+(netip.Addr in text form, zero <-> empty string - netip's text
 marshalling) is in the derived wire form now, so ticket 02 is purely
 additive (flip the parked tags); it becomes observable at the document
 seams when ticket 02 un-parks the fields, as the decomposition
@@ -51,7 +51,7 @@ report-side change" is by construction (the sample's emitted field set
 lives only in the Event's tags); ticket 02's tag-only diff to un-park
 four fields is the demonstration.
 
-Note for tickets 02/03: the Event↔wire coupling ADR 0021 records is
+Note for tickets 02/03: the Event<->wire coupling ADR 0021 records is
 deliberate and visible beyond the report - the log action's `event`
 attribute now renders in the Event's wire form too (six keys,
 second-precision time), so `TestE2ELogActionLogsEventAndTrackerReading`
