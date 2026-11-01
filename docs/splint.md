@@ -51,7 +51,7 @@ The report document is consumed as published: `splint` parses the
 contract, ignores unknown fields, refuses a document `version` it does
 not know (keeping the last installed rules), and skips individual
 semantically invalid Reports with a log and a counter instead of failing
-the cycle - a record with a missing or unknown Penalty, a bad rate, or
+the cycle - a report with a missing or unknown Penalty, a bad rate, or
 an unparseable or fully excluded Target. A structurally broken document
 (a JSON type mismatch) fails the whole cycle deliberately: corruption
 is loud, never silently dropped.
@@ -138,10 +138,10 @@ strictest Penalty breaking ties:
 
 Reports group by (address family, prefix length, Penalty) into one ban
 rule per group holding an equal-length prefix set; ban rules order by
-prefix length descending, then strictness; equal-length groups order by
-rate ascending, then family, so nftables first-match reproduces the
-policy. The result does not depend on the order of the
-document's Reports.
+prefix length descending, then strictness - prefix length and strictness
+alone are what nftables first-match reproduces. Equal-length groups
+order by rate ascending, then family, for deterministic serialization.
+The result does not depend on the order of the document's Reports.
 
 ## Exclusions
 
