@@ -18,7 +18,7 @@ type Document struct {
 	Reports     []Report `json:"reports"`
 }
 
-// Report is one wire report record (docs/reports.md "Report record").
+// Report is one wire report entry (docs/reports.md "Report entry").
 // Fields the consumer does not act on still mirror the contract: the
 // published document is the integration surface.
 type Report struct {
