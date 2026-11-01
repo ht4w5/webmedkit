@@ -12,4 +12,18 @@ test names.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
+
+## Comments
+
+Resolved on branch `ticket/dc-08-code-comments`. What landed: the two
+comment fixes only, no behaviour change - `domain.TrackerReading`'s doc
+comment now names the report's tracker reading (the tracker values at
+trigger time, not its Sample; "evidence" dropped) and the memory
+cache's lazy-expiry comment says "restart accumulation below" (bare
+"bucket" never names a tracker). The suppression list
+(`firewall.Hit`/`Outcome.Hits`, `Stats`/`track.Statistics`,
+`--nft-hook`, test names) is untouched. `make test` green.
+
+Context: spec `../spec.md`, `bandage/internal/domain/report.go`,
+`bandage/internal/infra/cache/memory/memory.go`.
