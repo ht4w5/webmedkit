@@ -53,10 +53,10 @@ type Sample struct {
 	Path              string `json:"path"`
 	Agent             string `json:"agent"`
 	Status            int    `json:"status"`
-	Sent              int64  `json:"sent"`
+	SentBytes         int64  `json:"sent_bytes"`
 	ContentLength     int64  `json:"content_length"`
 	ContentRangeTotal int64  `json:"content_range_total"`
-	Size              int64  `json:"size"`
+	SizeBytes         int64  `json:"size_bytes"`
 }
 
 // Penalty is the advisory enforcement stance a report carries

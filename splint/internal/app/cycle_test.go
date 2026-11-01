@@ -336,10 +336,10 @@ func TestParseDocumentMirrorsTheCanonicalExampleSample(t *testing.T) {
 		Path:              "/releases/24.04.iso",
 		Agent:             "Wget/1.21",
 		Status:            206,
-		Sent:              6000,
+		SentBytes:         6000,
 		ContentLength:     6000,
 		ContentRangeTotal: 3000000,
-		Size:              0,
+		SizeBytes:         0,
 	}
 	if s := doc.Reports[0].Sample; s != want {
 		t.Errorf("sample = %+v, want %+v (the mirror decodes every contract key)", s, want)
