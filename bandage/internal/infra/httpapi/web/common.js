@@ -63,9 +63,8 @@ function loadStats() {
 }
 
 // Report review table: one row per live Report fetched from
-// /api/reports. renderReports(list) renders whatever list it is handed -
-// the full fetched one or the filter's narrowed view - and
-// reportRow(report) builds one row's markup including its delete cell.
+// /api/reports; reportRow(report) builds one row's markup including its
+// delete cell.
 
 // The review table's columns: rule, target, tracker reading, updated
 // and the delete cell - detail and message rows span all of them.
@@ -117,7 +116,17 @@ function reportRow(report) {
 	return pair;
 }
 
-// messageRow renders one full-width message row (loading, empty state,
+// showEmptyState swaps the review table and the empty state in and out
+// together: an empty live set reads as information - "No live reports."
+// - instead of a bare table.
+function showEmptyState(show) {
+	document.getElementById("report-table").hidden = show;
+	const empty = document.getElementById("empty-state");
+	empty.hidden = !show;
+	empty.textContent = show ? "No live reports." : "";
+}
+
+// messageRow renders one full-width message row (loading, no-match,
 // error) so the table is never blank.
 function messageRow(text) {
 	const td = document.createElement("td");
@@ -129,13 +138,17 @@ function messageRow(text) {
 	return tr;
 }
 
+// renderReports renders whatever list it is handed - the full fetched
+// one or the filter's narrowed view - swapping in the empty state when
+// nothing at all is live.
 function renderReports(list) {
 	const rows = document.getElementById("report-rows");
 	rows.textContent = "";
 	if (list.length === 0) {
-		rows.appendChild(messageRow("No live reports."));
+		showEmptyState(true);
 		return;
 	}
+	showEmptyState(false);
 	for (const report of list) {
 		rows.appendChild(reportRow(report));
 	}
@@ -145,6 +158,7 @@ function renderReports(list) {
 // failed fetch never leaves the table blank.
 function showReportsError(err) {
 	const rows = document.getElementById("report-rows");
+	showEmptyState(false);
 	rows.textContent = "";
 	rows.appendChild(messageRow("error: " + err.message));
 }
@@ -152,11 +166,17 @@ function showReportsError(err) {
 function loadReports() {
 	const rows = document.getElementById("report-rows");
 	if (rows === null) return;
+	showEmptyState(false);
 	rows.textContent = "";
 	rows.appendChild(messageRow("Loading..."));
 	fetchJSON("GET", "/api/reports")
 		.then((doc) => {
 			fetchedReports = doc.reports || [];
+			// The header's legend shows the live report count - the
+			// full fetched total, which the narrowed view never
+			// changes.
+			document.getElementById("legend").textContent =
+				"Live reports: " + fetchedReports.length;
 			applyReportFilter();
 		})
 		.catch(showReportsError);
