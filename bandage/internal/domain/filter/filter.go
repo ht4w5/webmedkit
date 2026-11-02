@@ -255,6 +255,40 @@ func (fa *FilterAgent) Match(event *domain.Event) bool {
 	return fa.agent == event.Agent
 }
 
+// FilterAgentPrefix matches events whose user agent starts with the given prefix.
+type FilterAgentPrefix struct {
+	prefix string
+}
+
+// NewFilterAgentPrefix returns a filter matching events whose user agent starts with prefix.
+func NewFilterAgentPrefix(prefix string) (*FilterAgentPrefix, error) {
+	if prefix == "" {
+		return nil, errors.New("prefix must not be empty")
+	}
+	return &FilterAgentPrefix{prefix: prefix}, nil
+}
+
+func (fap *FilterAgentPrefix) Match(event *domain.Event) bool {
+	return strings.HasPrefix(event.Agent, fap.prefix)
+}
+
+// FilterAgentSuffix matches events whose user agent ends with the given suffix.
+type FilterAgentSuffix struct {
+	suffix string
+}
+
+// NewFilterAgentSuffix returns a filter matching events whose user agent ends with suffix.
+func NewFilterAgentSuffix(suffix string) (*FilterAgentSuffix, error) {
+	if suffix == "" {
+		return nil, errors.New("suffix must not be empty")
+	}
+	return &FilterAgentSuffix{suffix: suffix}, nil
+}
+
+func (fas *FilterAgentSuffix) Match(event *domain.Event) bool {
+	return strings.HasSuffix(event.Agent, fas.suffix)
+}
+
 // FilterAgentKeyword matches events whose user agent contains the given
 // keyword.
 type FilterAgentKeyword struct {
