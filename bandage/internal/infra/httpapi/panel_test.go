@@ -207,6 +207,27 @@ func TestStatsRowsAreGeneratedPerReportedKey(t *testing.T) {
 	}
 }
 
+// An unknown top-level block renders within its own generic group - a
+// generic extra group table named for the block - never flattened as
+// dotted rows into the identity table; the known top-level keys
+// (generated_at, uptime) and the build block's fields stay in identity
+// as now. The rendering itself is verified interactively per the user
+// stories; this pins the generic group's served vocabulary.
+func TestStatsUnknownBlocksGetTheirOwnGenericGroup(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`["build", "group-identity"]`, // the build block's fields stay in identity as now
+		"group-extra-",               // the generic group's row slot, named for the block
+		"group-title",                // its heading names the block
+		`createElement("table")`,     // its key/value table
+		`key + "." + field`,          // an unknown block's generic extra rows keep the block-key prefix
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the generic group's %q; an unknown top-level block must render its own group table named for the block, body:\n%s", want, js)
+		}
+	}
+}
+
 // The header's search box narrows the key/value rows on the Stats view
 // the way it narrows report rows on Reports: the same unanchored,
 // case-insensitive regex semantics, with an invalid pattern called out
