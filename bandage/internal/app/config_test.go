@@ -160,6 +160,61 @@ func TestParseConfigErrors(t *testing.T) {
 	}
 }
 
+// TestParseConfigMemoryMode: db.sqlite.memory selects the throwaway
+// in-memory report store (an empty store on every start, nothing left on
+// disk) and is mutually exclusive with db.sqlite.path.
+func TestParseConfigMemoryMode(t *testing.T) {
+	memoryOnly := strings.Replace(validConfig, "    path: /var/lib/bandage/reports.db", "    memory: true", 1)
+	t.Run("memory alone parses", func(t *testing.T) {
+		cfg, err := ParseConfig([]byte(memoryOnly))
+		if err != nil {
+			t.Fatalf("ParseConfig error: %v", err)
+		}
+		if !cfg.DB.SQLite.Memory {
+			t.Errorf("db.sqlite.memory = false, want true")
+		}
+		if cfg.DB.SQLite.Path != "" {
+			t.Errorf("db.sqlite.path = %q, want empty", cfg.DB.SQLite.Path)
+		}
+	})
+	for _, tt := range []struct{ name, yaml string }{
+		{"memory with path", strings.Replace(validConfig, "    path: /var/lib/bandage/reports.db", "    path: /var/lib/bandage/reports.db\n    memory: true", 1)},
+		{"memory with empty path", strings.Replace(validConfig, "    path: /var/lib/bandage/reports.db", "    path: \"\"\n    memory: true", 1)},
+	} {
+		t.Run(tt.name+" is a validation error naming both keys", func(t *testing.T) {
+			_, err := ParseConfig([]byte(tt.yaml))
+			if err == nil {
+				t.Fatal("ParseConfig succeeded, want a mutual-exclusion error")
+			}
+			for _, key := range []string{"db.sqlite.memory", "db.sqlite.path"} {
+				if !strings.Contains(err.Error(), key) {
+					t.Errorf("error %q does not name %q", err, key)
+				}
+			}
+		})
+	}
+	t.Run("memory false is not memory mode", func(t *testing.T) {
+		yaml := strings.Replace(validConfig, "    path: /var/lib/bandage/reports.db", "    memory: false", 1)
+		_, err := ParseConfig([]byte(yaml))
+		if err == nil {
+			t.Fatal("ParseConfig succeeded, want db.sqlite.path required")
+		}
+		if !strings.Contains(err.Error(), "db.sqlite.path") {
+			t.Errorf("error %q does not name %q", err, "db.sqlite.path")
+		}
+	})
+	t.Run("memory under the wrong driver is rejected like the rest of the store config", func(t *testing.T) {
+		yaml := strings.Replace(memoryOnly, "driver: sqlite", "driver: postgres", 1)
+		_, err := ParseConfig([]byte(yaml))
+		if err == nil {
+			t.Fatal("ParseConfig succeeded, want the unknown db driver error")
+		}
+		if !strings.Contains(err.Error(), "db driver") {
+			t.Errorf("error %q does not contain %q", err, "db driver")
+		}
+	})
+}
+
 func TestLoadConfigFromFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bandage.yml")
 	if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {

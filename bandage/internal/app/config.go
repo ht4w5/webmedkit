@@ -48,9 +48,12 @@ type DB struct {
 	SQLite SQLite
 }
 
-// SQLite configures the sqlite report store.
+// SQLite configures the sqlite report store. Memory selects the
+// throwaway in-memory store for debugging (an empty store on every
+// start); it is mutually exclusive with Path.
 type SQLite struct {
-	Path string
+	Path   string
+	Memory bool
 }
 
 // Cache configures the tracker cache.
@@ -103,7 +106,8 @@ type rawDB struct {
 }
 
 type rawSQLite struct {
-	Path string `yaml:"path"`
+	Path   *string `yaml:"path"`
+	Memory bool    `yaml:"memory"`
 }
 
 type rawCache struct {
@@ -157,13 +161,17 @@ func ParseConfig(data []byte) (Config, error) {
 }
 
 func validateConfig(raw rawConfig) (Config, error) {
+	db := DB{Driver: raw.DB.Driver, SQLite: SQLite{Memory: raw.DB.SQLite.Memory}}
+	if raw.DB.SQLite.Path != nil {
+		db.SQLite.Path = *raw.DB.SQLite.Path
+	}
 	cfg := Config{
 		Ingest: Ingest{
 			Driver: raw.Ingest.Driver,
 			Parser: raw.Ingest.Parser,
 			Syslog: Syslog{Network: raw.Ingest.Syslog.Network, Listen: raw.Ingest.Syslog.Listen},
 		},
-		DB:    DB{Driver: raw.DB.Driver, SQLite: SQLite{Path: raw.DB.SQLite.Path}},
+		DB:    db,
 		API:   API{Listen: raw.API.Listen},
 		Cache: Cache{MaxEntries: DefaultCacheEntries},
 		Log:   Log{Level: domain.LevelInfo},
@@ -200,7 +208,12 @@ func validateConfig(raw rawConfig) (Config, error) {
 	case cfg.DB.Driver != "sqlite":
 		return Config{}, fmt.Errorf(`config: db.driver: unknown db driver %q (want "sqlite")`, cfg.DB.Driver)
 	}
-	if cfg.DB.SQLite.Path == "" {
+	switch {
+	case cfg.DB.SQLite.Memory && raw.DB.SQLite.Path != nil:
+		// Setting both keys is a validation error naming both, so
+		// nobody has to guess which one won.
+		return Config{}, errors.New("config: db.sqlite.memory: must not be set together with db.sqlite.path")
+	case !cfg.DB.SQLite.Memory && cfg.DB.SQLite.Path == "":
 		return Config{}, errors.New("config: db.sqlite.path: required")
 	}
 	if raw.Cache.MaxEntries != nil {
