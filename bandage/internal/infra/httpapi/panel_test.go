@@ -175,12 +175,28 @@ func TestStatsPageRendersSnapshotFromStatsAPI(t *testing.T) {
 	}
 }
 
+// The review table renders in pprof's table skin: sticky table headers
+// right-aligned over the data, and pprof's row-highlight color on the
+// hovered report row (ADR 0025).
+func TestReviewTableCarriesPprofTableSkin(t *testing.T) {
+	css := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.css").Body.String()
+	for _, want := range []string{
+		"position: sticky",  // sticky table headers
+		"text-align: right", // right-aligned headers and cells
+		"report-row:hover",  // the row highlight
+		"#ebf5fb",           // pprof's row-highlight color
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("common.css lacks the review table's %q skin token, css head:\n%s", want, head(css, 200))
+		}
+	}
+}
+
 // The Reports page carries the report review table - rule, target,
 // tracker reading, updated - with its existing affordances: live
-// reports fetched from the machine API's /api/reports, a clear empty
-// state for an empty report set, click-to-expand detail rows, and a
-// per-row Delete that deletes exactly the reviewed Report by rule and
-// target via DELETE /api/reports.
+// reports fetched from the machine API's /api/reports, click-to-expand
+// detail rows, and a per-row Delete that deletes exactly the reviewed
+// Report by rule and target via DELETE /api/reports.
 func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
 	srv := apiTestServer(nil)
 	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
@@ -194,15 +210,61 @@ func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
 	}
 	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
 	for _, want := range []string{
-		"/api/reports",    // live reports come from the machine API
-		"No live reports", // the empty state
-		"DELETE",          // per-row delete
+		"/api/reports", // live reports come from the machine API
+		"DELETE",       // per-row delete
 		`"/api/reports?rule="`,
 		`"&target="`,                     // delete by the report's identity
 		"report-detail", "aria-expanded", // click-to-expand detail rows
+		"JSON.stringify(report", // the detail carries the full report body (reason, penalty, sample)
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("common.js lacks the review table's %q affordance, body:\n%s", want, js)
+		}
+	}
+}
+
+// The empty live set renders a clear empty state, never a bare table:
+// the page carries the empty-state slot beside the review table, and
+// the served JS swaps the table out for the empty state and back (the
+// swap itself is verified manually per the spec's user stories).
+func TestReportsPageEmptyStateReplacesBareTable(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
+	for _, want := range []string{`id="empty-state"`, `id="report-table"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /reports body lacks the empty-state surface's %s, body:\n%s", want, page)
+		}
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`getElementById("empty-state")`,  // the empty-state slot
+		`getElementById("report-table")`, // the table it replaces
+		"No live reports",                // the empty-state copy
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the empty state's %q; an empty report set must render the empty state, never a bare table, body:\n%s", want, js)
+		}
+	}
+}
+
+// The Reports page's right-aligned legend shows the live report count:
+// the header's legend slot is filled from the fetched report list - the
+// full live total, not the narrowed view (the fill itself is verified
+// manually per the spec's user stories).
+func TestReportsPageLegendShowsLiveReportCount(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
+	if !strings.Contains(page, `class="legend" id="legend"`) {
+		t.Errorf("GET /reports body lacks the header's right-aligned legend slot, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`getElementById("legend")`, // the legend fill
+		`fetchedReports.length`,    // the count comes from the live report list
+		"Live reports: ",           // the live report count's copy
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the legend's live report count %q; the Reports legend must show the count of live reports, body:\n%s", want, js)
 		}
 	}
 }
