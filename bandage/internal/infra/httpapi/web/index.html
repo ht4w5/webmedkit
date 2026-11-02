@@ -24,6 +24,12 @@
   <section id="panel-reports" class="tab-panel" hidden>
     <h2>Reports</h2>
     <p class="hint">Every live Report fetched from <code>GET /api/reports</code> - expired reports never reach the wire. Click a row for the full report body. Reload with Refresh.</p>
+    <div class="report-filter">
+      <label for="report-filter">Filter</label>
+      <input id="report-filter" type="search" autocomplete="off" spellcheck="false">
+      <span class="hint">unanchored, case-insensitive regex over rule, target, and body</span>
+      <p id="report-filter-error" class="filter-error" role="alert" hidden></p>
+    </div>
     <table class="reports">
       <thead>
         <tr><th>Rule</th><th>Target</th><th>Tracker reading</th><th>Updated</th></tr>

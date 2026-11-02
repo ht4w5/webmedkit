@@ -7,6 +7,7 @@
 	--muted: #666666;
 	--line: #cccccc;
 	--accent: #2f5d8a;
+	--danger: #c0392b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +17,7 @@
 		--muted: #9a9a9a;
 		--line: #3a3a3a;
 		--accent: #7fb3e0;
+		--danger: #e57373;
 	}
 }
 
@@ -127,6 +129,42 @@ main {
 .reports th {
 	color: var(--muted);
 	font-size: 0.8rem;
+}
+
+.report-filter {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin: 0.75rem 0;
+}
+
+.report-filter label {
+	color: var(--muted);
+	font-size: 0.85rem;
+}
+
+#report-filter {
+	flex: 1;
+	min-width: 12rem;
+	padding: 0.35rem 0.6rem;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	color: var(--fg);
+	background: transparent;
+	font: inherit;
+}
+
+#report-filter:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+.filter-error {
+	flex-basis: 100%;
+	margin: 0.25rem 0 0;
+	color: var(--danger);
+	font-size: 0.85rem;
 }
 
 .report-row {
