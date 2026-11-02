@@ -149,11 +149,11 @@ _Avoid_: excerpt, summary, example, evidence
 
 ### Operations
 
-**Statistic**:
+**Stats**:
 The human-facing cumulative-since-start snapshot of the daemon's
 counters and identity, served for operator eyes with no format contract.
 The Web Panel is an in-repo consumer of the snapshot.
-_Avoid_: stats, metrics
+_Avoid_: statistic, metrics
 
 **Metric**:
 A named, typed series in the daemon's machine contract for scrapers,
@@ -162,10 +162,11 @@ or removed.
 _Avoid_: statistic, stat
 
 **Web Panel**:
-The human-facing page served at the web root from assets embedded in the
-daemon binary: tabbed operator views over the Statistic and the reports,
-fetched client-side from the machine API and reloaded only on manual
-refresh.
+The human-facing pages served at the web root from assets embedded in
+the daemon binary: menu-selected per-view pages over the Stats snapshot
+and the reports, each a static shell whose data is fetched client-side
+from the machine API behind a shared header with a regexp search box;
+reload is manual only - the REFRESH control or a page load.
 _Avoid_: dashboard, UI, console
 
 ### Enforcement

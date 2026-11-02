@@ -7,134 +7,217 @@ import (
 	"testing"
 )
 
-// Web Panel serving tests: the page and its assets are embedded in the
-// daemon binary and load from the existing listener; the panel fetches
-// data from the machine API only, never an external asset. The panel JS
-// deliberately has no test harness (see the spec's Testing Decisions),
-// so every assertion here is about the SERVED surface - the page and
-// asset bytes on the wire - never the JS's internal structure; the
-// panel's interactive behavior is covered manually per the stories.
+// Web Panel serving tests: the Stats and Reports pages and their shared
+// assets are embedded in the daemon binary and load from the existing
+// listener; the pages fetch data from the machine API only, never an
+// external asset. The panel's JavaScript deliberately has no test
+// harness (see the spec's Testing Decisions), so every assertion here
+// is about the SERVED surface - the page and asset bytes on the wire -
+// never the JS's internal behavior; interactive behavior is covered
+// manually per the user stories.
 
-// GET / at the exact web root serves the panel page: the tab shell with
-// the Statistic and Reports slots, the Reports slot carrying the report
-// review table.
-func TestWebPanelRootServesPage(t *testing.T) {
+// The web root redirects to the Stats page's own address; the view
+// pages live at /stats and /reports (ADR 0022 reserved the web root for
+// pages; ADR 0025 records the page split).
+func TestWebRootRedirectsToStatsPage(t *testing.T) {
 	w := apiRequest(t, apiTestServer(nil), http.MethodGet, "/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET / status = %d, want 200", w.Code)
+	if w.Code != http.StatusFound {
+		t.Fatalf("GET / status = %d, want 302", w.Code)
 	}
-	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Errorf("GET / Content-Type = %q, want text/html", ct)
+	if loc := w.Header().Get("Location"); loc != "/stats" {
+		t.Errorf("GET / Location = %q, want /stats", loc)
 	}
-	body := w.Body.String()
-	for _, want := range []string{"Statistic", "Reports"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("GET / body lacks the %q tab slot, body:\n%s", want, body)
+}
+
+// Both view pages serve as HTML from the daemon's embedded assets.
+func TestViewPagesServeHTML(t *testing.T) {
+	srv := apiTestServer(nil)
+	for _, path := range []string{"/stats", "/reports"} {
+		w := apiRequest(t, srv, http.MethodGet, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200", path, w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", path, ct)
+		}
+		if w.Body.Len() == 0 {
+			t.Errorf("GET %s served an empty body", path)
 		}
 	}
 	// The stub's markup hook only - a legitimate placeholder= input
 	// attribute must never trip this guard.
-	if strings.Contains(body, `class="placeholder"`) {
-		t.Errorf("GET / body still carries the placeholder stub instead of the report review table, body:\n%s", body)
-	}
-}
-
-// The Reports tab lists one row per live Report - rule, target, tracker
-// reading, updated time - fetched from the machine API's /api/reports,
-// and an empty report set renders a clear empty state, never a blank
-// table. Expired reports never reach the wire (the repository never
-// returns them), so the list is exactly what a consumer would fetch.
-func TestWebPanelReportsTabListsRowsFromReportsAPI(t *testing.T) {
-	srv := apiTestServer(nil)
-	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
-	if !strings.Contains(js, "/api/reports") {
-		t.Errorf("panel.js does not fetch /api/reports; the Reports tab must list live reports, body:\n%s", js)
-	}
-	if !strings.Contains(js, "No live reports") {
-		t.Errorf("panel.js carries no empty-state copy for an empty report set, body:\n%s", js)
-	}
-	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
-	if !strings.Contains(page, `id="report-rows"`) {
-		t.Errorf("GET / body lacks the report review table's row slot, body:\n%s", page)
-	}
-	for _, want := range []string{"Rule", "Target", "Tracker reading", "Updated"} {
-		if !strings.Contains(page, want) {
-			t.Errorf("GET / body lacks the %q review-table column, body:\n%s", want, page)
+	for _, path := range []string{"/stats", "/reports"} {
+		if body := apiRequest(t, apiTestServer(nil), http.MethodGet, path).Body.String(); strings.Contains(body, `class="placeholder"`) {
+			t.Errorf("GET %s body still carries the placeholder stub instead of the view, body:\n%s", path, body)
 		}
 	}
 }
 
-// A report row expands to the full report body pretty-printed and
-// collapses again without disturbing the other rows - covered manually
-// per the stories; at the served level the page advertises the
-// click-to-expand affordance on the review table.
-func TestWebPanelReportsTabAdvertisesRowExpansion(t *testing.T) {
-	page := apiRequest(t, apiTestServer(nil), http.MethodGet, "/").Body.String()
-	if !strings.Contains(page, "Click a row for the full report body") {
-		t.Errorf("GET / body does not advertise expanding a row to the full report body, body:\n%s", page)
+// Both pages serve the replicated google/pprof web UI header: the brand
+// link to the Stats page, the VIEW menu whose dropdown lists Stats and
+// Reports with pprof's active-item styling on the current view, the
+// regexp search box (placeholder "Search regexp"), the REFRESH menu
+// item, and the right-aligned legend slot (ADR 0025).
+func TestViewPagesCarryReplicatedHeaderChrome(t *testing.T) {
+	srv := apiTestServer(nil)
+	for _, tc := range []struct{ path, active string }{
+		{"/stats", `<a class="active" href="/stats">Stats</a>`},
+		{"/reports", `<a class="active" href="/reports">Reports</a>`},
+	} {
+		page := apiRequest(t, srv, http.MethodGet, tc.path).Body.String()
+		for _, want := range []string{
+			`<a href="/stats">bandage</a>`, // brand link to the Stats page
+			`id="view"`,                    // the VIEW menu
+			`class="submenu"`,              // its dropdown
+			`placeholder="Search regexp"`,  // the regexp search box
+			`id="refresh"`,                 // the REFRESH menu item
+			`id="legend"`,                  // the legend slot
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("GET %s body lacks the header's %s, body:\n%s", tc.path, want, page)
+			}
+		}
+		// The VIEW dropdown lists both views and marks the current one
+		// with pprof's active-item styling.
+		for _, want := range []string{`>Stats</a>`, `>Reports</a>`, tc.active} {
+			if !strings.Contains(page, want) {
+				t.Errorf("GET %s body lacks the VIEW dropdown's %s, body:\n%s", tc.path, want, page)
+			}
+		}
 	}
 }
 
-// Reload is manual: the page offers the Refresh control, the served JS
-// fetches both machine API documents (/api/stats and /api/reports), and
-// nothing schedules a timer - there is no polling affordance in the
-// served text.
-func TestWebPanelRefreshIsManualOverMachineAPI(t *testing.T) {
+// Every hint paragraph is gone: the search box's placeholder is the
+// panel's only affordance text. None of the old tab shell's hint copy
+// survives on either page, and no page explains endpoints or reload
+// semantics.
+func TestViewPagesCarryNoHintCopy(t *testing.T) {
 	srv := apiTestServer(nil)
-	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
-	if !strings.Contains(page, `id="refresh"`) {
-		t.Errorf("GET / body lacks the manual Refresh control, body:\n%s", page)
+	for _, path := range []string{"/stats", "/reports"} {
+		page := apiRequest(t, srv, http.MethodGet, path).Body.String()
+		for _, banned := range []string{
+			`class="hint"`,
+			"Click a row for the full report body",
+			"unanchored, case-insensitive regex over rule, target, and body",
+			"Reload with Refresh",
+			"cumulative-since-start snapshot, fetched",
+			"Every live Report fetched from",
+			"/api",
+		} {
+			if strings.Contains(page, banned) {
+				t.Errorf("GET %s body carries hint copy %q; the search placeholder is the only affordance text, body:\n%s", path, banned, page)
+			}
+		}
 	}
-	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
+}
+
+// Every served asset opens with the short provenance notice: derived
+// from google/pprof, Copyright Google Inc., Apache License 2.0 (ADR
+// 0025 - the permanent notice obligation on the derived assets).
+func TestServedAssetsOpenWithPprofLicenseNotice(t *testing.T) {
+	srv := apiTestServer(nil)
+	for _, path := range []string{"/stats", "/reports", "/common.css", "/common.js"} {
+		body := apiRequest(t, srv, http.MethodGet, path).Body.String()
+		if line, _, _ := strings.Cut(body, "\n"); !strings.Contains(line, "derived from google/pprof") {
+			t.Errorf("GET %s does not open with the pprof provenance notice, first line %q", path, line)
+		}
+		for _, want := range []string{"google/pprof", "Copyright Google Inc.", "Apache License 2.0"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("GET %s body lacks the license notice's %q, body head:\n%s", path, want, head(body, 200))
+			}
+		}
+	}
+}
+
+// head returns the first n bytes of s, for compact failure messages.
+func head(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "..."
+	}
+	return s
+}
+
+// The shared stylesheet carries the replicated google/pprof design
+// language (light theme only): pprof's typography and link color, its
+// uppercase menu items and dropdown styling, its active-item highlight,
+// and its sticky table headers (ADR 0025).
+func TestPanelStylesheetCarriesPprofDesignLanguage(t *testing.T) {
+	css := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.css").Body.String()
+	for _, want := range []string{
+		"Roboto",                    // pprof's typography
+		"#2a66d9",                   // pprof's link color
+		"text-transform: uppercase", // pprof's uppercase menu items
+		"#6b82d6",                   // pprof's active menu item
+		"position: sticky",          // pprof's sticky table headers
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("common.css lacks the pprof design token %q, css head:\n%s", want, head(css, 200))
+		}
+	}
+	if strings.Contains(css, "prefers-color-scheme") {
+		t.Errorf("common.css carries a dark theme; the panel is light theme only, css head:\n%s", head(css, 200))
+	}
+}
+
+// The Stats page renders the Stats snapshot (the human-facing
+// cumulative-since-start document, no format contract - ADR 0006):
+// fetched from the machine API's /api/stats into the page's snapshot
+// slot (JSON rendering at this stage).
+func TestStatsPageRendersSnapshotFromStatsAPI(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	if !strings.Contains(page, `id="stats"`) {
+		t.Errorf("GET /stats body lacks the snapshot's render slot, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
 	if !strings.Contains(js, "/api/stats") {
-		t.Errorf("panel.js does not fetch /api/stats; the Statistic tab must render the snapshot, body:\n%s", js)
+		t.Errorf("common.js does not fetch /api/stats; the Stats page must render the snapshot, body:\n%s", js)
 	}
-	if !strings.Contains(js, "/api/reports") {
-		t.Errorf("panel.js does not fetch /api/reports; Refresh must reload the report list too, body:\n%s", js)
+}
+
+// The Reports page carries the report review table - rule, target,
+// tracker reading, updated - with its existing affordances: live
+// reports fetched from the machine API's /api/reports, a clear empty
+// state for an empty report set, click-to-expand detail rows, and a
+// per-row Delete that deletes exactly the reviewed Report by rule and
+// target via DELETE /api/reports.
+func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
+	if !strings.Contains(page, `id="report-rows"`) {
+		t.Errorf("GET /reports body lacks the review table's row slot, body:\n%s", page)
 	}
-	for _, timer := range []string{"setInterval", "setTimeout"} {
-		if strings.Contains(js, timer) {
-			t.Errorf("panel.js schedules %s; reload must be manual only, body:\n%s", timer, js)
+	for _, want := range []string{"Rule", "Target", "Tracker reading", "Updated", "Delete"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /reports body lacks the %q review-table column, body:\n%s", want, page)
 		}
 	}
-	if strings.Contains(strings.ToLower(page), "auto-refresh") {
-		t.Errorf("GET / body offers an auto-refresh affordance; reload must be manual only, body:\n%s", page)
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		"/api/reports",    // live reports come from the machine API
+		"No live reports", // the empty state
+		"DELETE",          // per-row delete
+		`"/api/reports?rule="`,
+		`"&target="`,                     // delete by the report's identity
+		"report-detail", "aria-expanded", // click-to-expand detail rows
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the review table's %q affordance, body:\n%s", want, js)
+		}
 	}
 }
 
-// Each report row offers a delete button that deletes exactly the
-// reviewed Report by its identity - rule and target as the query - via
-// DELETE /api/reports; after completion the list refetches so the
-// deleted Report is gone from the table (covered manually per the
-// stories; the DELETE contract itself is pinned at the HTTP seam).
-func TestWebPanelReportRowsOfferDeleteByIdentity(t *testing.T) {
+// The delete button's first click is a confirmation step; the served
+// text carries the confirmation controls and the copy stating that the
+// enforcement derived from the report will be withdrawn at the
+// enforcing consumer's next sync - naming no specific consumer, since
+// deployments may run any ban-rule consumer.
+func TestDeleteConfirmCopyAndControls(t *testing.T) {
 	srv := apiTestServer(nil)
-	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
-	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
-	if !strings.Contains(page, "Delete") {
-		t.Errorf("GET / body carries no per-row delete control, body:\n%s", page)
-	}
-	if !strings.Contains(js, "DELETE") {
-		t.Errorf("panel.js issues no DELETE; a per-row delete must call the reports API's DELETE, body:\n%s", js)
-	}
-	if !strings.Contains(js, `"/api/reports?rule="`) || !strings.Contains(js, `"&target="`) {
-		t.Errorf("panel.js does not address DELETE /api/reports by rule and target filters, body:\n%s", js)
-	}
-}
-
-// The delete button's first click is a confirmation step (covered
-// manually per the stories); the served text carries the confirmation
-// controls and the copy stating that the enforcement derived from the
-// report will be withdrawn at the enforcing consumer's next sync -
-// naming no specific consumer, since deployments may run any ban-rule
-// consumer.
-func TestWebPanelDeleteConfirmCopyAndControls(t *testing.T) {
-	srv := apiTestServer(nil)
-	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
-	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
 	for _, want := range []string{"Confirm", "Cancel"} {
 		if !strings.Contains(js, want) {
-			t.Errorf("the served panel JS lacks the %q control; cancelling must delete nothing, body:\n%s", want, js)
+			t.Errorf("common.js lacks the %q control; cancelling must delete nothing, body:\n%s", want, js)
 		}
 	}
 	for _, want := range []string{"enforcing consumer", "next sync", "withdraw"} {
@@ -142,45 +225,94 @@ func TestWebPanelDeleteConfirmCopyAndControls(t *testing.T) {
 			t.Errorf("the delete confirmation copy lacks %q; it must state that the enforcement derived from the report is withdrawn at the enforcing consumer's next sync, body:\n%s", want, js)
 		}
 	}
-	for _, body := range []string{js, page} {
-		if strings.Contains(body, "splint") {
-			t.Errorf("the panel names a specific consumer (%q); the delete confirmation must name no consumer, body:\n%s", "splint", body)
+	for _, path := range []string{"/stats", "/reports", "/common.css", "/common.js"} {
+		if body := apiRequest(t, srv, http.MethodGet, path).Body.String(); strings.Contains(body, "splint") {
+			t.Errorf("GET %s names a specific consumer (%q); the delete confirmation must name no consumer, body:\n%s", path, "splint", body)
 		}
 	}
 }
 
-// Every asset the page references resolves from the same listener: each
-// href/src points at a local path that serves non-empty bytes with the
-// content type its extension promises.
+// Reload is manual: both pages offer the REFRESH menu item, the served
+// JS refetches both views' data from the machine API (/api/stats and
+// /api/reports), and nothing schedules a timer - there is no polling
+// affordance in the served text.
+func TestRefreshIsManualOverMachineAPI(t *testing.T) {
+	srv := apiTestServer(nil)
+	for _, path := range []string{"/stats", "/reports"} {
+		if page := apiRequest(t, srv, http.MethodGet, path).Body.String(); !strings.Contains(page, `id="refresh"`) {
+			t.Errorf("GET %s body lacks the REFRESH menu item, body:\n%s", path, page)
+		}
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, doc := range []string{"/api/stats", "/api/reports"} {
+		if !strings.Contains(js, doc) {
+			t.Errorf("common.js does not fetch %s; REFRESH must refetch both views' data, body:\n%s", doc, js)
+		}
+	}
+	for _, timer := range []string{"setInterval", "setTimeout"} {
+		if strings.Contains(js, timer) {
+			t.Errorf("common.js schedules %s; reload must be manual only, body:\n%s", timer, js)
+		}
+	}
+	for _, path := range []string{"/stats", "/reports"} {
+		if page := apiRequest(t, srv, http.MethodGet, path).Body.String(); strings.Contains(strings.ToLower(page), "auto-refresh") {
+			t.Errorf("GET %s body offers an auto-refresh affordance; reload must be manual only, body:\n%s", path, page)
+		}
+	}
+}
+
+// The header's regexp search box filters the report review rows; an
+// invalid pattern is called out inline instead of silently matching
+// nothing (the filtering behavior itself is covered manually per the
+// stories).
+func TestSearchBoxFiltersWithInlineError(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
+	if !strings.Contains(page, `id="search-error"`) {
+		t.Errorf("GET /reports body lacks the inline search-error slot, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{"new RegExp", "invalid pattern"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the search box's %q behavior/copy, body:\n%s", want, js)
+		}
+	}
+}
+
+// Every asset the pages reference resolves from the same listener:
+// each href/src points at a local path that serves non-empty bytes with
+// the content type its extension promises.
 func TestWebPanelAssetsResolve(t *testing.T) {
 	srv := apiTestServer(nil)
-	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
-	refs := regexp.MustCompile(`(?:href|src)="([^"]+)"`).FindAllStringSubmatch(page, -1)
-	if len(refs) == 0 {
-		t.Fatalf("GET / body references no assets, body:\n%s", page)
-	}
-	for _, m := range refs {
-		ref := m[1]
-		if strings.HasPrefix(ref, "//") || strings.Contains(ref, ":") {
-			t.Errorf("asset reference %q is not a plain local path", ref)
-			continue
+	refs := regexp.MustCompile(`(?:href|src)="([^"]+)"`)
+	for _, path := range []string{"/stats", "/reports"} {
+		page := apiRequest(t, srv, http.MethodGet, path).Body.String()
+		matches := refs.FindAllStringSubmatch(page, -1)
+		if len(matches) == 0 {
+			t.Fatalf("GET %s body references no assets, body:\n%s", path, page)
 		}
-		// Resolve against the page's base URL like a browser would.
-		path := ref
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		w := apiRequest(t, srv, http.MethodGet, path)
-		if w.Code != http.StatusOK {
-			t.Errorf("GET %s = %d, want 200", path, w.Code)
-			continue
-		}
-		if w.Body.Len() == 0 {
-			t.Errorf("GET %s served an empty body", path)
-		}
-		if want, ok := assetContentType(path); ok {
-			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
-				t.Errorf("GET %s Content-Type = %q, want %s", path, ct, want)
+		for _, m := range matches {
+			ref := m[1]
+			if strings.HasPrefix(ref, "//") || strings.Contains(ref, ":") {
+				t.Errorf("asset reference %q is not a plain local path", ref)
+				continue
+			}
+			// Resolve against the page's base URL like a browser would.
+			if !strings.HasPrefix(ref, "/") {
+				ref = "/" + ref
+			}
+			w := apiRequest(t, srv, http.MethodGet, ref)
+			if w.Code != http.StatusOK {
+				t.Errorf("GET %s (from %s) = %d, want 200", ref, path, w.Code)
+				continue
+			}
+			if w.Body.Len() == 0 {
+				t.Errorf("GET %s served an empty body", ref)
+			}
+			if want, ok := assetContentType(ref); ok {
+				if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
+					t.Errorf("GET %s Content-Type = %q, want %s", ref, ct, want)
+				}
 			}
 		}
 	}
@@ -199,51 +331,16 @@ func assetContentType(path string) (string, bool) {
 	return "", false
 }
 
-// The panel fetches nothing external: no served asset may reference an
+// The panel fetches nothing external: no served asset may spell an
 // http(s) URL at all, so the daemon binary alone serves the whole panel.
 func TestWebPanelFetchesNoExternalAssets(t *testing.T) {
 	srv := apiTestServer(nil)
-	for _, path := range []string{"/", "/panel.css", "/panel.js"} {
+	for _, path := range []string{"/stats", "/reports", "/common.css", "/common.js"} {
 		body := apiRequest(t, srv, http.MethodGet, path).Body.String()
 		for _, scheme := range []string{"http://", "https://"} {
 			if strings.Contains(body, scheme) {
 				t.Errorf("GET %s body references external URL scheme %q; the panel must fetch no external assets", path, scheme)
 			}
 		}
-	}
-}
-
-// The Reports tab carries one filter box above the review table plus a
-// slot for an inline pattern error. The filter narrows the fetched
-// report list client-side - a panel convenience over stored Reports,
-// deliberately independent of the Filter DSL's regex matchers, which
-// evaluate Events during rule evaluation.
-func TestWebPanelReportsFilterBox(t *testing.T) {
-	page := apiRequest(t, apiTestServer(nil), http.MethodGet, "/").Body.String()
-	for _, want := range []string{`id="report-filter"`, `id="report-filter-error"`} {
-		if !strings.Contains(page, want) {
-			t.Errorf("GET / body lacks the report filter's %s, body:\n%s", want, page)
-		}
-	}
-	reports := strings.Index(page, `id="panel-reports"`)
-	filter := strings.Index(page, `id="report-filter"`)
-	if reports >= 0 && filter >= 0 && filter < reports {
-		t.Errorf("the report filter must sit on the Reports tab, body:\n%s", page)
-	}
-}
-
-// The filter behaves as a search: the served page states the semantics
-// (an unanchored, case-insensitive regular expression over rule, target
-// and body), and the served JS carries inline copy for a pattern that
-// fails to compile. The filtering behavior itself is covered manually
-// per the stories.
-func TestWebPanelReportsFilterSemanticsAndInlineError(t *testing.T) {
-	page := apiRequest(t, apiTestServer(nil), http.MethodGet, "/").Body.String()
-	if !strings.Contains(page, "unanchored, case-insensitive regex over rule, target, and body") {
-		t.Errorf("GET / body does not state the filter's semantics (unanchored, case-insensitive regex over rule, target, and body), body:\n%s", page)
-	}
-	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/panel.js").Body.String()
-	if !strings.Contains(js, "invalid pattern") {
-		t.Errorf("panel.js carries no inline error copy for an invalid pattern, body:\n%s", js)
 	}
 }
