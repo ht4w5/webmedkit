@@ -1,6 +1,6 @@
 # The report document
 
-`GET /reports` serves the canonical, versioned **report document**: the
+`GET /api/reports` serves the canonical, versioned **report document**: the
 contract a report consumer integrates against instead of reverse-engineering
 the code. This document defines version 0 - the envelope, every report
 field including the penalty, the timestamp rules, the canonical
@@ -89,7 +89,7 @@ first flagged
 `sample` is the event that justified the report's current stance, so
 the sample always backs the penalty the report carries.
 
-The report dies at its `expires_at` or when `DELETE /reports` removes
+The report dies at its `expires_at` or when `DELETE /api/reports` removes
 it; the next matching event then writes a fresh report at the
 accumulation's current stance - a dead report's stance is not
 remembered, and one event's writes climb the crossed rungs, each
@@ -183,11 +183,11 @@ they are pre-release and outside this contract.
 
 ## Canonical serialization
 
-A `GET /reports` response is the document as JSON with two-space
+A `GET /api/reports` response is the document as JSON with two-space
 indentation and keys in the order of the tables above, terminated by
 exactly one newline. Strings are HTML-escaped as Go's `encoding/json`
 does by default: `<`, `>` and `&` appear as the escapes
-`\u003c`, `\u003e` and `\u0026`. The example below is exactly what `GET /reports`
+`\u003c`, `\u003e` and `\u0026`. The example below is exactly what `GET /api/reports`
 returns (one trailing newline included), and the test compares the bytes.
 
 ## Example
@@ -238,6 +238,6 @@ within one leak second:
 ```
 
 The first fenced `json` block of this document is the canonical example;
-the test extracts it and compares it byte for byte with the `GET /reports`
+the test extracts it and compares it byte for byte with the `GET /api/reports`
 response of that scenario (the response carries one trailing newline the
 fence does not).

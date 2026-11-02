@@ -5,7 +5,7 @@ Reports live in one sqlite database (`db.sqlite.path`, e.g.
 (rule, Target). Reports survive restarts; tracker state is memory-only
 (ADR 0002). The file database runs `journal_mode=WAL` with
 `synchronous=NORMAL`: writes go through a single connection and API
-reads use their own, so `GET /reports` never queues behind upserts
+reads use their own, so `GET /api/reports` never queues behind upserts
 ([ADR 0009](adr/0009-wal-with-a-separate-read-path.md)).
 
 ## The files beside the database

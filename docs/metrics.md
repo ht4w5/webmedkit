@@ -13,7 +13,7 @@ reproduced byte-for-byte by a test
 (`bandage/internal/infra/httpapi/metricsdoc_test.go`), so this contract
 and the implementation cannot drift.
 
-`GET /stats` remains the human-facing **Statistic**: the same
+`GET /api/stats` remains the human-facing **Statistic**: the same
 cumulative-since-start snapshot for operator eyes, unversioned and with
 no format contract ([ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)).
 Neither surface's contract constrains the other. Each endpoint takes
@@ -36,7 +36,7 @@ newline); every line is newline-terminated; families appear in a fixed
 deterministic order. The exposition is rendered by hand from a plain
 snapshot - no Prometheus client library
 ([ADR 0014](adr/0014-metrics-are-a-hand-rendered-machine-contract.md)).
-Each response is one point-in-time snapshot: the `/stats` snapshot block and
+Each response is one point-in-time snapshot: the `/api/stats` snapshot block and
 the runtime block are alike read at scrape time, so families within a
 single response never mix sampling times.
 
@@ -103,7 +103,7 @@ and alert rules that name families from this contract survive upgrades.
 ## Exposure
 
 `GET /metrics` is a read-only ops surface on the same unauthenticated
-listener as `/ping`, `/stats` and the report API: no authentication, no
+listener as `/ping`, `/api/stats` and the report API: no authentication, no
 TLS, no configuration knob, always registered. This is the exposure
 stance [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
 already accepted, carried over unchanged. The endpoint is GET only:
