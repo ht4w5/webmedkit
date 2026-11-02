@@ -396,9 +396,15 @@ func (p *parser) parseSent(kw token) (Filter, error) {
 }
 
 func (p *parser) parseSize(kw token) (Filter, error) {
+	if p.tok.kind == tokWord && p.tok.text == "unknown" {
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		return NewFilterSizeUnknown()
+	}
 	op := p.tok
 	if op.kind != tokGte && op.kind != tokLte {
-		return nil, p.errorf(op, `expected ">=" or "<=" after %q, got %s`, kw.text, op.desc())
+		return nil, p.errorf(op, `expected ">=", "<=", or "unknown" after %q, got %s`, kw.text, op.desc())
 	}
 	if err := p.advance(); err != nil {
 		return nil, err

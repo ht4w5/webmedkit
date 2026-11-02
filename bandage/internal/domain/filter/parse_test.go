@@ -57,6 +57,8 @@ func treeString(f Filter) string {
 		return "size >= " + ltoa(v.limit)
 	case *FilterSizeAtMost:
 		return "size <= " + ltoa(v.limit)
+	case *FilterSizeUnknown:
+		return "size unknown"
 	default:
 		return "?"
 	}
@@ -110,6 +112,8 @@ func TestParseTrees(t *testing.T) {
 		{"size binary k", "size >= 10k", "size >= 10240"},
 		{"size binary m case-insensitive", "size >= 10M", "size >= 10485760"},
 		{"size binary g", "size >= 2g", "size >= 2147483648"},
+		{"size unknown", "size unknown", "size unknown"},
+		{"size unknown in combinators", "not size unknown and size >= 0", "and(not(size unknown), size >= 0)"},
 
 		// String escapes unescape to the matched value.
 		{"string escapes", `path "a\"b\\c\nd\te"`, "path \"a\"b\\c\nd\te\""},
@@ -204,8 +208,14 @@ func TestParseErrorPositions(t *testing.T) {
 		{"sent decimal size is a word", "sent >= 0.1", `filter: 1:9: expected a size after "sent", got "0.1"`},
 		{"sent MB spelling is a word", "sent >= 10MB", `filter: 1:9: expected a size after "sent", got "10MB"`},
 		{"sent size overflow", "sent >= 9223372036854775807g", "filter: 1:9: size is out of range"},
-		{"size missing operator", "size", `filter: 1:5: expected ">=" or "<=" after "size", got end of filter`},
-		{"size bare number operator", "size 5", `filter: 1:6: expected ">=" or "<=" after "size", got "5"`},
+		{"size missing operator", "size", `filter: 1:5: expected ">=", "<=", or "unknown" after "size", got end of filter`},
+		{"size bare number operator", "size 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "5"`},
+		{"size known slip names unknown", "size known", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "known"`},
+		{"size bare word slip names unknown", "size maybe", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "maybe"`},
+		{"size known slip is case-sensitive", "size Known", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "Known"`},
+		{"size equality operator does not exist", "size = 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "="`},
+		{"size double equality operator does not exist", "size == 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "=="`},
+		{"size strict gt operator does not exist", "size > 5", `filter: 1:6: expected ">="`},
 		{"size non-size value", `size >= x`, `filter: 1:9: expected a size after "size", got "x"`},
 		{"size missing limit", `size >=`, `filter: 1:8: expected a size after "size", got end of filter`},
 		{"size overflow", "size >= 9223372036854775807g", "filter: 1:9: size is out of range"},
@@ -271,6 +281,7 @@ func TestParseExamples(t *testing.T) {
 		`src 10.0.0.0/8 and (method GET or method HEAD) and path prefix "/api"`,
 		`not agent keyword "curl" and sent >= 10m`,
 		`size >= 100m and size <= 1g and path prefix "/releases/"`,
+		`not size unknown and (size >= 1g or path prefix "/releases/")`,
 		`agent prefix "curl/" or agent suffix ".0"`,
 		`path regex "\\.(php|asp)$" or agent regex "(?i)bot"`,
 		"status class 5 or none",
