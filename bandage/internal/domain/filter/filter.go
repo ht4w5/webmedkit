@@ -364,3 +364,45 @@ func NewFilterSentAtMost(limit int64) (*FilterSentAtMost, error) {
 func (fsam *FilterSentAtMost) Match(event *domain.Event) bool {
 	return event.SentBytes <= fsam.limit
 }
+
+// FilterSizeAtLeast matches events whose Filesize estimate is known and at
+// least limit bytes (inclusive); an unknown-size event is never matched
+// (size 0 means unknown, ADR 0024).
+type FilterSizeAtLeast struct {
+	// Unit B.
+	limit int64
+}
+
+// NewFilterSizeAtLeast returns a filter matching events whose known Filesize
+// estimate is at least limit bytes (inclusive).
+func NewFilterSizeAtLeast(limit int64) (*FilterSizeAtLeast, error) {
+	if limit < 0 {
+		return nil, errors.New("limit must be greater or equal to 0")
+	}
+	return &FilterSizeAtLeast{limit: limit}, nil
+}
+
+func (fsal *FilterSizeAtLeast) Match(event *domain.Event) bool {
+	return event.SizeBytes != domain.FilesizeUnknown && event.SizeBytes >= fsal.limit
+}
+
+// FilterSizeAtMost matches events whose Filesize estimate is known and at
+// most limit bytes (inclusive); an unknown-size event is never matched
+// (size 0 means unknown, ADR 0024).
+type FilterSizeAtMost struct {
+	// Unit B.
+	limit int64
+}
+
+// NewFilterSizeAtMost returns a filter matching events whose known Filesize
+// estimate is at most limit bytes (inclusive).
+func NewFilterSizeAtMost(limit int64) (*FilterSizeAtMost, error) {
+	if limit < 0 {
+		return nil, errors.New("limit must be greater or equal to 0")
+	}
+	return &FilterSizeAtMost{limit: limit}, nil
+}
+
+func (fsam *FilterSizeAtMost) Match(event *domain.Event) bool {
+	return event.SizeBytes != domain.FilesizeUnknown && event.SizeBytes <= fsam.limit
+}

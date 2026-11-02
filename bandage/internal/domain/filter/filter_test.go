@@ -120,6 +120,25 @@ func TestFilterMatch(t *testing.T) {
 		{"sent g is binary", "sent >= 1g", func(e *domain.Event) { e.SentBytes = 1 << 30 }, true},
 		{"sent zero limit", "sent >= 0", nil, true},
 
+		// size: >= / <= over the Filesize estimate, inclusive at the boundary.
+		// The base event's Filesize is unknown; these set a known one.
+		{"size gte inclusive boundary", "size >= 1024", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size gte above", "size >= 1023", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size gte below", "size >= 1025", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size lte inclusive boundary", "size <= 1024", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte below", "size <= 1025", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte above", "size <= 1023", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size k is binary", "size >= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size k decimal does not match", "size >= 1k", func(e *domain.Event) { e.SizeBytes = 1000 }, false},
+		{"size m is binary", "size <= 1m", func(e *domain.Event) { e.SizeBytes = 1 << 20 }, true},
+		{"size g is binary", "size >= 1g", func(e *domain.Event) { e.SizeBytes = 1 << 30 }, true},
+
+		// A comparison claims only events whose Filesize is known (size 0 means unknown).
+		{"size gte skips unknown", "size >= 0", nil, false},
+		{"size lte skips unknown", "size <= 1g", nil, false},
+		{"size gte zero is known-size", "size >= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte zero matches nothing", "size <= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+
 		// combinators: precedence not > and > or, parentheses override.
 		{"and all match", `method GET and status 200`, nil, true},
 		{"and one mismatch", `method GET and status 404`, nil, false},
@@ -187,6 +206,8 @@ func TestConstructorValidation(t *testing.T) {
 		{"class above range", func() error { _, err := NewFilterStatusClass(6); return err }()},
 		{"sent at least negative", func() error { _, err := NewFilterSentAtLeast(-1); return err }()},
 		{"sent at most negative", func() error { _, err := NewFilterSentAtMost(-1); return err }()},
+		{"size at least negative", func() error { _, err := NewFilterSizeAtLeast(-1); return err }()},
+		{"size at most negative", func() error { _, err := NewFilterSizeAtMost(-1); return err }()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,6 +234,12 @@ func TestConstructorValidation(t *testing.T) {
 	}
 	if _, err := NewFilterAgentRegex(`(?i)curl`); err != nil {
 		t.Errorf("NewFilterAgentRegex error: %v", err)
+	}
+	if _, err := NewFilterSizeAtLeast(0); err != nil {
+		t.Errorf("NewFilterSizeAtLeast error: %v", err)
+	}
+	if _, err := NewFilterSizeAtMost(0); err != nil {
+		t.Errorf("NewFilterSizeAtMost error: %v", err)
 	}
 }
 

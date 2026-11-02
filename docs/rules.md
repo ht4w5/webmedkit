@@ -64,9 +64,20 @@ Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
 `path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
 `keyword`, and `regex` forms),
-and `sent >= 1MB` / `sent <= 1MB` (size units are allowed only here) -
+`sent >= 1m` / `sent <= 1m`, and `size >= 100m` / `size <= 1m`
+(size units `k`, `m`, `g` are binary - `1k` is 1024 bytes - and are
+allowed only after `sent` and `size`) -
 combined with `and`, `or`, `not`, where `not` binds tighter than `and`,
 which binds tighter than `or`.
+
+`sent` decides over the bytes the event actually transferred; `size`
+decides over the served content's Filesize estimate
+([GLOSSARY.md](../GLOSSARY.md)) - never conflated. A `size` comparison
+is inclusive at the boundary and considers only events whose Filesize
+is known: an event whose size is unknown is never claimed by `size >=`
+or `size <=`, so `size >= 0` matches exactly the events whose size is
+known and `size <= 0` matches nothing (size 0 means unknown,
+[ADR 0024](adr/0024-size-0-means-unknown.md)).
 
 `path regex "…"` and `agent regex "…"` compile their pattern when the
 rules load, with the DSL's string escapes (a regex `\.` is written
@@ -89,6 +100,12 @@ enrichment state - no observation, no cache update. A widened filter
 cannot poison the estimate: what feeds it is the **Sampling rule**
 ([GLOSSARY.md](../GLOSSARY.md)), fixed in code and stricter than any
 Filter ([ADR 0019](adr/0019-filesize-from-response-sizes.md)).
+
+Beware `size` in `enrichment.filter`: the gate runs after the derived
+fields are reset and before the Filesize estimate is looked up, so every
+event reaches it with an unknown size - a `size` comparison there never
+matches and silently disables enrichment. Deliberately accepted, not
+rejected at load.
 
 ```yaml
 version: 0

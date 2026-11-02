@@ -9,7 +9,8 @@ import (
 var benchMatch bool
 
 // leafCases pairs each leaf filter type with sources that do and do not match
-// baseEvent.
+// the benchmark event - baseEvent with a known Filesize, so the size leaves
+// have a match case.
 var leafCases = []struct{ name, match, miss string }{
 	{"remote-addr", `src 203.0.113.0/24`, `src 198.51.100.0/24`},
 	{"method", `method GET`, `method POST`},
@@ -25,6 +26,8 @@ var leafCases = []struct{ name, match, miss string }{
 	{"status-class", `status class 2`, `status class 5`},
 	{"sent-at-least", `sent >= 1k`, `sent >= 10m`},
 	{"sent-at-most", `sent <= 10k`, `sent <= 100`},
+	{"size-at-least", `size >= 1k`, `size >= 10m`},
+	{"size-at-most", `size <= 10m`, `size <= 1k`},
 }
 
 // benchFilter parses src or fails the benchmark: fixture construction is
@@ -56,6 +59,7 @@ func benchChain(b *testing.B, n int, matchLast bool) []Filter {
 
 func BenchmarkFilterMatch(b *testing.B) {
 	ev := baseEvent()
+	ev.SizeBytes = 1 << 20 // known Filesize: a comparison matches nothing without one
 	b.Run("leaf", func(b *testing.B) {
 		for _, leaf := range leafCases {
 			for _, path := range []struct {
