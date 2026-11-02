@@ -139,6 +139,30 @@ func TestFilterMatch(t *testing.T) {
 		{"size gte zero is known-size", "size >= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
 		{"size lte zero matches nothing", "size <= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
 
+		// size unknown: exactly the events whose Filesize is unknown (size 0 means unknown).
+		{"size unknown matches unknown", "size unknown", nil, true},
+		{"size unknown skips known", "size unknown", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size unknown skips minimal known size", "size unknown", func(e *domain.Event) { e.SizeBytes = 1 }, false},
+		{"not size unknown is the complement", "not size unknown", nil, false},
+		{"not size unknown matches known", "not size unknown", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+
+		// Partition pinned: comparisons never claim unknowns, >= 0 is "known", <= 0 matches nothing.
+		{"size gte zero matches minimal known size", "size >= 0", func(e *domain.Event) { e.SizeBytes = 1 }, true},
+		{"size lte zero matches nothing even at minimal size", "size <= 0", func(e *domain.Event) { e.SizeBytes = 1 }, false},
+		{"size unknown or known covers unknown", "size unknown or size >= 0", nil, true},
+		{"size unknown or known covers known", "size unknown or size >= 0", func(e *domain.Event) { e.SizeBytes = 1 << 30 }, true},
+		{"size unknown and known never overlap on unknown", "size unknown and size >= 0", nil, false},
+		{"size unknown and known never overlap on known", "size unknown and size >= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+
+		// size unknown composes like every predicate.
+		{"size unknown and match", "size unknown and method GET", nil, true},
+		{"size unknown and mismatch", "size unknown and method POST", nil, false},
+		{"size unknown or comparison", "size unknown or size >= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"not size unknown and comparison", "not size unknown and size <= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"parens with size unknown", "(size unknown or size >= 1g) and method GET", nil, true},
+		{"parens change size unknown result", "(size unknown or size >= 1g) and method POST", nil, false},
+		{"symbol combinators with size unknown", "size unknown && ! status 404", nil, true},
+
 		// combinators: precedence not > and > or, parentheses override.
 		{"and all match", `method GET and status 200`, nil, true},
 		{"and one mismatch", `method GET and status 404`, nil, false},
@@ -240,6 +264,9 @@ func TestConstructorValidation(t *testing.T) {
 	}
 	if _, err := NewFilterSizeAtMost(0); err != nil {
 		t.Errorf("NewFilterSizeAtMost error: %v", err)
+	}
+	if _, err := NewFilterSizeUnknown(); err != nil {
+		t.Errorf("NewFilterSizeUnknown error: %v", err)
 	}
 }
 

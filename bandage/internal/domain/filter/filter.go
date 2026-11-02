@@ -406,3 +406,17 @@ func NewFilterSizeAtMost(limit int64) (*FilterSizeAtMost, error) {
 func (fsam *FilterSizeAtMost) Match(event *domain.Event) bool {
 	return event.SizeBytes != domain.FilesizeUnknown && event.SizeBytes <= fsam.limit
 }
+
+// FilterSizeUnknown matches events whose Filesize estimate is unknown - the
+// complement of the size comparisons (size 0 means unknown, ADR 0024).
+type FilterSizeUnknown struct{}
+
+// NewFilterSizeUnknown returns a filter matching events whose Filesize
+// estimate is unknown; it takes no argument, like any/none.
+func NewFilterSizeUnknown() (*FilterSizeUnknown, error) {
+	return &FilterSizeUnknown{}, nil
+}
+
+func (fsu *FilterSizeUnknown) Match(event *domain.Event) bool {
+	return event.SizeBytes == domain.FilesizeUnknown
+}
