@@ -255,17 +255,23 @@ func (d *Daemon) sweep() {
 		case <-d.stopSweep:
 			return
 		case <-t.C:
-			d.cache.SweepExpired()
-			d.logStatistics()
-			n, err := d.sweepOnce(d.ctx)
-			if err != nil {
-				d.logger.Error().Err(err).Msg("sweep expired reports")
-				continue
-			}
-			if n > 0 {
-				d.logger.Info().Int("count", n).Msg("swept expired reports")
-			}
+			d.sweepTick()
 		}
+	}
+}
+
+// sweepTick runs one sweep pass: expires cache entries, logs the
+// statistics record and deletes expired reports.
+func (d *Daemon) sweepTick() {
+	d.cache.SweepExpired()
+	d.logStatistics()
+	n, err := d.sweepOnce(d.ctx)
+	if err != nil {
+		d.logger.Error().Err(err).Msg("sweep expired reports")
+		return
+	}
+	if n > 0 {
+		d.logger.Debug().Int("count", n).Msg("swept expired reports")
 	}
 }
 
@@ -273,7 +279,7 @@ func (d *Daemon) sweep() {
 // from the same Stats snapshot /api/stats serves.
 func (d *Daemon) logStatistics() {
 	s := d.Stats()
-	d.logger.Info().
+	d.logger.Debug().
 		Int64("received", s.Pipeline.Received).Int64("parsed", s.Pipeline.Parsed).Int64("dropped", s.Pipeline.Dropped).
 		Int64("cache_gets", s.TrackerCache.Gets).Int64("cache_sets", s.TrackerCache.Sets).Int64("cache_misses", s.TrackerCache.Misses).
 		Int64("cache_evictions", s.TrackerCache.Evictions).Int64("cache_size", s.TrackerCache.Size).
