@@ -45,7 +45,7 @@ type EventParser interface {
 }
 
 // counters is the drop accounting behind the statistics log and
-// /stats (ADR 0006).
+// /api/stats (ADR 0006).
 type counters struct {
 	Received int64 // raw lines received from the wire
 	Parsed   int64 // lines parsed into events
@@ -270,7 +270,7 @@ func (d *Daemon) sweep() {
 }
 
 // logStatistics emits the periodic statistics record (ADR 0006)
-// from the same Stats snapshot /stats serves.
+// from the same Stats snapshot /api/stats serves.
 func (d *Daemon) logStatistics() {
 	s := d.Stats()
 	d.logger.Info().
@@ -344,7 +344,7 @@ func (d *Daemon) counters() counters {
 	}
 }
 
-// Stats assembles the /stats snapshot (httpapi.StatsSource): build
+// Stats assembles the /api/stats snapshot (httpapi.StatsSource): build
 // identity, pipeline counters and cache statistics since start.
 func (d *Daemon) Stats() httpapi.Stats {
 	c := d.counters()

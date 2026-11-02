@@ -101,7 +101,7 @@ size - `net.core.rmem_max` on Linux). If bandage's reader lags behind a
 burst, **the kernel drops datagrams from the queue - silently**:
 
 - dropped datagrams never reach the pipeline, so they appear in
-  neither `received` nor `dropped` on `GET /stats` (`dropped` counts
+  neither `received` nor `dropped` on `GET /api/stats` (`dropped` counts
   parse failures only). Kernel loss is invisible in bandage's counters;
 - watch the host's UDP counters instead - `nstat -az UdpRcvbufErrors`
   or `netstat -su` (receive buffer errors) - and treat any growth as

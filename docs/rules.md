@@ -47,7 +47,7 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
   write. Only the tracker cache's TTL and eviction restart a record.
 - A failed report write is not a Trigger outcome: the tracker stays
   intact and the next matching event retries the report.
-- Deleting a report (`DELETE /reports`) or letting its `ttl` expire
+- Deleting a report (`DELETE /api/reports`) or letting its `ttl` expire
   re-arms writing: the next matching event writes a fresh report at the
   accumulation's current stance - a dead report's stance is not
   remembered, and one event's writes climb the crossed rungs, each
@@ -399,7 +399,7 @@ How it behaves:
   prefix - per address for IPv4, per /64 for IPv6. A tracker-less rule
   has no `target_prefix` to configure; each offending source gets one
   report of its own.
-- Re-arm: `DELETE /reports?rule=ua-trip&target=203.0.113.7` or expiry
+- Re-arm: `DELETE /api/reports?rule=ua-trip&target=203.0.113.7` or expiry
   at `ttl` re-arms writing - the next matching event writes a fresh
   report immediately. A still-offending source keeps matching (and its
   other actions keep running) while suppressed, so nothing is lost by

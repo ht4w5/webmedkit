@@ -45,10 +45,10 @@ func (g *gatedListStore) List(ctx context.Context, q report.Query) ([]domain.Rep
 	return g.ReportRepository.List(ctx, q)
 }
 
-// fetchReports issues GET /reports off the test goroutine (t helpers must not
+// fetchReports issues GET /api/reports off the test goroutine (t helpers must not
 // run from a goroutine).
 func fetchReports(addr string) (int, reportDoc, error) {
-	resp, err := apiClient.Get("http://" + addr + "/reports")
+	resp, err := apiClient.Get("http://" + addr + "/api/reports")
 	if err != nil {
 		return 0, reportDoc{}, err
 	}
@@ -79,16 +79,16 @@ func waitQuery(t *testing.T, res <-chan queryResult) (int, reportDoc) {
 	select {
 	case r := <-res:
 		if r.err != nil {
-			t.Fatalf("GET /reports: %v", r.err)
+			t.Fatalf("GET /api/reports: %v", r.err)
 		}
 		return r.status, r.doc
 	case <-time.After(5 * time.Second):
-		t.Fatal("GET /reports waited for the store")
+		t.Fatal("GET /api/reports waited for the store")
 	}
 	return 0, reportDoc{}
 }
 
-// TestQueryDuringInflightWriteDoesNotWait: GET /reports answers while the
+// TestQueryDuringInflightWriteDoesNotWait: GET /api/reports answers while the
 // report write is still in flight and has not landed.
 func TestQueryDuringInflightWriteDoesNotWait(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -116,7 +116,7 @@ func TestQueryDuringInflightWriteDoesNotWait(t *testing.T) {
 		res <- queryResult{status, doc, err}
 	}()
 	if status, doc := waitQuery(t, res); status != http.StatusOK {
-		t.Errorf("GET /reports status = %d, want 200", status)
+		t.Errorf("GET /api/reports status = %d, want 200", status)
 	} else if len(doc.Reports) != 0 {
 		t.Errorf("query during the in-flight write saw %d reports, want 0 (the write has not landed)", len(doc.Reports))
 	}
@@ -130,7 +130,7 @@ func TestQueryDuringInflightWriteDoesNotWait(t *testing.T) {
 }
 
 // TestWriteDuringInflightQueryDoesNotWait: the Trigger's upsert lands while a
-// GET /reports is still being served.
+// GET /api/reports is still being served.
 func TestWriteDuringInflightQueryDoesNotWait(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	dbPath := filepath.Join(t.TempDir(), "reports.db")
@@ -170,6 +170,6 @@ func TestWriteDuringInflightQueryDoesNotWait(t *testing.T) {
 	// Released, the query completes on its own time.
 	store.release()
 	if status, _ := waitQuery(t, res); status != http.StatusOK {
-		t.Errorf("GET /reports status = %d, want 200", status)
+		t.Errorf("GET /api/reports status = %d, want 200", status)
 	}
 }

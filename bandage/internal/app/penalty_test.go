@@ -191,6 +191,6 @@ func TestE2ERearmedWriteCarriesThenLoadedPenalty(t *testing.T) {
 	}
 	letExpire := func(t *testing.T, d *testDaemon) {} // the 1h ttl expires at 19:00
 
-	rearmScenario(t, "after DELETE /reports", deleteReport, 10*time.Minute, "2025-10-17T18:10:00Z")
+	rearmScenario(t, "after DELETE /api/reports", deleteReport, 10*time.Minute, "2025-10-17T18:10:00Z")
 	rearmScenario(t, "after expiry", letExpire, 90*time.Minute, "2025-10-17T19:30:00Z") // 19:30, past the 19:00 expiry
 }

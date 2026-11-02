@@ -132,7 +132,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The /stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker bucket.
+	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker bucket.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}

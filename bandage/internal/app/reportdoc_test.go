@@ -29,12 +29,12 @@ chains:
               rate: 1MB
 `
 
-// getReportsRaw issues GET /reports and returns the raw response body.
+// getReportsRaw issues GET /api/reports and returns the raw response body.
 func (d *testDaemon) getReportsRaw(t *testing.T) []byte {
 	t.Helper()
-	resp, err := apiClient.Get("http://" + d.apiAddr() + "/reports")
+	resp, err := apiClient.Get("http://" + d.apiAddr() + "/api/reports")
 	if err != nil {
-		t.Fatalf("GET /reports: %v", err)
+		t.Fatalf("GET /api/reports: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -42,14 +42,14 @@ func (d *testDaemon) getReportsRaw(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /reports status = %d, want 200 (body %q)", resp.StatusCode, body)
+		t.Fatalf("GET /api/reports status = %d, want 200 (body %q)", resp.StatusCode, body)
 	}
 	return body
 }
 
-// TestE2EReportsDocumentIsIndentedJSON: GET /reports serves the
+// TestE2EReportsDocumentIsIndentedJSON: GET /api/reports serves the
 // canonical v0 serialization -- two-space indented JSON terminated by
-// exactly one newline (the readable shape /stats established).
+// exactly one newline (the readable shape /api/stats established).
 func TestE2EReportsDocumentIsIndentedJSON(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", canonicalRules)
@@ -61,10 +61,10 @@ func TestE2EReportsDocumentIsIndentedJSON(t *testing.T) {
 
 	body := d.getReportsRaw(t)
 	if !bytes.HasPrefix(body, []byte("{\n  \"")) {
-		t.Errorf("GET /reports body = %q, want indented JSON", body)
+		t.Errorf("GET /api/reports body = %q, want indented JSON", body)
 	}
 	if !bytes.HasSuffix(body, []byte("}\n")) {
-		t.Errorf("GET /reports body = %q, want one trailing newline", body)
+		t.Errorf("GET /api/reports body = %q, want one trailing newline", body)
 	}
 }
 
@@ -102,7 +102,7 @@ const (
 	docEventTime2 = "1760723975.123" // 2025-10-17T17:59:35Z
 )
 
-// TestE2EReportsDocumentMatchesDocsExample: the document GET /reports
+// TestE2EReportsDocumentMatchesDocsExample: the document GET /api/reports
 // serves for the canonical scenario equals the example fenced in
 // docs/reports.md byte for byte, so the published contract and the
 // implementation cannot drift. json.Encoder.Encode terminates the
@@ -123,13 +123,13 @@ func TestE2EReportsDocumentMatchesDocsExample(t *testing.T) {
 	d.waitProcessed(t, 2)
 
 	body := d.getReportsRaw(t)
-	t.Logf("GET /reports body (the doc example is authored from this run):\n%s", body)
+	t.Logf("GET /api/reports body (the doc example is authored from this run):\n%s", body)
 	got, found := bytes.CutSuffix(body, []byte("\n"))
 	if !found {
-		t.Fatalf("GET /reports body = %q, want one trailing newline", body)
+		t.Fatalf("GET /api/reports body = %q, want one trailing newline", body)
 	}
 	want := docsExample(t, "../../../docs/reports.md")
 	if !bytes.Equal(got, []byte(want)) {
-		t.Errorf("GET /reports document does not match the docs/reports.md example\n--- got ---\n%s--- want ---\n%s", got, want)
+		t.Errorf("GET /api/reports document does not match the docs/reports.md example\n--- got ---\n%s--- want ---\n%s", got, want)
 	}
 }

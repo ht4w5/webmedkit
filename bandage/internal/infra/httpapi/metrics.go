@@ -13,7 +13,7 @@ import (
 // The response states its format version rather than negotiating one.
 const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 
-// One point-in-time sample: the snapshot /stats serves plus a Runtime sample,
+// One point-in-time sample: the snapshot /api/stats serves plus a Runtime sample,
 // both read at scrape time by the handler and never by the renderer.
 type metricsSnapshot struct {
 	stats   Stats
