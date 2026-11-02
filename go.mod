@@ -3,6 +3,7 @@ module github.com/HT4w5/webmedkit
 go 1.27.0
 
 require (
+	github.com/bytedance/sonic v1.15.5
 	github.com/google/nftables v0.3.0
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/pflag v1.0.10
@@ -13,15 +14,21 @@ require (
 )
 
 require (
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic/loader v0.5.3 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	modernc.org/libc v1.77.1 // indirect
