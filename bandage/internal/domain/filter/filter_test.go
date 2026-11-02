@@ -86,10 +86,16 @@ func TestFilterMatch(t *testing.T) {
 		{"path regex case-sensitive", `path regex "RELEASES"`, nil, false},
 		{"path regex case-insensitive flag", `path regex "(?i)RELEASES"`, nil, true},
 
-		// agent: exact / keyword / regex, case-sensitive.
+		// agent: exact / prefix / suffix / keyword / regex, case-sensitive.
 		{"agent exact", `agent "curl/8.5.0"`, nil, true},
 		{"agent exact mismatch", `agent "curl"`, nil, false},
 		{"agent exact case-sensitive", `agent "CURL/8.5.0"`, nil, false},
+		{"agent prefix match", `agent prefix "curl/"`, nil, true},
+		{"agent prefix mismatch", `agent prefix "wget/"`, nil, false},
+		{"agent prefix case-sensitive", `agent prefix "CURL/"`, nil, false},
+		{"agent suffix match", `agent suffix ".0"`, nil, true},
+		{"agent suffix mismatch", `agent suffix ".img"`, nil, false},
+		{"agent suffix case-sensitive", `agent suffix "T/1.0"`, func(e *domain.Event) { e.Agent = "Wget/1.0" }, false},
 		{"agent keyword match", `agent keyword "curl"`, nil, true},
 		{"agent keyword mismatch", `agent keyword "wget"`, nil, false},
 		{"agent regex match", `agent regex "curl"`, nil, true},
@@ -178,6 +184,8 @@ func TestConstructorValidation(t *testing.T) {
 		{"empty path pattern", func() error { _, err := NewFilterPathRegex(""); return err }()},
 		{"invalid path pattern", func() error { _, err := NewFilterPathRegex("("); return err }()},
 		{"empty agent", func() error { _, err := NewFilterAgent(""); return err }()},
+		{"empty agent prefix", func() error { _, err := NewFilterAgentPrefix(""); return err }()},
+		{"empty agent suffix", func() error { _, err := NewFilterAgentSuffix(""); return err }()},
 		{"empty agent keyword", func() error { _, err := NewFilterAgentKeyword(""); return err }()},
 		{"empty agent pattern", func() error { _, err := NewFilterAgentRegex(""); return err }()},
 		{"invalid agent pattern", func() error { _, err := NewFilterAgentRegex("["); return err }()},
@@ -210,6 +218,12 @@ func TestConstructorValidation(t *testing.T) {
 	}
 	if _, err := NewFilterPathRegex(`\.iso$`); err != nil {
 		t.Errorf("NewFilterPathRegex error: %v", err)
+	}
+	if _, err := NewFilterAgentPrefix("curl/"); err != nil {
+		t.Errorf("NewFilterAgentPrefix error: %v", err)
+	}
+	if _, err := NewFilterAgentSuffix(".0"); err != nil {
+		t.Errorf("NewFilterAgentSuffix error: %v", err)
 	}
 	if _, err := NewFilterAgentRegex(`(?i)curl`); err != nil {
 		t.Errorf("NewFilterAgentRegex error: %v", err)

@@ -37,6 +37,10 @@ func treeString(f Filter) string {
 		return `path regex "` + v.re.String() + `"`
 	case *FilterAgent:
 		return `agent "` + v.agent + `"`
+	case *FilterAgentPrefix:
+		return `agent prefix "` + v.prefix + `"`
+	case *FilterAgentSuffix:
+		return `agent suffix "` + v.suffix + `"`
 	case *FilterAgentKeyword:
 		return `agent keyword "` + v.keyword + `"`
 	case *FilterAgentRegex:
@@ -86,6 +90,8 @@ func TestParseTrees(t *testing.T) {
 		{"path regex", `path regex "\\.iso$"`, `path regex "\.iso$"`},
 		{"path regex flag passes through", `path regex "(?i)\\.iso$"`, `path regex "(?i)\.iso$"`},
 		{"agent exact", `agent "curl"`, `agent "curl"`},
+		{"agent prefix", `agent prefix "curl/"`, `agent prefix "curl/"`},
+		{"agent suffix", `agent suffix ".0"`, `agent suffix ".0"`},
 		{"agent keyword", `agent keyword "curl"`, `agent keyword "curl"`},
 		{"agent regex", `agent regex "(?i)curl"`, `agent regex "(?i)curl"`},
 		{"status code", "status 404", "status 404"},
@@ -171,6 +177,10 @@ func TestParseErrorPositions(t *testing.T) {
 		{"path regex empty value", `path regex ""`, "filter: 1:12: pattern must not be empty"},
 		{"path regex invalid pattern", `path regex "("`, "filter: 1:12: error parsing regexp: missing closing ): `(`"},
 		{"agent empty value", `agent ""`, "filter: 1:7: agent must not be empty"},
+		{"agent prefix missing value", `agent prefix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
+		{"agent prefix empty value", `agent prefix ""`, "filter: 1:14: prefix must not be empty"},
+		{"agent suffix missing value", `agent suffix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
+		{"agent suffix empty value", `agent suffix ""`, "filter: 1:14: suffix must not be empty"},
 		{"agent regex missing value", `agent regex`, `filter: 1:12: expected a quoted text value after "agent", got end of filter`},
 		{"agent regex empty value", `agent regex ""`, "filter: 1:13: pattern must not be empty"},
 		{"agent regex invalid pattern", `agent regex "["`, "filter: 1:13: error parsing regexp: missing closing ]: `[`"},
@@ -245,6 +255,7 @@ func TestParseExamples(t *testing.T) {
 	for _, src := range []string{
 		`src 10.0.0.0/8 and (method GET or method HEAD) and path prefix "/api"`,
 		`not agent keyword "curl" and sent >= 10m`,
+		`agent prefix "curl/" or agent suffix ".0"`,
 		`path regex "\\.(php|asp)$" or agent regex "(?i)bot"`,
 		"status class 5 or none",
 	} {
