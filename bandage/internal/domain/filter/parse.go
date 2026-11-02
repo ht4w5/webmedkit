@@ -172,6 +172,8 @@ func (p *parser) parsePrimitive() (Filter, error) {
 		return p.parseStatus(kw)
 	case "sent":
 		return p.parseSent(kw)
+	case "size":
+		return p.parseSize(kw)
 	default:
 		return nil, p.errorf(kw, "unknown keyword %q", kw.text)
 	}
@@ -208,7 +210,7 @@ func (p *parser) takeNumber(kw token, what string, allowUnit bool) (token, error
 		return token{}, p.errorf(tok, "expected a %s after %q, got %s", what, kw.text, tok.desc())
 	}
 	if tok.unit != 0 && !allowUnit {
-		return token{}, p.errorf(tok, `size units are only allowed after "sent"`)
+		return token{}, p.errorf(tok, `size units are only allowed after "sent" or "size"`)
 	}
 	if err := p.advance(); err != nil {
 		return token{}, err
@@ -251,7 +253,19 @@ func (p *parser) parseMethod(kw token) (Filter, error) {
 	return f, nil
 }
 
-func (p *parser) parsePath(kw token) (Filter, error) {
+// textCtor builds a text-matcher filter from its matched text.
+type textCtor func(text string) (Filter, error)
+
+// textMatch is one text-matcher family's constructor set: the exact form plus
+// one constructor per modifier takeMod accepts after "path" / "agent".
+type textMatch struct {
+	exact, prefix, suffix, keyword, regex textCtor
+}
+
+// parseTextMod parses "$kw [mod] \"text\"": no modifier selects the exact
+// form, a modifier word selects its constructor. A validation error wraps at
+// the text token.
+func (p *parser) parseTextMod(kw token, m textMatch) (Filter, error) {
 	mod, err := p.takeMod("prefix", "suffix", "keyword", "regex")
 	if err != nil {
 		return nil, err
@@ -260,69 +274,42 @@ func (p *parser) parsePath(kw token) (Filter, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctor := m.exact
 	switch mod {
 	case "prefix":
-		f, err := NewFilterPathPrefix(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
+		ctor = m.prefix
 	case "suffix":
-		f, err := NewFilterPathSuffix(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
+		ctor = m.suffix
 	case "keyword":
-		f, err := NewFilterPathKeyword(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
+		ctor = m.keyword
 	case "regex":
-		f, err := NewFilterPathRegex(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
-	default:
-		f, err := NewFilterPath(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
+		ctor = m.regex
 	}
+	f, err := ctor(tok.text)
+	if err != nil {
+		return nil, p.wrap(tok, err)
+	}
+	return f, nil
+}
+
+func (p *parser) parsePath(kw token) (Filter, error) {
+	return p.parseTextMod(kw, textMatch{
+		exact:   func(text string) (Filter, error) { return NewFilterPath(text) },
+		prefix:  func(text string) (Filter, error) { return NewFilterPathPrefix(text) },
+		suffix:  func(text string) (Filter, error) { return NewFilterPathSuffix(text) },
+		keyword: func(text string) (Filter, error) { return NewFilterPathKeyword(text) },
+		regex:   func(text string) (Filter, error) { return NewFilterPathRegex(text) },
+	})
 }
 
 func (p *parser) parseAgent(kw token) (Filter, error) {
-	mod, err := p.takeMod("keyword", "regex")
-	if err != nil {
-		return nil, err
-	}
-	tok, err := p.takeText(kw)
-	if err != nil {
-		return nil, err
-	}
-	switch mod {
-	case "keyword":
-		f, err := NewFilterAgentKeyword(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
-	case "regex":
-		f, err := NewFilterAgentRegex(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
-	default:
-		f, err := NewFilterAgent(tok.text)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
-	}
+	return p.parseTextMod(kw, textMatch{
+		exact:   func(text string) (Filter, error) { return NewFilterAgent(text) },
+		prefix:  func(text string) (Filter, error) { return NewFilterAgentPrefix(text) },
+		suffix:  func(text string) (Filter, error) { return NewFilterAgentSuffix(text) },
+		keyword: func(text string) (Filter, error) { return NewFilterAgentKeyword(text) },
+		regex:   func(text string) (Filter, error) { return NewFilterAgentRegex(text) },
+	})
 }
 
 func (p *parser) parseStatus(kw token) (Filter, error) {
@@ -351,10 +338,14 @@ func (p *parser) parseStatus(kw token) (Filter, error) {
 	return f, nil
 }
 
-func (p *parser) parseSent(kw token) (Filter, error) {
+// parseByteLimit parses a byte-limit comparison after kw - ">=" or "<="
+// then a size - building the limit filter with the atLeast / atMost
+// constructors. expect names the accepted operators in the error for
+// anything else.
+func (p *parser) parseByteLimit(kw token, expect string, atLeast, atMost func(int64) (Filter, error)) (Filter, error) {
 	op := p.tok
 	if op.kind != tokGte && op.kind != tokLte {
-		return nil, p.errorf(op, `expected ">=" or "<=" after %q, got %s`, kw.text, op.desc())
+		return nil, p.errorf(op, "expected %s after %q, got %s", expect, kw.text, op.desc())
 	}
 	if err := p.advance(); err != nil {
 		return nil, err
@@ -367,18 +358,33 @@ func (p *parser) parseSent(kw token) (Filter, error) {
 	if err != nil {
 		return nil, p.wrap(tok, err)
 	}
-	if op.kind == tokGte {
-		f, err := NewFilterSentAtLeast(limit)
-		if err != nil {
-			return nil, p.wrap(tok, err)
-		}
-		return f, nil
+	newFilter := atLeast
+	if op.kind == tokLte {
+		newFilter = atMost
 	}
-	f, err := NewFilterSentAtMost(limit)
+	f, err := newFilter(limit)
 	if err != nil {
 		return nil, p.wrap(tok, err)
 	}
 	return f, nil
+}
+
+func (p *parser) parseSent(kw token) (Filter, error) {
+	return p.parseByteLimit(kw, `">=" or "<="`,
+		func(limit int64) (Filter, error) { return NewFilterSentAtLeast(limit) },
+		func(limit int64) (Filter, error) { return NewFilterSentAtMost(limit) })
+}
+
+func (p *parser) parseSize(kw token) (Filter, error) {
+	if p.tok.kind == tokWord && p.tok.text == "unknown" {
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		return &FilterSizeUnknown{}, nil
+	}
+	return p.parseByteLimit(kw, `">=", "<=", or "unknown"`,
+		func(limit int64) (Filter, error) { return NewFilterSizeAtLeast(limit) },
+		func(limit int64) (Filter, error) { return NewFilterSizeAtMost(limit) })
 }
 
 // takeMod consumes an optional bare modifier word from the given set, or "" if the next token is none of them.

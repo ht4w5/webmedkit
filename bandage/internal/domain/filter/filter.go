@@ -255,6 +255,40 @@ func (fa *FilterAgent) Match(event *domain.Event) bool {
 	return fa.agent == event.Agent
 }
 
+// FilterAgentPrefix matches events whose user agent starts with the given prefix.
+type FilterAgentPrefix struct {
+	prefix string
+}
+
+// NewFilterAgentPrefix returns a filter matching events whose user agent starts with prefix.
+func NewFilterAgentPrefix(prefix string) (*FilterAgentPrefix, error) {
+	if prefix == "" {
+		return nil, errors.New("prefix must not be empty")
+	}
+	return &FilterAgentPrefix{prefix: prefix}, nil
+}
+
+func (fap *FilterAgentPrefix) Match(event *domain.Event) bool {
+	return strings.HasPrefix(event.Agent, fap.prefix)
+}
+
+// FilterAgentSuffix matches events whose user agent ends with the given suffix.
+type FilterAgentSuffix struct {
+	suffix string
+}
+
+// NewFilterAgentSuffix returns a filter matching events whose user agent ends with suffix.
+func NewFilterAgentSuffix(suffix string) (*FilterAgentSuffix, error) {
+	if suffix == "" {
+		return nil, errors.New("suffix must not be empty")
+	}
+	return &FilterAgentSuffix{suffix: suffix}, nil
+}
+
+func (fas *FilterAgentSuffix) Match(event *domain.Event) bool {
+	return strings.HasSuffix(event.Agent, fas.suffix)
+}
+
 // FilterAgentKeyword matches events whose user agent contains the given
 // keyword.
 type FilterAgentKeyword struct {
@@ -343,8 +377,8 @@ func NewFilterSentAtLeast(limit int64) (*FilterSentAtLeast, error) {
 	return &FilterSentAtLeast{limit: limit}, nil
 }
 
-func (fsat *FilterSentAtLeast) Match(event *domain.Event) bool {
-	return event.SentBytes >= fsat.limit
+func (fsatl *FilterSentAtLeast) Match(event *domain.Event) bool {
+	return event.SentBytes >= fsatl.limit
 }
 
 // FilterSentAtMost matches events that sent at most limit bytes (inclusive).
@@ -361,6 +395,63 @@ func NewFilterSentAtMost(limit int64) (*FilterSentAtMost, error) {
 	return &FilterSentAtMost{limit: limit}, nil
 }
 
-func (fsam *FilterSentAtMost) Match(event *domain.Event) bool {
-	return event.SentBytes <= fsam.limit
+func (fsatm *FilterSentAtMost) Match(event *domain.Event) bool {
+	return event.SentBytes <= fsatm.limit
+}
+
+// sizeKnown reports whether the event's Filesize estimate is known; size 0
+// means unknown (ADR 0024).
+func sizeKnown(event *domain.Event) bool {
+	return event.SizeBytes != domain.FilesizeUnknown
+}
+
+// FilterSizeAtLeast matches events whose Filesize estimate is known and at
+// least limit bytes (inclusive); an unknown-size event is never matched
+// (size 0 means unknown, ADR 0024).
+type FilterSizeAtLeast struct {
+	// Unit B.
+	limit int64
+}
+
+// NewFilterSizeAtLeast returns a filter matching events whose known Filesize
+// estimate is at least limit bytes (inclusive).
+func NewFilterSizeAtLeast(limit int64) (*FilterSizeAtLeast, error) {
+	if limit < 0 {
+		return nil, errors.New("limit must be greater or equal to 0")
+	}
+	return &FilterSizeAtLeast{limit: limit}, nil
+}
+
+func (fsizl *FilterSizeAtLeast) Match(event *domain.Event) bool {
+	return sizeKnown(event) && event.SizeBytes >= fsizl.limit
+}
+
+// FilterSizeAtMost matches events whose Filesize estimate is known and at
+// most limit bytes (inclusive); an unknown-size event is never matched
+// (size 0 means unknown, ADR 0024).
+type FilterSizeAtMost struct {
+	// Unit B.
+	limit int64
+}
+
+// NewFilterSizeAtMost returns a filter matching events whose known Filesize
+// estimate is at most limit bytes (inclusive).
+func NewFilterSizeAtMost(limit int64) (*FilterSizeAtMost, error) {
+	if limit < 0 {
+		return nil, errors.New("limit must be greater or equal to 0")
+	}
+	return &FilterSizeAtMost{limit: limit}, nil
+}
+
+func (fsizm *FilterSizeAtMost) Match(event *domain.Event) bool {
+	return sizeKnown(event) && event.SizeBytes <= fsizm.limit
+}
+
+// FilterSizeUnknown matches events whose Filesize estimate is unknown - the
+// complement of the size comparisons (size 0 means unknown, ADR 0024). Like
+// any/none it takes no argument and is built directly, with no constructor.
+type FilterSizeUnknown struct{}
+
+func (fsu *FilterSizeUnknown) Match(event *domain.Event) bool {
+	return !sizeKnown(event)
 }

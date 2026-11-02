@@ -86,10 +86,16 @@ func TestFilterMatch(t *testing.T) {
 		{"path regex case-sensitive", `path regex "RELEASES"`, nil, false},
 		{"path regex case-insensitive flag", `path regex "(?i)RELEASES"`, nil, true},
 
-		// agent: exact / keyword / regex, case-sensitive.
+		// agent: exact / prefix / suffix / keyword / regex, case-sensitive.
 		{"agent exact", `agent "curl/8.5.0"`, nil, true},
 		{"agent exact mismatch", `agent "curl"`, nil, false},
 		{"agent exact case-sensitive", `agent "CURL/8.5.0"`, nil, false},
+		{"agent prefix match", `agent prefix "curl/"`, nil, true},
+		{"agent prefix mismatch", `agent prefix "wget/"`, nil, false},
+		{"agent prefix case-sensitive", `agent prefix "CURL/"`, nil, false},
+		{"agent suffix match", `agent suffix ".0"`, nil, true},
+		{"agent suffix mismatch", `agent suffix ".img"`, nil, false},
+		{"agent suffix case-sensitive", `agent suffix "T/1.0"`, func(e *domain.Event) { e.Agent = "Wget/1.0" }, false},
 		{"agent keyword match", `agent keyword "curl"`, nil, true},
 		{"agent keyword mismatch", `agent keyword "wget"`, nil, false},
 		{"agent regex match", `agent regex "curl"`, nil, true},
@@ -119,6 +125,49 @@ func TestFilterMatch(t *testing.T) {
 		{"sent m is binary", "sent <= 1m", func(e *domain.Event) { e.SentBytes = 1 << 20 }, true},
 		{"sent g is binary", "sent >= 1g", func(e *domain.Event) { e.SentBytes = 1 << 30 }, true},
 		{"sent zero limit", "sent >= 0", nil, true},
+
+		// size: >= / <= over the Filesize estimate, inclusive at the boundary.
+		// The base event's Filesize is unknown; these set a known one.
+		{"size gte inclusive boundary", "size >= 1024", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size gte above", "size >= 1023", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size gte below", "size >= 1025", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size lte inclusive boundary", "size <= 1024", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte below", "size <= 1025", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte above", "size <= 1023", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size k is binary", "size >= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size k decimal does not match", "size >= 1k", func(e *domain.Event) { e.SizeBytes = 1000 }, false},
+		{"size m is binary", "size <= 1m", func(e *domain.Event) { e.SizeBytes = 1 << 20 }, true},
+		{"size g is binary", "size >= 1g", func(e *domain.Event) { e.SizeBytes = 1 << 30 }, true},
+
+		// A comparison claims only events whose Filesize is known (size 0 means unknown).
+		{"size gte skips unknown", "size >= 0", nil, false},
+		{"size lte skips unknown", "size <= 1g", nil, false},
+		{"size gte zero is known-size", "size >= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"size lte zero matches nothing", "size <= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+
+		// size unknown: exactly the events whose Filesize is unknown (size 0 means unknown).
+		{"size unknown matches unknown", "size unknown", nil, true},
+		{"size unknown skips known", "size unknown", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+		{"size unknown skips minimal known size", "size unknown", func(e *domain.Event) { e.SizeBytes = 1 }, false},
+		{"not size unknown is the complement", "not size unknown", nil, false},
+		{"not size unknown matches known", "not size unknown", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+
+		// Partition pinned: comparisons never claim unknowns, >= 0 is "known", <= 0 matches nothing.
+		{"size gte zero matches minimal known size", "size >= 0", func(e *domain.Event) { e.SizeBytes = 1 }, true},
+		{"size lte zero matches nothing even at minimal size", "size <= 0", func(e *domain.Event) { e.SizeBytes = 1 }, false},
+		{"size unknown or known covers unknown", "size unknown or size >= 0", nil, true},
+		{"size unknown or known covers known", "size unknown or size >= 0", func(e *domain.Event) { e.SizeBytes = 1 << 30 }, true},
+		{"size unknown and known never overlap on unknown", "size unknown and size >= 0", nil, false},
+		{"size unknown and known never overlap on known", "size unknown and size >= 0", func(e *domain.Event) { e.SizeBytes = 1024 }, false},
+
+		// size unknown composes like every predicate.
+		{"size unknown and match", "size unknown and method GET", nil, true},
+		{"size unknown and mismatch", "size unknown and method POST", nil, false},
+		{"size unknown or comparison", "size unknown or size >= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"not size unknown and comparison", "not size unknown and size <= 1k", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
+		{"parens with size unknown", "(size unknown or size >= 1g) and method GET", nil, true},
+		{"parens change size unknown result", "(size unknown or size >= 1g) and method POST", nil, false},
+		{"symbol combinators with size unknown", "size unknown && ! status 404", nil, true},
 
 		// combinators: precedence not > and > or, parentheses override.
 		{"and all match", `method GET and status 200`, nil, true},
@@ -178,6 +227,8 @@ func TestConstructorValidation(t *testing.T) {
 		{"empty path pattern", func() error { _, err := NewFilterPathRegex(""); return err }()},
 		{"invalid path pattern", func() error { _, err := NewFilterPathRegex("("); return err }()},
 		{"empty agent", func() error { _, err := NewFilterAgent(""); return err }()},
+		{"empty agent prefix", func() error { _, err := NewFilterAgentPrefix(""); return err }()},
+		{"empty agent suffix", func() error { _, err := NewFilterAgentSuffix(""); return err }()},
 		{"empty agent keyword", func() error { _, err := NewFilterAgentKeyword(""); return err }()},
 		{"empty agent pattern", func() error { _, err := NewFilterAgentRegex(""); return err }()},
 		{"invalid agent pattern", func() error { _, err := NewFilterAgentRegex("["); return err }()},
@@ -187,6 +238,8 @@ func TestConstructorValidation(t *testing.T) {
 		{"class above range", func() error { _, err := NewFilterStatusClass(6); return err }()},
 		{"sent at least negative", func() error { _, err := NewFilterSentAtLeast(-1); return err }()},
 		{"sent at most negative", func() error { _, err := NewFilterSentAtMost(-1); return err }()},
+		{"size at least negative", func() error { _, err := NewFilterSizeAtLeast(-1); return err }()},
+		{"size at most negative", func() error { _, err := NewFilterSizeAtMost(-1); return err }()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -211,8 +264,20 @@ func TestConstructorValidation(t *testing.T) {
 	if _, err := NewFilterPathRegex(`\.iso$`); err != nil {
 		t.Errorf("NewFilterPathRegex error: %v", err)
 	}
+	if _, err := NewFilterAgentPrefix("curl/"); err != nil {
+		t.Errorf("NewFilterAgentPrefix error: %v", err)
+	}
+	if _, err := NewFilterAgentSuffix(".0"); err != nil {
+		t.Errorf("NewFilterAgentSuffix error: %v", err)
+	}
 	if _, err := NewFilterAgentRegex(`(?i)curl`); err != nil {
 		t.Errorf("NewFilterAgentRegex error: %v", err)
+	}
+	if _, err := NewFilterSizeAtLeast(0); err != nil {
+		t.Errorf("NewFilterSizeAtLeast error: %v", err)
+	}
+	if _, err := NewFilterSizeAtMost(0); err != nil {
+		t.Errorf("NewFilterSizeAtMost error: %v", err)
 	}
 }
 

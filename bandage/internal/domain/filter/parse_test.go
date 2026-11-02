@@ -37,6 +37,10 @@ func treeString(f Filter) string {
 		return `path regex "` + v.re.String() + `"`
 	case *FilterAgent:
 		return `agent "` + v.agent + `"`
+	case *FilterAgentPrefix:
+		return `agent prefix "` + v.prefix + `"`
+	case *FilterAgentSuffix:
+		return `agent suffix "` + v.suffix + `"`
 	case *FilterAgentKeyword:
 		return `agent keyword "` + v.keyword + `"`
 	case *FilterAgentRegex:
@@ -49,6 +53,12 @@ func treeString(f Filter) string {
 		return "sent >= " + ltoa(v.limit)
 	case *FilterSentAtMost:
 		return "sent <= " + ltoa(v.limit)
+	case *FilterSizeAtLeast:
+		return "size >= " + ltoa(v.limit)
+	case *FilterSizeAtMost:
+		return "size <= " + ltoa(v.limit)
+	case *FilterSizeUnknown:
+		return "size unknown"
 	default:
 		return "?"
 	}
@@ -86,6 +96,8 @@ func TestParseTrees(t *testing.T) {
 		{"path regex", `path regex "\\.iso$"`, `path regex "\.iso$"`},
 		{"path regex flag passes through", `path regex "(?i)\\.iso$"`, `path regex "(?i)\.iso$"`},
 		{"agent exact", `agent "curl"`, `agent "curl"`},
+		{"agent prefix", `agent prefix "curl/"`, `agent prefix "curl/"`},
+		{"agent suffix", `agent suffix ".0"`, `agent suffix ".0"`},
 		{"agent keyword", `agent keyword "curl"`, `agent keyword "curl"`},
 		{"agent regex", `agent regex "(?i)curl"`, `agent regex "(?i)curl"`},
 		{"status code", "status 404", "status 404"},
@@ -95,6 +107,13 @@ func TestParseTrees(t *testing.T) {
 		{"sent binary k", "sent >= 10k", "sent >= 10240"},
 		{"sent binary m case-insensitive", "sent >= 10M", "sent >= 10485760"},
 		{"sent binary g", "sent >= 2g", "sent >= 2147483648"},
+		{"size gte bare", "size >= 1024", "size >= 1024"},
+		{"size lte bare", "size <= 0", "size <= 0"},
+		{"size binary k", "size >= 10k", "size >= 10240"},
+		{"size binary m case-insensitive", "size >= 10M", "size >= 10485760"},
+		{"size binary g", "size >= 2g", "size >= 2147483648"},
+		{"size unknown", "size unknown", "size unknown"},
+		{"size unknown in combinators", "not size unknown and size >= 0", "and(not(size unknown), size >= 0)"},
 
 		// String escapes unescape to the matched value.
 		{"string escapes", `path "a\"b\\c\nd\te"`, "path \"a\"b\\c\nd\te\""},
@@ -171,12 +190,16 @@ func TestParseErrorPositions(t *testing.T) {
 		{"path regex empty value", `path regex ""`, "filter: 1:12: pattern must not be empty"},
 		{"path regex invalid pattern", `path regex "("`, "filter: 1:12: error parsing regexp: missing closing ): `(`"},
 		{"agent empty value", `agent ""`, "filter: 1:7: agent must not be empty"},
+		{"agent prefix missing value", `agent prefix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
+		{"agent prefix empty value", `agent prefix ""`, "filter: 1:14: prefix must not be empty"},
+		{"agent suffix missing value", `agent suffix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
+		{"agent suffix empty value", `agent suffix ""`, "filter: 1:14: suffix must not be empty"},
 		{"agent regex missing value", `agent regex`, `filter: 1:12: expected a quoted text value after "agent", got end of filter`},
 		{"agent regex empty value", `agent regex ""`, "filter: 1:13: pattern must not be empty"},
 		{"agent regex invalid pattern", `agent regex "["`, "filter: 1:13: error parsing regexp: missing closing ]: `[`"},
 		{"status missing value", "status", `filter: 1:7: expected a status code after "status", got end of filter`},
 		{"status out of range", "status 20", "filter: 1:8: status must be within [100, 599]"},
-		{"status size unit", "status 200k", `filter: 1:8: size units are only allowed after "sent"`},
+		{"status size unit", "status 200k", `filter: 1:8: size units are only allowed after "sent" or "size"`},
 		{"status class missing value", "status class", `filter: 1:13: expected a status class after "status", got end of filter`},
 		{"status class out of range", "status class 9", "filter: 1:14: class must be within [1, 5]"},
 		{"sent missing operator", "sent", `filter: 1:5: expected ">=" or "<=" after "sent", got end of filter`},
@@ -185,6 +208,17 @@ func TestParseErrorPositions(t *testing.T) {
 		{"sent decimal size is a word", "sent >= 0.1", `filter: 1:9: expected a size after "sent", got "0.1"`},
 		{"sent MB spelling is a word", "sent >= 10MB", `filter: 1:9: expected a size after "sent", got "10MB"`},
 		{"sent size overflow", "sent >= 9223372036854775807g", "filter: 1:9: size is out of range"},
+		{"size missing operator", "size", `filter: 1:5: expected ">=", "<=", or "unknown" after "size", got end of filter`},
+		{"size bare number operator", "size 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "5"`},
+		{"size known slip names unknown", "size known", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "known"`},
+		{"size bare word slip names unknown", "size maybe", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "maybe"`},
+		{"size known slip is case-sensitive", "size Known", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "Known"`},
+		{"size equality operator does not exist", "size = 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "="`},
+		{"size double equality operator does not exist", "size == 5", `filter: 1:6: expected ">=", "<=", or "unknown" after "size", got "=="`},
+		{"size strict gt operator does not exist", "size > 5", `filter: 1:6: expected ">="`},
+		{"size non-size value", `size >= x`, `filter: 1:9: expected a size after "size", got "x"`},
+		{"size missing limit", `size >=`, `filter: 1:8: expected a size after "size", got end of filter`},
+		{"size overflow", "size >= 9223372036854775807g", "filter: 1:9: size is out of range"},
 
 		// Positions are 1-based rune counts; newlines reset the column.
 		{"newline resets column", "any and\nfoo", `filter: 2:1: unknown keyword "foo"`},
@@ -219,6 +253,7 @@ func TestParseErrorUnwrapsValidation(t *testing.T) {
 	}{
 		{"status out of range", "status 20", "status"},
 		{"invalid regex pattern", `path regex "("`, "regexp"},
+		{"size overflow", "size >= 9223372036854775807g", "out of range"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,6 +280,9 @@ func TestParseExamples(t *testing.T) {
 	for _, src := range []string{
 		`src 10.0.0.0/8 and (method GET or method HEAD) and path prefix "/api"`,
 		`not agent keyword "curl" and sent >= 10m`,
+		`size >= 100m and size <= 1g and path prefix "/releases/"`,
+		`not size unknown and (size >= 1g or path prefix "/releases/")`,
+		`agent prefix "curl/" or agent suffix ".0"`,
 		`path regex "\\.(php|asp)$" or agent regex "(?i)bot"`,
 		"status class 5 or none",
 	} {

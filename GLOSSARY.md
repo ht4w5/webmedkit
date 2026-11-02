@@ -23,13 +23,15 @@ _Avoid_: where clause, condition
 **Filesize**:
 The total size of a path's content, learned from observed response sizes
 (Content-Length on GET/HEAD 200, Content-Range totals on GET 206);
-unknown until enough observations have been seen.
+unknown until enough observations have been seen. Empty content is
+indistinguishable from not-yet-known.
 _Avoid_: size index, file length
 
 **Sampling rule**:
 The fixed, non-configurable rule deciding which events contribute an
-observation to the Filesize estimate - GET/HEAD 200 with a Content-Length,
-GET 206 with a Content-Range total. Not a Filter.
+observation to the Filesize estimate - GET/HEAD 200 with a non-empty
+Content-Length, GET 206 with a non-empty Content-Range total. Not a
+Filter.
 _Avoid_: ewma filter, eligibility filter
 
 ### Rules
