@@ -34,6 +34,8 @@ var leafCases = []struct {
 	{"agent", `agent "curl/8.5.0"`, `agent "Wget/1.21"`, nil},
 	{"agent-keyword", `agent keyword "curl"`, `agent keyword "Wget"`, nil},
 	{"agent-regex", `agent regex "curl"`, `agent regex "Wget"`, nil},
+	{"agent-prefix", `agent prefix "curl/"`, `agent prefix "Wget/"`, nil},
+	{"agent-suffix", `agent suffix ".5.0"`, `agent suffix ".deb"`, nil},
 	{"status", `status 200`, `status 404`, nil},
 	{"status-class", `status class 2`, `status class 5`, nil},
 	{"sent-at-least", `sent >= 1k`, `sent >= 10m`, nil},
