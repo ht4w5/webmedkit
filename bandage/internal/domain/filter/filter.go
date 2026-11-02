@@ -1,10 +1,13 @@
 // Package filter holds the filter language: a predicate over an Event deciding
-// whether a rule considers the event. Matches are exact and case-sensitive.
+// whether a rule considers the event. Matches are exact and case-sensitive; the
+// regex matchers search unanchored, case-sensitive unless the pattern carries
+// "(?i)" (GLOSSARY: Filter).
 package filter
 
 import (
 	"errors"
 	"net/netip"
+	"regexp"
 	"strings"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
@@ -204,6 +207,37 @@ func (fpk *FilterPathKeyword) Match(event *domain.Event) bool {
 	return strings.Contains(event.Path, fpk.keyword)
 }
 
+// compilePattern compiles a regex matcher pattern, rejecting the empty
+// pattern like every other text matcher.
+func compilePattern(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, errors.New("pattern must not be empty")
+	}
+	return regexp.Compile(pattern)
+}
+
+// FilterPathRegex matches events whose path matches the given regular
+// expression - an unanchored search, case-sensitive unless the pattern
+// carries "(?i)" (GLOSSARY: Filter).
+type FilterPathRegex struct {
+	re *regexp.Regexp
+}
+
+// NewFilterPathRegex returns a filter matching events whose path matches
+// pattern. The pattern is compiled here, so an invalid pattern is rejected
+// up front and is never a runtime no-match.
+func NewFilterPathRegex(pattern string) (*FilterPathRegex, error) {
+	re, err := compilePattern(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return &FilterPathRegex{re: re}, nil
+}
+
+func (fpr *FilterPathRegex) Match(event *domain.Event) bool {
+	return fpr.re.MatchString(event.Path)
+}
+
 // FilterAgent matches events with exactly the given user agent.
 type FilterAgent struct {
 	agent string
@@ -237,6 +271,28 @@ func NewFilterAgentKeyword(keyword string) (*FilterAgentKeyword, error) {
 
 func (fak *FilterAgentKeyword) Match(event *domain.Event) bool {
 	return strings.Contains(event.Agent, fak.keyword)
+}
+
+// FilterAgentRegex matches events whose user agent matches the given regular
+// expression - an unanchored search, case-sensitive unless the pattern
+// carries "(?i)" (GLOSSARY: Filter).
+type FilterAgentRegex struct {
+	re *regexp.Regexp
+}
+
+// NewFilterAgentRegex returns a filter matching events whose user agent
+// matches pattern. The pattern is compiled here, so an invalid pattern is
+// rejected up front and is never a runtime no-match.
+func NewFilterAgentRegex(pattern string) (*FilterAgentRegex, error) {
+	re, err := compilePattern(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return &FilterAgentRegex{re: re}, nil
+}
+
+func (far *FilterAgentRegex) Match(event *domain.Event) bool {
+	return far.re.MatchString(event.Agent)
 }
 
 // FilterStatus matches events with exactly the given status code.

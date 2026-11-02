@@ -33,10 +33,14 @@ func treeString(f Filter) string {
 		return `path suffix "` + v.suffix + `"`
 	case *FilterPathKeyword:
 		return `path keyword "` + v.keyword + `"`
+	case *FilterPathRegex:
+		return `path regex "` + v.re.String() + `"`
 	case *FilterAgent:
 		return `agent "` + v.agent + `"`
 	case *FilterAgentKeyword:
 		return `agent keyword "` + v.keyword + `"`
+	case *FilterAgentRegex:
+		return `agent regex "` + v.re.String() + `"`
 	case *FilterStatus:
 		return "status " + itoa(v.status)
 	case *FilterStatusClass:
@@ -79,8 +83,11 @@ func TestParseTrees(t *testing.T) {
 		{"path prefix", `path prefix "/x"`, `path prefix "/x"`},
 		{"path suffix", `path suffix ".iso"`, `path suffix ".iso"`},
 		{"path keyword", `path keyword "iso"`, `path keyword "iso"`},
+		{"path regex", `path regex "\\.iso$"`, `path regex "\.iso$"`},
+		{"path regex flag passes through", `path regex "(?i)\\.iso$"`, `path regex "(?i)\.iso$"`},
 		{"agent exact", `agent "curl"`, `agent "curl"`},
 		{"agent keyword", `agent keyword "curl"`, `agent keyword "curl"`},
+		{"agent regex", `agent regex "(?i)curl"`, `agent regex "(?i)curl"`},
 		{"status code", "status 404", "status 404"},
 		{"status class", "status class 5", "status class 5"},
 		{"sent gte bare", "sent >= 1024", "sent >= 1024"},
@@ -102,6 +109,8 @@ func TestParseTrees(t *testing.T) {
 		{"parens override", "(any or none) and any", "and(or(any, none), any)"},
 		{"nested parens", "not (any and (none or any))", "not(and(any, or(none, any)))"},
 		{"mixed symbols", "any && none || ! any", "or(and(any, none), not(any))"},
+		{"regex in combinators", `not path regex "a|b" and any`, `and(not(path regex "a|b"), any)`},
+		{"regex both fields in combinators", `path regex "a" and not agent regex "b" or path regex "c"`, `or(and(path regex "a", not(agent regex "b")), path regex "c")`},
 
 		// Newlines are whitespace; positions reset per line (see errors).
 		{"newlines separate tokens", "any and\n none", "and(any, none)"},
@@ -158,7 +167,13 @@ func TestParseErrorPositions(t *testing.T) {
 		{"path prefix missing value", `path prefix`, `filter: 1:12: expected a quoted text value after "path", got end of filter`},
 		{"path empty value", `path ""`, "filter: 1:6: path must not be empty"},
 		{"path keyword empty value", `path keyword ""`, "filter: 1:14: keyword must not be empty"},
+		{"path regex missing value", `path regex`, `filter: 1:11: expected a quoted text value after "path", got end of filter`},
+		{"path regex empty value", `path regex ""`, "filter: 1:12: pattern must not be empty"},
+		{"path regex invalid pattern", `path regex "("`, "filter: 1:12: error parsing regexp: missing closing ): `(`"},
 		{"agent empty value", `agent ""`, "filter: 1:7: agent must not be empty"},
+		{"agent regex missing value", `agent regex`, `filter: 1:12: expected a quoted text value after "agent", got end of filter`},
+		{"agent regex empty value", `agent regex ""`, "filter: 1:13: pattern must not be empty"},
+		{"agent regex invalid pattern", `agent regex "["`, "filter: 1:13: error parsing regexp: missing closing ]: `[`"},
 		{"status missing value", "status", `filter: 1:7: expected a status code after "status", got end of filter`},
 		{"status out of range", "status 20", "filter: 1:8: status must be within [100, 599]"},
 		{"status size unit", "status 200k", `filter: 1:8: size units are only allowed after "sent"`},
@@ -197,19 +212,31 @@ func TestParseErrorPositions(t *testing.T) {
 
 // Validation errors wrap their cause and stay unwrappable.
 func TestParseErrorUnwrapsValidation(t *testing.T) {
-	_, err := Parse("status 20")
-	if err == nil {
-		t.Fatal("Parse succeeded, want error")
+	tests := []struct {
+		name string
+		src  string
+		want string // substring of the wrapped validation error
+	}{
+		{"status out of range", "status 20", "status"},
+		{"invalid regex pattern", `path regex "("`, "regexp"},
 	}
-	var pe *ParseError
-	if !errors.As(err, &pe) {
-		t.Fatalf("error %v is not a *ParseError", err)
-	}
-	if pe.Unwrap() == nil {
-		t.Fatal("Unwrap() = nil, want the wrapped validation error")
-	}
-	if !strings.Contains(pe.Unwrap().Error(), "status") {
-		t.Errorf("Unwrap() = %v, want the range validation error", pe.Unwrap())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse(tt.src)
+			if err == nil {
+				t.Fatal("Parse succeeded, want error")
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) {
+				t.Fatalf("error %v is not a *ParseError", err)
+			}
+			if pe.Unwrap() == nil {
+				t.Fatal("Unwrap() = nil, want the wrapped validation error")
+			}
+			if !strings.Contains(pe.Unwrap().Error(), tt.want) {
+				t.Errorf("Unwrap() = %v, want it to contain %q", pe.Unwrap(), tt.want)
+			}
+		})
 	}
 }
 
@@ -218,6 +245,7 @@ func TestParseExamples(t *testing.T) {
 	for _, src := range []string{
 		`src 10.0.0.0/8 and (method GET or method HEAD) and path prefix "/api"`,
 		`not agent keyword "curl" and sent >= 10m`,
+		`path regex "\\.(php|asp)$" or agent regex "(?i)bot"`,
 		"status class 5 or none",
 	} {
 		if _, err := Parse(src); err != nil {
