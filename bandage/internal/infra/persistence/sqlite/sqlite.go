@@ -18,13 +18,17 @@ import (
 
 const driverName = "sqlite"
 
+// MemoryPath names a throwaway in-memory database for Open: the store
+// behind the daemon's memory mode (db.sqlite.memory), no files behind it.
+const MemoryPath = ":memory:"
+
 // ReportRepository is a report.Repository backed by a sqlite database.
 type ReportRepository struct {
 	// write is the sole writer (one connection): writes serialize
 	// through it and land deterministically (ADR 0007).
 	write *sql.DB
-	// read serves queries on its own bounded pool (ADR 0009); for a
-	// :memory: database it is write (each connection would be its own database).
+	// read serves queries on its own bounded pool (ADR 0009); for an
+	// in-memory database it is write (each connection would be its own database).
 	read *sql.DB
 	// upsert is prepared once at Open and reused by every Upsert.
 	upsert *sql.Stmt
@@ -41,7 +45,7 @@ ON CONFLICT (rule, target) DO UPDATE SET
 	body       = excluded.body`
 
 // Open opens (creating if needed) the report database at path and ensures the
-// schema; file databases run WAL/synchronous=NORMAL (ADR 0009), :memory: does not split.
+// schema; file databases run WAL/synchronous=NORMAL (ADR 0009), MemoryPath does not split.
 func Open(path string) (*ReportRepository, error) {
 	write, err := sql.Open(driverName, path)
 	if err != nil {
@@ -89,10 +93,11 @@ func Open(path string) (*ReportRepository, error) {
 	return &ReportRepository{write: write, read: read, upsert: upsert}, nil
 }
 
-// isMemory reports whether path names an in-memory database: WAL does not apply
-// there and each connection would be a separate database (ADR 0009).
+// isMemory reports whether path names an in-memory database (MemoryPath or
+// a mode=memory DSN): WAL does not apply there and each connection would be
+// a separate database (ADR 0009).
 func isMemory(path string) bool {
-	return path == ":memory:" || strings.Contains(path, "mode=memory")
+	return path == MemoryPath || strings.Contains(path, "mode=memory")
 }
 
 const schema = `

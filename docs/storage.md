@@ -2,8 +2,8 @@
 
 Reports live in one sqlite database (`db.sqlite.path`, e.g.
 `/var/lib/bandage/reports.db` - see `configs/bandage.yml`), one row per
-(rule, Target). Reports survive restarts; tracker state is memory-only
-(ADR 0002). The file database runs `journal_mode=WAL` with
+(rule, Target). Reports survive restarts (memory mode excepted - see
+below); tracker state is memory-only (ADR 0002). The file database runs `journal_mode=WAL` with
 `synchronous=NORMAL`: writes go through a single connection and API
 reads use their own, so `GET /api/reports` never queues behind upserts
 ([ADR 0009](adr/0009-wal-with-a-separate-read-path.md)).
@@ -48,3 +48,17 @@ restore there is nothing to clean up manually.
   0009 - the loss window a restart re-discovers anyway).
 - WAL does not work over network filesystems. Keep `db.sqlite.path` on
   local storage (ADR 0009).
+
+## Memory mode (`db.sqlite.memory`)
+
+`db.sqlite.memory: true` runs the report store on a throwaway
+in-memory database instead of a file: debugging runs leave no database
+files behind and every start begins with an empty store. The option is
+mutually exclusive with `db.sqlite.path` - setting both is a config
+validation error, so no run guesses which one won.
+
+Memory mode is the exception to "reports survive restarts": reports do
+not survive, deliberately, and the daemon warns about exactly that at
+startup (ADR 0002's durability is bent here, for debugging only). The
+WAL files, the backup procedures and the durability notes above
+describe the file database; none of them apply in memory mode.

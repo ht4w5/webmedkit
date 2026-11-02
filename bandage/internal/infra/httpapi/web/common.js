@@ -54,46 +54,56 @@ function fetchJSON(method, url) {
 // added) appear as generic extra rows and nothing the daemon reports
 // is dropped by the panel.
 
-// STATS_SLOTS names each group's row slot, in display order.
-const STATS_SLOTS = ["group-identity", "group-pipeline", "group-tracker-cache"];
+// STATS_GROUPS maps the snapshot's known top-level blocks onto their
+// group tables' row slots. The one map serves both the group dispatch
+// and the row keys: a block the map names renders plain field keys -
+// its group names the block - while any other block's generic extra
+// rows keep the block-key prefix.
+const STATS_GROUPS = new Map([
+	["build", "group-identity"],
+	["pipeline", "group-pipeline"],
+	["tracker_cache", "group-tracker-cache"],
+]);
+
+// GENERIC_GROUP_PREFIX marks a dynamically created group's row slot;
+// the rest of the slot name is the block key its table is named for.
+const GENERIC_GROUP_PREFIX = "group-extra-";
+
+// genericGroups holds each generic group's created heading and table,
+// so a render can clear them before rebuilding.
+const genericGroups = new Map();
 
 // valueText renders one reported value as row text.
 function valueText(value) {
 	return typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
 }
 
-// statsGroups maps the snapshot document onto the three groups: the
-// pipeline and tracker_cache blocks feed their own tables field by
-// field; the build block's identity fields and every other top-level
-// entry - generated_at, uptime, and any key added later - become
-// identity rows. A new top-level block flattens into dotted generic
-// rows rather than being hidden.
+// statsGroups maps the snapshot document onto the groups: the pipeline
+// and tracker_cache blocks feed their own tables field by field; the
+// build block's fields and every other top-level scalar - generated_at,
+// uptime, and any key added later - become identity rows. An unknown
+// top-level block renders within its own generic group - a generic
+// extra group table named for the block - never flattened into the
+// identity table or hidden.
 function statsGroups(snapshot) {
 	const groups = { "group-identity": [], "group-pipeline": [], "group-tracker-cache": [] };
 	for (const [key, value] of Object.entries(snapshot)) {
-		let rows;
-		if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-			const bare = key === "build" || key === "pipeline" || key === "tracker_cache";
-			rows = Object.entries(value).map(([field, v]) => ({
-				key: bare ? field : key + "." + field,
+		const block = typeof value === "object" && value !== null && !Array.isArray(value);
+		const slot = STATS_GROUPS.get(key) ??
+			(block ? GENERIC_GROUP_PREFIX + key : "group-identity");
+		const noKeyPrefix = STATS_GROUPS.has(key);
+		const rows = block
+			? Object.entries(value).map(([field, v]) => ({
+				key: noKeyPrefix ? field : key + "." + field,
 				value: valueText(v),
-			}));
-		} else {
-			rows = [{ key: key, value: valueText(value) }];
-		}
-		if (key === "pipeline") {
-			groups["group-pipeline"].push(...rows);
-		} else if (key === "tracker_cache") {
-			groups["group-tracker-cache"].push(...rows);
-		} else {
-			groups["group-identity"].push(...rows);
-		}
+			}))
+			: [{ key: key, value: valueText(value) }];
+		(groups[slot] = groups[slot] || []).push(...rows);
 	}
 	return groups;
 }
 
-// kvRow builds one key/value row; kvMessageRow the full-width message
-// row (loading, error) the key/value tables share.
+// kvRow builds one key/value row.
 function kvRow(row) {
 	const tr = document.createElement("tr");
 	tr.className = "kv-row";
@@ -106,9 +116,14 @@ function kvRow(row) {
 	return tr;
 }
 
-function kvMessageRow(text) {
+// KV_COLUMNS is the key/value tables' Key and Value columns.
+const KV_COLUMNS = 2;
+
+// messageRow builds one full-width message row (loading, no-match,
+// error) spanning a table's columns, so a table is never blank.
+function messageRow(text, colSpan) {
 	const td = document.createElement("td");
-	td.colSpan = 2;
+	td.colSpan = colSpan;
 	td.className = "empty";
 	td.textContent = text;
 	const tr = document.createElement("tr");
@@ -118,21 +133,57 @@ function kvMessageRow(text) {
 
 // renderStatsGroups renders each group's rows through the same row
 // builder - the full fetched set or the search's narrowed view - so
-// narrowing composes with everything the tables show.
+// narrowing composes with everything the tables show. Generic group
+// tables are rebuilt on every render, so a block the snapshot stops
+// reporting leaves nothing stale behind.
 function renderStatsGroups(groups, match) {
+	for (const nodes of genericGroups.values()) {
+		for (const node of nodes) node.remove();
+	}
+	genericGroups.clear();
 	for (const [slot, rows] of Object.entries(groups)) {
-		const tbody = document.getElementById(slot);
+		const tbody = groupBody(slot);
 		if (tbody === null) continue;
 		tbody.textContent = "";
 		const shown = match === null ? rows : rows.filter((row) => match.test(row.key + "\n" + row.value));
 		if (shown.length === 0) {
-			tbody.appendChild(kvMessageRow(match === null ? "Loading..." : "No keys match the filter."));
+			tbody.appendChild(messageRow(match === null ? "Loading..." : "No keys match the filter.", KV_COLUMNS));
 			continue;
 		}
 		for (const row of shown) {
 			tbody.appendChild(kvRow(row));
 		}
 	}
+}
+
+// groupBody returns the group's row slot - the static page's own for
+// the named groups, or for a generic group its table created here: a
+// key/value table headed for its block.
+function groupBody(slot) {
+	const existing = document.getElementById(slot);
+	if (existing !== null) return existing;
+	if (!slot.startsWith(GENERIC_GROUP_PREFIX)) return null;
+	const heading = document.createElement("h2");
+	heading.className = "group-title";
+	heading.textContent = slot.slice(GENERIC_GROUP_PREFIX.length);
+	const table = document.createElement("table");
+	const headRow = document.createElement("tr");
+	for (const text of ["Key", "Value"]) {
+		const th = document.createElement("th");
+		th.textContent = text;
+		headRow.appendChild(th);
+	}
+	const thead = document.createElement("thead");
+	thead.appendChild(headRow);
+	const tbody = document.createElement("tbody");
+	tbody.id = slot;
+	table.appendChild(thead);
+	table.appendChild(tbody);
+	const content = document.getElementById("content");
+	content.appendChild(heading);
+	content.appendChild(table);
+	genericGroups.set(slot, [heading, table]);
+	return tbody;
 }
 
 // fetchedStatsGroups holds the three groups' rows from the last fetch;
@@ -163,11 +214,9 @@ function loadStats() {
 			applyStatsFilter();
 		})
 		.catch((err) => {
-			for (const slot of STATS_SLOTS) {
-				const tbody = document.getElementById(slot);
-				if (tbody === null) continue;
+			for (const tbody of document.querySelectorAll("#content tbody")) {
 				tbody.textContent = "";
-				tbody.appendChild(kvMessageRow("error: " + err.message));
+				tbody.appendChild(messageRow("error: " + err.message, KV_COLUMNS));
 			}
 		});
 }
@@ -236,18 +285,6 @@ function showEmptyState(show) {
 	empty.textContent = show ? "No live reports." : "";
 }
 
-// messageRow renders one full-width message row (loading, no-match,
-// error) so the table is never blank.
-function messageRow(text) {
-	const td = document.createElement("td");
-	td.colSpan = REPORT_COLUMNS;
-	td.className = "empty";
-	td.textContent = text;
-	const tr = document.createElement("tr");
-	tr.appendChild(td);
-	return tr;
-}
-
 // renderReports renders whatever list it is handed - the full fetched
 // one or the filter's narrowed view - swapping in the empty state when
 // nothing at all is live.
@@ -270,7 +307,7 @@ function showReportsError(err) {
 	const rows = document.getElementById("report-rows");
 	showEmptyState(false);
 	rows.textContent = "";
-	rows.appendChild(messageRow("error: " + err.message));
+	rows.appendChild(messageRow("error: " + err.message, REPORT_COLUMNS));
 }
 
 function loadReports() {
@@ -278,7 +315,7 @@ function loadReports() {
 	if (rows === null) return;
 	showEmptyState(false);
 	rows.textContent = "";
-	rows.appendChild(messageRow("Loading..."));
+	rows.appendChild(messageRow("Loading...", REPORT_COLUMNS));
 	fetchJSON("GET", "/api/reports")
 		.then((doc) => {
 			fetchedReports = doc.reports || [];
@@ -295,8 +332,8 @@ function loadReports() {
 // Per-row delete: its own cell, and the button stops click propagation
 // so clicking it never toggles the row's expansion. Delete is two-step
 // (click, then confirm): the first click arms the confirmation and only
-// the confirm control issues the DELETE - against the report's identity,
-// rule and target - after which the list refetches so the deleted Report
+// the confirm control issues the DELETE - by the report's rule and
+// target - after which the list refetches so the deleted Report
 // is gone. Cancelling puts the Delete button back and deletes nothing.
 const DELETE_CONFIRM_COPY =
 	"Deleting this report withdraws the enforcement derived from it at " +
@@ -394,12 +431,9 @@ function applyReportFilter() {
 	const rows = document.getElementById("report-rows");
 	if (rows === null) return;
 	const { match, invalid } = searchMatcher();
-	if (invalid) {
-		renderReports(fetchedReports);
-		return;
-	}
-	// Clearing the box restores the full list.
-	if (match === null) {
+	// An invalid pattern keeps the full list visible (the inline error
+	// names the typo); clearing the box restores the full list too.
+	if (invalid || match === null) {
 		renderReports(fetchedReports);
 		return;
 	}
@@ -411,7 +445,7 @@ function applyReportFilter() {
 	);
 	if (narrowed.length === 0 && fetchedReports.length > 0) {
 		rows.textContent = "";
-		rows.appendChild(messageRow("No reports match the filter."));
+		rows.appendChild(messageRow("No reports match the filter.", REPORT_COLUMNS));
 		return;
 	}
 	renderReports(narrowed);

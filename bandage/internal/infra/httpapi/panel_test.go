@@ -181,7 +181,7 @@ func TestStatsPageRendersSnapshotAsGroupedKeyValueTables(t *testing.T) {
 	}
 	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
 	for _, want := range []string{
-		"/api/stats", // the snapshot comes from the machine API
+		"/api/stats",                               // the snapshot comes from the machine API
 		`"build"`, `"pipeline"`, `"tracker_cache"`, // the snapshot blocks that feed the groups
 		"group-identity", "group-pipeline", "group-tracker-cache",
 	} {
@@ -203,6 +203,27 @@ func TestStatsRowsAreGeneratedPerReportedKey(t *testing.T) {
 	for _, want := range []string{"Object.entries", "kv-row", "kv-key", "kv-value"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("common.js lacks the generic key/value row builder's %s; rows must be generated per reported key, body:\n%s", want, js)
+		}
+	}
+}
+
+// An unknown top-level block renders within its own generic group - a
+// generic extra group table named for the block - never flattened as
+// dotted rows into the identity table; the known top-level keys
+// (generated_at, uptime) and the build block's fields stay in identity
+// as now. The rendering itself is verified interactively per the user
+// stories; this pins the generic group's served vocabulary.
+func TestStatsUnknownBlocksGetTheirOwnGenericGroup(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`["build", "group-identity"]`, // the build block's fields stay in identity as now
+		"group-extra-",                // the generic group's row slot, named for the block
+		"group-title",                 // its heading names the block
+		`createElement("table")`,      // its key/value table
+		`key + "." + field`,           // an unknown block's generic extra rows keep the block-key prefix
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the generic group's %q; an unknown top-level block must render its own group table named for the block, body:\n%s", want, js)
 		}
 	}
 }
@@ -230,7 +251,7 @@ func TestStatsSearchNarrowsKeyValueRows(t *testing.T) {
 func TestStatsLegendShowsBuildIdentityAndUptime(t *testing.T) {
 	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
 	for _, want := range []string{
-		`("legend")`,                           // the right-aligned legend slot
+		`("legend")`,                                  // the right-aligned legend slot
 		"build.name", "build.version", "build.commit", // the build identity
 		" · uptime ", // the uptime copy
 	} {

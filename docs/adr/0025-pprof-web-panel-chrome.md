@@ -17,7 +17,12 @@ tabbed page - **Stats** at `/stats` and the report review (Reports) at
 `/reports` - and `GET /` redirects to the Stats page. The pages occupy
 the web root that ADR 0022 reserved for pages; the machine contract
 stays under `/api/`, so no page shadows an API route and each view has
-its own bookmarks-able address.
+its own bookmarks-able address. This amends ADR 0022's "old root paths
+404" consequence: `GET /stats` and `GET /reports` now answer 200 HTML
+at the old root paths, and `DELETE /reports` answers 405 (the page
+route serves GET only), so only requests the pages do not answer still
+fail visibly - an unmigrated consumer's `GET` receives a page instead
+of a 404, while the documents' move under `/api/` is unchanged.
 
 Every derived asset (each page, the stylesheet, the script) opens with a
 short notice: derived from google/pprof, Copyright Google Inc., Apache
