@@ -104,6 +104,24 @@ func TestFilterMatch(t *testing.T) {
 		{"agent regex case-sensitive", `agent regex "CURL"`, nil, false},
 		{"agent regex case-insensitive flag", `agent regex "(?i)CURL"`, nil, true},
 
+		// single-quoted strings: interchangeable with the double-quoted spelling
+		// at every text value; '' is the only escape (one literal quote), every
+		// other character - backslashes included - is literal.
+		{"path exact single-quoted equivalence", `path '/releases/24.04.iso'`, nil, true},
+		{"path exact single-quoted mismatch", `path '/releases'`, nil, false},
+		{"agent prefix single-quoted equivalence", `agent prefix 'curl/'`, nil, true},
+		{"agent prefix single-quoted mismatch", `agent prefix 'wget/'`, nil, false},
+		{"agent suffix single-quoted equivalence", `agent suffix '.0'`, nil, true},
+		{"path regex single-quoted pairs with double-quoted", `path regex '\.iso$'`, nil, true},
+		{"path regex single-quoted mismatch", `path regex '\.deb$'`, nil, false},
+		{"path regex single-quoted unanchored", `path regex 'releases'`, nil, true},
+		{"path regex single-quoted case-sensitive", `path regex 'RELEASES'`, nil, false},
+		{"path regex single-quoted case-insensitive flag", `path regex '(?i)RELEASES'`, nil, true},
+		{"single-quoted backslashes are literal", `path '/releases/24\.04.iso'`, func(e *domain.Event) { e.Path = `/releases/24\.04.iso` }, true},
+		{"single-quoted backslash text is not an escape", `path keyword '\.iso'`, nil, false},
+		{"single-quoted values compose with combinators", `not path suffix '\.img' and (agent prefix 'curl/' or agent prefix 'wget/')`, nil, true},
+		{"single-quoted doubled quote is one literal quote", `agent suffix 'don''t'`, func(e *domain.Event) { e.Agent = "curl/don't" }, true},
+
 		// status: code or class.
 		{"status exact", "status 200", nil, true},
 		{"status mismatch", "status 404", nil, false},

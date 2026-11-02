@@ -98,7 +98,7 @@ spelling and its escapes are unchanged.
   form with its four escapes, and the single-quoted form where `''`
   yields one quote and every other character - including backslash -
   is literal. The string ends at the first unpaired quote, so `'foo\'`
-  is `foo\` and `''''` is two quotes.
+  is `foo\` and `''''` is one literal quote (`''''''` is two).
 - Both spellings produce the same string token; the text-value consumer
   and the parser are unchanged - one seam, no parser fork. Empty `''`
   is a valid empty text token and is rejected where empty text is
@@ -107,13 +107,17 @@ spelling and its escapes are unchanged.
 - The lexer gains a single-quoted scan routine mirroring the existing
   one: unterminated strings raise the same `unterminated string` error
   at the opening quote, and `unknown escape sequence` remains exclusive
-  to the double-quoted form - raw-quoted text can never raise it.
+  to the double-quoted form - single-quoted text can never raise it.
 - Single-quoted strings may span newlines, parity with the
   double-quoted form.
 - The quote character joins the set that terminates bare words (parity
-  with the double quote). This can only change inputs that fail to load
-  today: a successfully-loading file's bare words are keywords,
-  numbers, or CIDRs and cannot contain a quote character.
+  with the double quote). Bare words are keywords, numbers, CIDRs, or
+  method names; a method name containing a quote character is the one
+  input class that loads today and lexes differently after - it now
+  fails loudly at load at the quote (`method don't` raises
+  `unterminated string` at the quote, `method 'GET'` raises the
+  expected-bare-method-name error). Loud at load, never a silent
+  semantic change.
 - Compatibility and versioning: the addition is additive; the
   rules-file format version stays 0, and an older binary rejects a
   single-quoted string at load (it lexes as a bare word and fails the
