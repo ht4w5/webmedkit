@@ -103,8 +103,7 @@ function statsGroups(snapshot) {
 	return groups;
 }
 
-// kvRow builds one key/value row; kvMessageRow the full-width message
-// row (loading, error) the key/value tables share.
+// kvRow builds one key/value row.
 function kvRow(row) {
 	const tr = document.createElement("tr");
 	tr.className = "kv-row";
@@ -117,9 +116,14 @@ function kvRow(row) {
 	return tr;
 }
 
-function kvMessageRow(text) {
+// KV_COLUMNS is the key/value tables' Key and Value columns.
+const KV_COLUMNS = 2;
+
+// messageRow builds one full-width message row (loading, no-match,
+// error) spanning a table's columns, so a table is never blank.
+function messageRow(text, colSpan) {
 	const td = document.createElement("td");
-	td.colSpan = 2;
+	td.colSpan = colSpan;
 	td.className = "empty";
 	td.textContent = text;
 	const tr = document.createElement("tr");
@@ -143,7 +147,7 @@ function renderStatsGroups(groups, match) {
 		tbody.textContent = "";
 		const shown = match === null ? rows : rows.filter((row) => match.test(row.key + "\n" + row.value));
 		if (shown.length === 0) {
-			tbody.appendChild(kvMessageRow(match === null ? "Loading..." : "No keys match the filter."));
+			tbody.appendChild(messageRow(match === null ? "Loading..." : "No keys match the filter.", KV_COLUMNS));
 			continue;
 		}
 		for (const row of shown) {
@@ -212,7 +216,7 @@ function loadStats() {
 		.catch((err) => {
 			for (const tbody of document.querySelectorAll("#content tbody")) {
 				tbody.textContent = "";
-				tbody.appendChild(kvMessageRow("error: " + err.message));
+				tbody.appendChild(messageRow("error: " + err.message, KV_COLUMNS));
 			}
 		});
 }
@@ -281,18 +285,6 @@ function showEmptyState(show) {
 	empty.textContent = show ? "No live reports." : "";
 }
 
-// messageRow renders one full-width message row (loading, no-match,
-// error) so the table is never blank.
-function messageRow(text) {
-	const td = document.createElement("td");
-	td.colSpan = REPORT_COLUMNS;
-	td.className = "empty";
-	td.textContent = text;
-	const tr = document.createElement("tr");
-	tr.appendChild(td);
-	return tr;
-}
-
 // renderReports renders whatever list it is handed - the full fetched
 // one or the filter's narrowed view - swapping in the empty state when
 // nothing at all is live.
@@ -315,7 +307,7 @@ function showReportsError(err) {
 	const rows = document.getElementById("report-rows");
 	showEmptyState(false);
 	rows.textContent = "";
-	rows.appendChild(messageRow("error: " + err.message));
+	rows.appendChild(messageRow("error: " + err.message, REPORT_COLUMNS));
 }
 
 function loadReports() {
@@ -323,7 +315,7 @@ function loadReports() {
 	if (rows === null) return;
 	showEmptyState(false);
 	rows.textContent = "";
-	rows.appendChild(messageRow("Loading..."));
+	rows.appendChild(messageRow("Loading...", REPORT_COLUMNS));
 	fetchJSON("GET", "/api/reports")
 		.then((doc) => {
 			fetchedReports = doc.reports || [];
@@ -340,8 +332,8 @@ function loadReports() {
 // Per-row delete: its own cell, and the button stops click propagation
 // so clicking it never toggles the row's expansion. Delete is two-step
 // (click, then confirm): the first click arms the confirmation and only
-// the confirm control issues the DELETE - against the report's identity,
-// rule and target - after which the list refetches so the deleted Report
+// the confirm control issues the DELETE - by the report's rule and
+// target - after which the list refetches so the deleted Report
 // is gone. Cancelling puts the Delete button back and deletes nothing.
 const DELETE_CONFIRM_COPY =
 	"Deleting this report withdraws the enforcement derived from it at " +
@@ -439,12 +431,9 @@ function applyReportFilter() {
 	const rows = document.getElementById("report-rows");
 	if (rows === null) return;
 	const { match, invalid } = searchMatcher();
-	if (invalid) {
-		renderReports(fetchedReports);
-		return;
-	}
-	// Clearing the box restores the full list.
-	if (match === null) {
+	// An invalid pattern keeps the full list visible (the inline error
+	// names the typo); clearing the box restores the full list too.
+	if (invalid || match === null) {
 		renderReports(fetchedReports);
 		return;
 	}
@@ -456,7 +445,7 @@ function applyReportFilter() {
 	);
 	if (narrowed.length === 0 && fetchedReports.length > 0) {
 		rows.textContent = "";
-		rows.appendChild(messageRow("No reports match the filter."));
+		rows.appendChild(messageRow("No reports match the filter.", REPORT_COLUMNS));
 		return;
 	}
 	renderReports(narrowed);
