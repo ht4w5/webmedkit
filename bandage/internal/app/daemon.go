@@ -138,7 +138,15 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 
 	var repo reportStore = o.store
 	if repo == nil {
-		r, err := sqlite.Open(cfg.DB.SQLite.Path)
+		// Memory mode (db.sqlite.memory) runs the report store on a
+		// throwaway in-memory database: one shared database across the
+		// read and write paths, no files behind it, an empty store on
+		// every start.
+		path := cfg.DB.SQLite.Path
+		if cfg.DB.SQLite.Memory {
+			path = ":memory:"
+		}
+		r, err := sqlite.Open(path)
 		if err != nil {
 			return nil, err
 		}
@@ -194,6 +202,11 @@ func (d *Daemon) Start(lifetime context.Context) error {
 		Str("commit", d.build.Commit()).
 		Str("build_date", d.build.BuildDate()).
 		Msg("starting")
+	if d.cfg.DB.SQLite.Memory {
+		// The deliberate bend of ADR 0002 (durable reports) is named
+		// here, at startup, where the operator can still act on it.
+		d.logger.Warn().Msg("memory mode: reports are not durable - deliberately bends ADR 0002 (durable reports) for debugging")
+	}
 	d.src = syslog.New(d.cfg.Ingest.Syslog.Network, d.cfg.Ingest.Syslog.Listen, d.lines, d.logger)
 	if err := d.src.Start(); err != nil {
 		return err

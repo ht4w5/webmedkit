@@ -2685,3 +2685,113 @@ func TestStartupLogCarriesBuildIdentity(t *testing.T) {
 		t.Errorf("build_date = %v, want %q", attrs["build_date"], testBuild.BuildDate())
 	}
 }
+
+// nonDurableWarning is the startup record memory mode must log and a
+// file-backed run must not: the deliberate bend of ADR 0002 (durable
+// reports), named at the moment the operator can still act on it.
+const nonDurableWarning = "memory mode: reports are not durable - deliberately bends ADR 0002 (durable reports) for debugging"
+
+// TestE2EMemoryModeRoundTripAndStartupWarning: the memory-mode config
+// option serves reports against the in-memory store - upserts, listing,
+// deletion and expiry sweeping all work over the one shared database -
+// and startup logs the non-durable-reports warning.
+func TestE2EMemoryModeRoundTripAndStartupWarning(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonCfg(t, clock, "unixgram", "", bandwidthRules, func(cfg *Config) {
+		cfg.DB.SQLite = SQLite{Memory: true}
+	})
+
+	// Upsert and listing over the shared in-memory database: the
+	// overflow Trigger writes the report and the API lists it back.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 2)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 || doc.Reports[0].Rule != "sustained-egress" {
+		t.Fatalf("after overflow: %+v, want the one report", doc.Reports)
+	}
+
+	// Deletion removes the row and the store keeps writing afterwards.
+	if _, n := d.del(t, url.Values{"target": {"203.0.113.7/32"}}); n != 1 {
+		t.Fatalf("delete count = %d, want 1", n)
+	}
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after delete: %+v, want none", doc.Reports)
+	}
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 3)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 {
+		t.Fatalf("after re-trigger: %+v, want 1", doc.Reports)
+	}
+
+	// The next write upserts over the expired row: expiry recomputes
+	// while created_at stays fixed (the report-store contract). The
+	// tracker entry expired with the wall clock, so overflow takes the
+	// same two events as the first write.
+	clock.Advance(25 * time.Hour)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after 25h: %+v, want none (expired reports never returned)", doc.Reports)
+	}
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 5)
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("after upsert over the expired row: %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-18T19:00:00Z" || r.ExpiresAt != "2025-10-19T19:00:00Z" {
+		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want %q/2025-10-18T19:00:00Z/2025-10-19T19:00:00Z",
+			r.CreatedAt, r.UpdatedAt, r.ExpiresAt, wallBase)
+	}
+
+	// Expiry sweeping deletes the expired row for good.
+	clock.Advance(50 * time.Hour)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after 75h: %+v, want none", doc.Reports)
+	}
+	if _, err := d.sweepOnce(context.Background()); err != nil {
+		t.Fatalf("sweepOnce: %v", err)
+	}
+	if _, n := d.del(t, url.Values{"target": {"203.0.113.7/32"}}); n != 0 {
+		t.Errorf("delete after sweep = %d, want 0 (row swept away)", n)
+	}
+
+	// Memory mode starts empty on every run: a fresh daemon over the
+	// same config serves no leftover reports.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := d.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	cancel()
+	d2 := startTestDaemonCfg(t, clock, "unixgram", "", bandwidthRules, func(cfg *Config) {
+		cfg.DB.SQLite = SQLite{Memory: true}
+	})
+	if doc := d2.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("after restart: %+v, want an empty store", doc.Reports)
+	}
+
+	// Startup warns that reports are not durable.
+	recs := d.logs.withMessage(nonDurableWarning)
+	if len(recs) != 1 {
+		t.Fatalf("non-durable warning records = %d, want 1", len(recs))
+	}
+	if recs[0].Level != zerolog.WarnLevel {
+		t.Errorf("non-durable warning level = %v, want warn", recs[0].Level)
+	}
+}
+
+// TestE2EFileBackedRunLogsNoNonDurableWarning: a file-backed run logs no
+// non-durable-reports warning and behaves as before - the warning is
+// memory mode's alone.
+func TestE2EFileBackedRunLogsNoNonDurableWarning(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", filepath.Join(t.TempDir(), "reports.db"), bandwidthRules)
+	if recs := d.logs.withMessage(nonDurableWarning); len(recs) != 0 {
+		t.Errorf("file-backed startup logged the non-durable warning: %+v", recs)
+	}
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 2)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 {
+		t.Errorf("after overflow: %+v, want 1 report", doc.Reports)
+	}
+}
