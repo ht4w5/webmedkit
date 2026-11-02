@@ -122,6 +122,8 @@ _Avoid_: capped drop, drop, expiry
 **Report**:
 The document recording that a rule matched for a target, carrying its
 tracker reading, sample, and penalty, alive until expiry or deletion.
+Deleting a Report withdraws the enforcement derived from it at the
+enforcing consumer's next sync.
 _Avoid_: finding, record, ban
 
 **Reason**:

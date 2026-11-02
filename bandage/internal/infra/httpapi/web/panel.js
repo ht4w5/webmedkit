@@ -54,11 +54,14 @@ function reportRow(report) {
 		td.textContent = text;
 		row.appendChild(td);
 	}
+	// The delete button lives in its own cell; deleteCell stops its
+	// clicks from reaching the row below.
+	row.appendChild(deleteCell(report));
 	const detail = document.createElement("tr");
 	detail.className = "report-detail";
 	detail.hidden = true;
 	const td = document.createElement("td");
-	td.colSpan = 4;
+	td.colSpan = 5;
 	const pre = document.createElement("pre");
 	pre.className = "json";
 	// The full report body pretty-printed: reason, penalty, sample,
@@ -84,7 +87,7 @@ function reportRow(report) {
 // error) so the table is never blank.
 function messageRow(text) {
 	const td = document.createElement("td");
-	td.colSpan = 4;
+	td.colSpan = 5;
 	td.className = "empty";
 	td.textContent = text;
 	const tr = document.createElement("tr");
@@ -119,6 +122,79 @@ function loadReports() {
 			renderReports(doc.reports || []);
 		})
 		.catch((err) => {
+			rows.textContent = "";
+			rows.appendChild(messageRow("error: " + err.message));
+		});
+}
+
+// Per-row delete: its own cell, and the button stops click propagation
+// so clicking it never toggles the row's expansion. Delete is two-step
+// (click, then confirm): the first click arms the confirmation and only
+// the confirm control issues the DELETE - against the report's identity,
+// rule and target - after which the list refetches so the deleted Report
+// is gone. Cancelling puts the Delete button back and deletes nothing.
+const DELETE_CONFIRM_COPY =
+	"Deleting this report withdraws the enforcement derived from it at " +
+	"the enforcing consumer's next sync.";
+
+function armDeleteButton(td, report) {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.textContent = "Delete";
+	button.addEventListener("click", (event) => {
+		event.stopPropagation();
+		showDeleteConfirm(td, report);
+	});
+	td.appendChild(button);
+}
+
+function deleteCell(report) {
+	const td = document.createElement("td");
+	td.className = "delete";
+	armDeleteButton(td, report);
+	return td;
+}
+
+function showDeleteConfirm(td, report) {
+	td.textContent = "";
+	const copy = document.createElement("p");
+	copy.className = "delete-confirm";
+	copy.textContent = DELETE_CONFIRM_COPY;
+	td.appendChild(copy);
+	const confirm = document.createElement("button");
+	confirm.type = "button";
+	confirm.textContent = "Confirm";
+	confirm.addEventListener("click", (event) => {
+		event.stopPropagation();
+		deleteReport(report);
+	});
+	td.appendChild(confirm);
+	const cancel = document.createElement("button");
+	cancel.type = "button";
+	cancel.textContent = "Cancel";
+	cancel.addEventListener("click", (event) => {
+		event.stopPropagation();
+		td.textContent = "";
+		armDeleteButton(td, report);
+	});
+	td.appendChild(cancel);
+}
+
+function deleteReport(report) {
+	const url = "/api/reports?rule=" + encodeURIComponent(report.rule) +
+		"&target=" + encodeURIComponent(report.target);
+	fetch(url, { method: "DELETE" })
+		.then((res) => {
+			if (!res.ok) {
+				throw new Error("DELETE /api/reports returned HTTP " + res.status);
+			}
+			return res.json();
+		})
+		.then(() => {
+			loadReports();
+		})
+		.catch((err) => {
+			const rows = document.getElementById("report-rows");
 			rows.textContent = "";
 			rows.appendChild(messageRow("error: " + err.message));
 		});

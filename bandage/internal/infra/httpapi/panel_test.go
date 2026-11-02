@@ -81,6 +81,64 @@ func TestWebPanelReportsRefreshAndEmptyState(t *testing.T) {
 	}
 }
 
+// Each report row offers a delete button that deletes exactly the
+// reviewed Report by its identity - rule and target as the query - via
+// DELETE /api/reports and, on completion, refetches the list so the
+// deleted Report is gone from the table.
+func TestWebPanelReportRowsOfferDeleteByIdentity(t *testing.T) {
+	srv := apiTestServer(nil)
+	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
+	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
+	if !strings.Contains(page, "Delete") {
+		t.Errorf("GET / body carries no per-row delete control, body:\n%s", page)
+	}
+	if !strings.Contains(js, `"/api/reports?rule="`) || !strings.Contains(js, `"&target="`) {
+		t.Errorf("panel.js does not address DELETE /api/reports by rule and target filters, body:\n%s", js)
+	}
+	if !strings.Contains(js, "encodeURIComponent(report.rule)") || !strings.Contains(js, "encodeURIComponent(report.target)") {
+		t.Errorf("panel.js does not delete by the reviewed report's (rule, target) identity, body:\n%s", js)
+	}
+	if !regexp.MustCompile(`method:\s*"DELETE"`).MatchString(js) {
+		t.Errorf("panel.js issues no DELETE; a per-row delete must call the reports API's DELETE, body:\n%s", js)
+	}
+	if !regexp.MustCompile(`(?s)function deleteReport[\s\S]{0,800}?loadReports\(\)`).MatchString(js) {
+		t.Errorf("deletion does not refetch the report list; after a delete the Report must be gone from the table, body:\n%s", js)
+	}
+}
+
+// The delete button's first click is a confirmation step, never an
+// immediate delete: only the confirm control issues the DELETE, and
+// Cancel deletes nothing. The confirmation copy states that the
+// enforcement derived from the report will be withdrawn at the enforcing
+// consumer's next sync - naming no specific consumer, since deployments
+// may run any ban-rule consumer.
+func TestWebPanelDeleteIsTwoStepWithWithdrawalCopy(t *testing.T) {
+	srv := apiTestServer(nil)
+	js := apiRequest(t, srv, http.MethodGet, "/panel.js").Body.String()
+	page := apiRequest(t, srv, http.MethodGet, "/").Body.String()
+	if !regexp.MustCompile(`(?s)function deleteCell[\s\S]{0,600}?showDeleteConfirm`).MatchString(js) {
+		t.Errorf("the delete button's first click does not ask for confirmation; delete must be two-step (click, then confirm), body:\n%s", js)
+	}
+	if !regexp.MustCompile(`(?s)function showDeleteConfirm[\s\S]{0,900}?deleteReport\(`).MatchString(js) {
+		t.Errorf("the confirmation step never issues the delete, body:\n%s", js)
+	}
+	for _, want := range []string{"Confirm", "Cancel"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the confirmation step lacks the %q control; cancelling must delete nothing, body:\n%s", want, js)
+		}
+	}
+	for _, want := range []string{"enforcing consumer", "next sync", "withdraw"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("the delete confirmation copy lacks %q; it must state that the enforcement derived from the report is withdrawn at the enforcing consumer's next sync, body:\n%s", want, js)
+		}
+	}
+	for _, body := range []string{js, page} {
+		if strings.Contains(body, "splint") {
+			t.Errorf("the panel names a specific consumer (%q); the delete confirmation must name no consumer, body:\n%s", "splint", body)
+		}
+	}
+}
+
 // Every asset the page references resolves from the same listener: each
 // href/src points at a local path that serves non-empty bytes.
 func TestWebPanelAssetsResolve(t *testing.T) {

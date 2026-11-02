@@ -137,6 +137,34 @@ main {
 	margin: 0.25rem 0 0.5rem;
 }
 
+.delete {
+	white-space: nowrap;
+}
+
+.delete button {
+	padding: 0.25rem 0.7rem;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	color: var(--accent);
+	background: transparent;
+	cursor: pointer;
+	font: inherit;
+	font-size: 0.85rem;
+}
+
+.delete button:hover {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: var(--bg);
+}
+
+.delete-confirm {
+	margin: 0 0 0.35rem;
+	color: var(--muted);
+	font-size: 0.85rem;
+	font-weight: normal;
+}
+
 .empty {
 	color: var(--muted);
 	font-style: italic;
