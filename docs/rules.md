@@ -62,8 +62,8 @@ Validate config and rules before deploying: `bandage -t -c bandage.yml
 Rule filters and the enrichment gate share one expression language over
 Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
-`path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
-`keyword`, and `regex` forms, plus `agent prefix|suffix "text"` -
+`path prefix|suffix|keyword|regex 'text'` (`agent` takes the exact,
+`keyword`, and `regex` forms, plus `agent prefix|suffix 'text'` -
 matching the user agent's literal start or end, exactly like
 `path prefix|suffix`),
 `sent >= 1m` / `sent <= 1m`, `size >= 100m` / `size <= 1m`, and
@@ -72,6 +72,21 @@ matching the user agent's literal start or end, exactly like
 allowed only after `sent` and `size`) -
 combined with `and`, `or`, `not`, where `not` binds tighter than `and`,
 which binds tighter than `or`.
+
+Text values - the `path`/`agent` exact form and the
+`prefix`/`suffix`/`keyword`/`regex` modifiers - come in two spellings,
+interchangeable everywhere. Double-quoted strings process four
+escapes: `\"` is a quote, `\\` a backslash, `\n` a newline, `\t` a
+tab; any other `\X` aborts loading with `unknown escape sequence \X`.
+Single-quoted strings have exactly one escape: `''` is a single quote.
+Every other character - backslashes included - is literal, and the
+string ends at the first unpaired quote, so `'foo\'` is `foo\` and
+`''''` is two quotes. Both spellings may span newlines, and empty text
+is rejected by the `prefix`/`suffix` matchers under either. Single
+quotes are the recommended spelling for regex patterns
+(`path regex '\.iso$'`): the pattern reads exactly as the regex engine
+sees it - in the double-quoted spelling a regex `\.` must instead be
+doubled to `"\\."`.
 
 `sent` decides over the bytes the event actually transferred; `size`
 decides over the served content's Filesize estimate
@@ -88,12 +103,11 @@ size and `size <= 0` matches nothing. Size 0 means unknown
 indistinguishable from not-yet-known
 ([GLOSSARY.md](../GLOSSARY.md)).
 
-`path regex "…"` and `agent regex "…"` compile their pattern when the
-rules load, with the DSL's string escapes (a regex `\.` is written
-`"\\."` in the source) - an invalid pattern aborts loading, never a
-silent no-match at runtime. Matching is an unanchored search over the
-Event's path or user agent, case-sensitive unless the pattern carries
-Go's `(?i)` inline flag (e.g. `agent regex "(?i)curl"`). These matchers
+`path regex '…'` and `agent regex '…'` compile their pattern when the
+rules load - an invalid pattern aborts loading, never a silent
+no-match at runtime. Matching is an unanchored search over the Event's
+path or user agent, case-sensitive unless the pattern carries Go's
+`(?i)` inline flag (e.g. `agent regex '(?i)curl'`). These matchers
 decide over Events during rule evaluation; the web panel's report
 filter is a separate client-side search over stored Reports, and the
 two are deliberately independent.

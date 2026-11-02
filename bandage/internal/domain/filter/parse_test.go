@@ -118,6 +118,26 @@ func TestParseTrees(t *testing.T) {
 		// String escapes unescape to the matched value.
 		{"string escapes", `path "a\"b\\c\nd\te"`, "path \"a\"b\\c\nd\te\""},
 
+		// Single-quoted strings produce the same tokens as the double-quoted
+		// spelling at every text value; backslash sequences stay literal.
+		{"single-quoted path exact", `path '/x'`, `path "/x"`},
+		{"single-quoted path prefix", `path prefix '/x'`, `path prefix "/x"`},
+		{"single-quoted path suffix", `path suffix '.iso'`, `path suffix ".iso"`},
+		{"single-quoted path keyword", `path keyword 'iso'`, `path keyword "iso"`},
+		{"single-quoted path regex", `path regex '\.iso$'`, `path regex "\.iso$"`},
+		{"single-quoted agent exact", `agent 'curl'`, `agent "curl"`},
+		{"single-quoted agent prefix", `agent prefix 'curl/'`, `agent prefix "curl/"`},
+		{"single-quoted agent suffix", `agent suffix '.0'`, `agent suffix ".0"`},
+		{"single-quoted agent keyword", `agent keyword 'curl'`, `agent keyword "curl"`},
+		{"single-quoted agent regex", `agent regex '(?i)curl'`, `agent regex "(?i)curl"`},
+		{"single-quoted doubled quote is one quote", `path 'a''b'`, `path "a'b"`},
+		{"single-quoted string ends at unpaired quote", `path 'foo\'`, `path "foo\"`},
+		{"single-quoted doubled quotes are two quotes", `path ''''`, `path "'"`},
+		{"single-quoted backslash sequences are literal", `path 'a\qb'`, `path "a\qb"`},
+		{"single-quoted string spans newlines", "path 'a\nb'", "path \"a\nb\""},
+		{"single quote terminates bare words", "path'foo'", `path "foo"`},
+		{"double quote terminates bare words", `path"foo"`, `path "foo"`},
+
 		// Precedence: not > and > or; chains flatten to n-ary nodes.
 		{"and chain flattens", "any and none and any", "and(any, none, any)"},
 		{"or chain flattens", "any or none or any", "or(any, none, any)"},
@@ -164,7 +184,11 @@ func TestParseErrorPositions(t *testing.T) {
 		{"lone lt", "sent < 1", `filter: 1:6: expected "<="`},
 		{"number out of range", "sent >= 9223372036854775808", `filter: 1:9: number "9223372036854775808" is out of range`},
 		{"unterminated string", `path "abc`, "filter: 1:6: unterminated string"},
+		{"unterminated single-quoted string", `path 'abc`, "filter: 1:6: unterminated string"},
+		{"unterminated single-quoted string after newline", "any and\npath 'foo", "filter: 2:6: unterminated string"},
 		{"trailing backslash in string", `path "abc\`, "filter: 1:6: unterminated string"},
+		// "unknown escape sequence" is exclusive to the double-quoted spelling:
+		// the same text in a single-quoted string is literal (see parse trees).
 		{"bad escape points at escape char", `path "a\qb"`, `filter: 1:9: unknown escape sequence \q`},
 
 		// Parser errors at the offending token.
@@ -185,6 +209,11 @@ func TestParseErrorPositions(t *testing.T) {
 		{"path bare word value", "path x", `filter: 1:6: expected a quoted text value after "path", got "x"`},
 		{"path prefix missing value", `path prefix`, `filter: 1:12: expected a quoted text value after "path", got end of filter`},
 		{"path empty value", `path ""`, "filter: 1:6: path must not be empty"},
+		// Empty text is rejected under either spelling, identically.
+		{"path prefix empty value", `path prefix ""`, "filter: 1:13: prefix must not be empty"},
+		{"path prefix empty single-quoted value", `path prefix ''`, "filter: 1:13: prefix must not be empty"},
+		{"path suffix empty value", `path suffix ""`, "filter: 1:13: suffix must not be empty"},
+		{"path suffix empty single-quoted value", `path suffix ''`, "filter: 1:13: suffix must not be empty"},
 		{"path keyword empty value", `path keyword ""`, "filter: 1:14: keyword must not be empty"},
 		{"path regex missing value", `path regex`, `filter: 1:11: expected a quoted text value after "path", got end of filter`},
 		{"path regex empty value", `path regex ""`, "filter: 1:12: pattern must not be empty"},
@@ -192,8 +221,10 @@ func TestParseErrorPositions(t *testing.T) {
 		{"agent empty value", `agent ""`, "filter: 1:7: agent must not be empty"},
 		{"agent prefix missing value", `agent prefix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
 		{"agent prefix empty value", `agent prefix ""`, "filter: 1:14: prefix must not be empty"},
+		{"agent prefix empty single-quoted value", `agent prefix ''`, "filter: 1:14: prefix must not be empty"},
 		{"agent suffix missing value", `agent suffix`, `filter: 1:13: expected a quoted text value after "agent", got end of filter`},
 		{"agent suffix empty value", `agent suffix ""`, "filter: 1:14: suffix must not be empty"},
+		{"agent suffix empty single-quoted value", `agent suffix ''`, "filter: 1:14: suffix must not be empty"},
 		{"agent regex missing value", `agent regex`, `filter: 1:12: expected a quoted text value after "agent", got end of filter`},
 		{"agent regex empty value", `agent regex ""`, "filter: 1:13: pattern must not be empty"},
 		{"agent regex invalid pattern", `agent regex "["`, "filter: 1:13: error parsing regexp: missing closing ]: `[`"},
@@ -253,6 +284,7 @@ func TestParseErrorUnwrapsValidation(t *testing.T) {
 	}{
 		{"status out of range", "status 20", "status"},
 		{"invalid regex pattern", `path regex "("`, "regexp"},
+		{"empty single-quoted value", `path prefix ''`, "must not be empty"},
 		{"size overflow", "size >= 9223372036854775807g", "out of range"},
 	}
 	for _, tt := range tests {
@@ -284,6 +316,7 @@ func TestParseExamples(t *testing.T) {
 		`not size unknown and (size >= 1g or path prefix "/releases/")`,
 		`agent prefix "curl/" or agent suffix ".0"`,
 		`path regex "\\.(php|asp)$" or agent regex "(?i)bot"`,
+		`path regex '\.(php|asp)$' or agent regex '(?i)bot'`,
 		"status class 5 or none",
 	} {
 		if _, err := Parse(src); err != nil {
