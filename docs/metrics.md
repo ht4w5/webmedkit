@@ -103,8 +103,11 @@ and alert rules that name families from this contract survive upgrades.
 ## Exposure
 
 `GET /metrics` is a read-only ops surface on the same unauthenticated
-listener as `/ping`, `/api/stats` and the report API: no authentication, no
-TLS, no configuration knob, always registered. This is the exposure
+listener as the rest of the daemon's web surface: `/ping`, the Web Panel
+at `GET /` (with its embedded assets), and the machine API under
+`/api/` - `/api/stats`, and the report API's `GET /api/reports` and
+`DELETE /api/reports` by rule and target. No authentication, no TLS, no
+configuration knob, always registered. This is the exposure
 stance [ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)
 already accepted, carried over unchanged. The endpoint is GET only:
 HEAD - which some scrapers and proxies send in place of GET - and

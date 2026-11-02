@@ -17,7 +17,7 @@ _Avoid_: request, log entry, record
 A predicate over an Event deciding whether a rule or the enrichment path
 considers the event. The regex matchers (`path regex`, `agent regex`)
 search unanchored, case-sensitive unless the pattern carries `(?i)`.
-Distinct from the web panel's client-side report filter.
+Distinct from the Web Panel's client-side report filter.
 _Avoid_: where clause, condition
 
 **Filesize**:
@@ -150,6 +150,7 @@ _Avoid_: excerpt, summary, example, evidence
 **Statistic**:
 The human-facing cumulative-since-start snapshot of the daemon's
 counters and identity, served for operator eyes with no format contract.
+The Web Panel is an in-repo consumer of the snapshot.
 _Avoid_: stats, metrics
 
 **Metric**:

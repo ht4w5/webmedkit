@@ -20,12 +20,12 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
-// decodeAPI decodes log lines with bytedance/sonic, configured to the
+// lineDecoder decodes log lines with bytedance/sonic, configured to the
 // historic map-decoder contract: member names match exactly (case-sensitive,
 // never the case-insensitive default) and unescaped control characters still
 // fail the line. Invalid UTF-8 in strings is mangled to U+FFFD (see
 // fieldValue.UnmarshalJSON), never a dropped line.
-var decodeAPI = sonic.Config{
+var lineDecoder = sonic.Config{
 	ValidateString: true,
 	CaseSensitive:  true,
 }.Froze()
@@ -82,7 +82,7 @@ func decodeString(b []byte) (string, error) {
 		return string(body), nil
 	}
 	var s string
-	if err := decodeAPI.Unmarshal(b, &s); err != nil {
+	if err := lineDecoder.Unmarshal(b, &s); err != nil {
 		return "", err
 	}
 	return s, nil
@@ -140,7 +140,7 @@ type rawFields struct {
 // malformed lines and invalid fields return an error and the event is dropped.
 func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	var fields rawFields
-	if err := decodeAPI.Unmarshal(line, &fields); err != nil {
+	if err := lineDecoder.Unmarshal(line, &fields); err != nil {
 		return domain.Event{}, fmt.Errorf("parse nginx json: %w", legacyLineError(line, err))
 	}
 

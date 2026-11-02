@@ -15,16 +15,21 @@ function showTab(name) {
 	document.getElementById("panel-reports").hidden = name !== "reports";
 }
 
+// fetchJSON fetches one machine API document and rejects on a non-OK
+// response, so each loader's catch renders "error: ..." in its own slot.
+function fetchJSON(method, url) {
+	return fetch(url, { method }).then((res) => {
+		if (!res.ok) {
+			throw new Error(method + " " + url.split("?")[0] + " returned HTTP " + res.status);
+		}
+		return res.json();
+	});
+}
+
 function loadStatistic() {
 	const out = document.getElementById("statistic");
 	out.textContent = "Loading...";
-	fetch("/api/stats")
-		.then((res) => {
-			if (!res.ok) {
-				throw new Error("GET /api/stats returned HTTP " + res.status);
-			}
-			return res.json();
-		})
+	fetchJSON("GET", "/api/stats")
 		.then((snapshot) => {
 			out.textContent = JSON.stringify(snapshot, null, 2);
 		})
@@ -34,9 +39,13 @@ function loadStatistic() {
 }
 
 // Report review table: one row per live Report fetched from
-// /api/reports. The fetched list is rendered by renderReports(list), so
-// a filter can re-render a narrowed list later, and reportRow(report)
-// builds one row's markup, so a per-row delete button can join it later.
+// /api/reports. renderReports(list) renders whatever list it is handed -
+// the full fetched one or the filter's narrowed view - and
+// reportRow(report) builds one row's markup including its delete cell.
+
+// The review table's columns: rule, target, tracker reading, updated
+// and the delete cell - detail and message rows span all of them.
+const REPORT_COLUMNS = 5;
 
 function trackerLabel(tracker) {
 	if (!tracker || !tracker.track) {
@@ -54,14 +63,14 @@ function reportRow(report) {
 		td.textContent = text;
 		row.appendChild(td);
 	}
-	// The delete button lives in its own cell; deleteCell stops its
-	// clicks from reaching the row below.
+	// The delete button lives in its own cell; its click handler stops
+	// propagation so it never toggles the row.
 	row.appendChild(deleteCell(report));
 	const detail = document.createElement("tr");
 	detail.className = "report-detail";
 	detail.hidden = true;
 	const td = document.createElement("td");
-	td.colSpan = 5;
+	td.colSpan = REPORT_COLUMNS;
 	const pre = document.createElement("pre");
 	pre.className = "json";
 	// The full report body pretty-printed: reason, penalty, sample,
@@ -70,8 +79,8 @@ function reportRow(report) {
 	td.appendChild(pre);
 	detail.appendChild(td);
 	// The toggle reaches only this row's own detail, so expanding one
-	// row never disturbs the others. (A per-row delete button must stop
-	// click propagation so it does not toggle the row.)
+	// row never disturbs the others. (The delete button stops click
+	// propagation so it does not toggle the row.)
 	row.addEventListener("click", () => {
 		const open = detail.hidden;
 		detail.hidden = !open;
@@ -87,7 +96,7 @@ function reportRow(report) {
 // error) so the table is never blank.
 function messageRow(text) {
 	const td = document.createElement("td");
-	td.colSpan = 5;
+	td.colSpan = REPORT_COLUMNS;
 	td.className = "empty";
 	td.textContent = text;
 	const tr = document.createElement("tr");
@@ -107,25 +116,24 @@ function renderReports(list) {
 	}
 }
 
+// showReportsError replaces the report rows with one error row, so a
+// failed fetch never leaves the table blank.
+function showReportsError(err) {
+	const rows = document.getElementById("report-rows");
+	rows.textContent = "";
+	rows.appendChild(messageRow("error: " + err.message));
+}
+
 function loadReports() {
 	const rows = document.getElementById("report-rows");
 	rows.textContent = "";
 	rows.appendChild(messageRow("Loading..."));
-	fetch("/api/reports")
-		.then((res) => {
-			if (!res.ok) {
-				throw new Error("GET /api/reports returned HTTP " + res.status);
-			}
-			return res.json();
-		})
+	fetchJSON("GET", "/api/reports")
 		.then((doc) => {
 			fetchedReports = doc.reports || [];
 			applyReportFilter();
 		})
-		.catch((err) => {
-			rows.textContent = "";
-			rows.appendChild(messageRow("error: " + err.message));
-		});
+		.catch(showReportsError);
 }
 
 // Per-row delete: its own cell, and the button stops click propagation
@@ -184,21 +192,11 @@ function showDeleteConfirm(td, report) {
 function deleteReport(report) {
 	const url = "/api/reports?rule=" + encodeURIComponent(report.rule) +
 		"&target=" + encodeURIComponent(report.target);
-	fetch(url, { method: "DELETE" })
-		.then((res) => {
-			if (!res.ok) {
-				throw new Error("DELETE /api/reports returned HTTP " + res.status);
-			}
-			return res.json();
-		})
+	fetchJSON("DELETE", url)
 		.then(() => {
 			loadReports();
 		})
-		.catch((err) => {
-			const rows = document.getElementById("report-rows");
-			rows.textContent = "";
-			rows.appendChild(messageRow("error: " + err.message));
-		});
+		.catch(showReportsError);
 }
 
 // Report filter: one regex box narrowing the fetched Reports
