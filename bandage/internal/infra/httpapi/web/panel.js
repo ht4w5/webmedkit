@@ -119,7 +119,8 @@ function loadReports() {
 			return res.json();
 		})
 		.then((doc) => {
-			renderReports(doc.reports || []);
+			fetchedReports = doc.reports || [];
+			applyReportFilter();
 		})
 		.catch((err) => {
 			rows.textContent = "";
@@ -200,6 +201,54 @@ function deleteReport(report) {
 		});
 }
 
+// Report filter: one regex box narrowing the fetched Reports
+// client-side - an unanchored, case-insensitive search across rule,
+// target, and the stringified body. This is a panel convenience over
+// stored Reports, deliberately independent of the Filter DSL's regex
+// matchers, which evaluate Events during rule evaluation.
+
+// fetchedReports holds the full list from the last fetch; the filter
+// only ever re-renders a narrowed view of it.
+let fetchedReports = [];
+
+function applyReportFilter() {
+	const pattern = document.getElementById("report-filter").value;
+	const error = document.getElementById("report-filter-error");
+	let match = null;
+	if (pattern !== "") {
+		try {
+			match = new RegExp(pattern, "i");
+		} catch (err) {
+			// A typo never blanks the view: report the bad pattern
+			// inline and leave the full list visible until it is fixed.
+			error.textContent = "invalid pattern: " + err.message;
+			error.hidden = false;
+			renderReports(fetchedReports);
+			return;
+		}
+	}
+	// Clearing the box restores the full list.
+	error.hidden = true;
+	error.textContent = "";
+	if (match === null) {
+		renderReports(fetchedReports);
+		return;
+	}
+	// The narrowed list re-renders through renderReports - the same
+	// row builder that carries the expand toggle - so filtering
+	// composes with row expansion.
+	const narrowed = fetchedReports.filter((report) =>
+		match.test(report.rule + "\n" + report.target + "\n" + JSON.stringify(report)),
+	);
+	if (narrowed.length === 0 && fetchedReports.length > 0) {
+		const rows = document.getElementById("report-rows");
+		rows.textContent = "";
+		rows.appendChild(messageRow("No reports match the filter."));
+		return;
+	}
+	renderReports(narrowed);
+}
+
 // refreshAll is the one manual reload trigger: both tabs refetch on
 // Refresh; nothing here polls.
 function refreshAll() {
@@ -208,6 +257,7 @@ function refreshAll() {
 }
 
 document.getElementById("refresh").addEventListener("click", refreshAll);
+document.getElementById("report-filter").addEventListener("input", applyReportFilter);
 
 for (const tab of document.querySelectorAll(".tab")) {
 	tab.addEventListener("click", () => showTab(tab.getAttribute("data-tab")));
