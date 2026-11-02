@@ -9,7 +9,7 @@ forms.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `agent prefix "text"` matches agents starting with text; `agent suffix "text"` matches agents ending with it
 - [x] Both match literally and case-sensitive, like `path prefix|suffix`
@@ -19,3 +19,9 @@ forms.
 - [x] Tests at the existing Filter seam (Parse -> Match tables), mirroring the `path prefix|suffix` tables
 
 Context: spec `../spec.md`.
+
+Implemented on integration branch `integration/dsl-extensions` (merge
+commit `37a8968`; cross-ticket code-review fixes through `5af6d25`,
+incl. the shared `parseTextMod` behind `path` and `agent` text
+modifiers). Context: spec `../spec.md` (Implementation Decisions,
+Testing Decisions).

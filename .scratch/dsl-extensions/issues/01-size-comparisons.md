@@ -14,7 +14,7 @@ not rejected at load).
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `size >= N` / `size <= N` accept N as a byte count or a binary-unit size (`k`, `m`, `g`), like `sent`
 - [x] Matches are inclusive at the boundary and consider only events whose Filesize is known; unknown-size events never match a comparison
@@ -27,3 +27,10 @@ not rejected at load).
 
 Context: spec `../spec.md`, ADR `0024` (size 0 means unknown), ADR
 `0019`, ADR `0021`.
+
+Implemented on integration branch `integration/dsl-extensions` (merge
+commit `ffdd65d`; cross-ticket code-review fixes through `5af6d25`,
+incl. the shared `parseByteLimit` parser, the `sizeKnown` guard, and the
+honest `&FilterSizeUnknown{}` construction). Context: spec `../spec.md`
+(Implementation Decisions, Testing Decisions), ADRs `0019`, `0021`,
+`0024`.

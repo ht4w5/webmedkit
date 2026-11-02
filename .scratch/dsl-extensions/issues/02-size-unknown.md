@@ -11,7 +11,7 @@ unknown; empty content is indistinguishable from not-yet-known).
 
 **Blocked by:** 01 (shares the `size` dispatch and completes its contract)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `size unknown` matches exactly the events whose Filesize is unknown; `not size unknown` is its complement
 - [x] The partition is pinned by tests: comparisons never claim unknowns, `size >= 0` matches every known size, `size <= 0` matches nothing
@@ -22,3 +22,8 @@ unknown; empty content is indistinguishable from not-yet-known).
 - [x] Tests at the existing Filter seam (Parse -> Match tables)
 
 Context: spec `../spec.md`, ADR `0024` (size 0 means unknown).
+
+Implemented on integration branch `integration/dsl-extensions` (merge
+commit `5874c2e`; cross-ticket code-review fixes through `5af6d25`).
+Context: spec `../spec.md` (Implementation Decisions, Testing
+Decisions), ADR `0024`.
