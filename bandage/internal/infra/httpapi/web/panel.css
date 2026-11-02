@@ -110,10 +110,34 @@ main {
 	line-height: 1.4;
 }
 
-.placeholder {
-	padding: 1.5rem 1rem;
-	border: 1px dashed var(--line);
-	border-radius: 4px;
+.reports {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.9rem;
+}
+
+.reports th,
+.reports td {
+	padding: 0.45rem 0.6rem;
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+.reports th {
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
+.report-row {
+	cursor: pointer;
+}
+
+.report-detail .json {
+	margin: 0.25rem 0 0.5rem;
+}
+
+.empty {
 	color: var(--muted);
 	font-style: italic;
 }
