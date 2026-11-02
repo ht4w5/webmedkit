@@ -1073,9 +1073,10 @@ chains:
 }
 
 // TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
-// the scrapeable machine contract (text exposition 0.0.4); GET / serves the
-// Web Panel from the daemon binary's embedded assets. Nothing else is
-// exposed beyond the report API and the /api/stats snapshot.
+// the scrapeable machine contract (text exposition 0.0.4); GET / redirects
+// to the Web Panel's Stats page and both view pages serve from the daemon
+// binary's embedded assets. Nothing else is exposed beyond the report API
+// and the /api/stats snapshot.
 func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
@@ -1107,27 +1108,48 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 		t.Errorf("GET /metrics body lacks the pipeline counter family, body:\n%s", body)
 	}
 
-	// GET / serves the Web Panel: the tab shell with its Statistic and
-	// Reports slots, embedded in the binary on the existing listener.
-	resp, err = apiClient.Get("http://" + d.apiAddr() + "/")
+	// GET / redirects to the Web Panel's Stats page; both view pages and
+	// their shared assets are embedded in the binary on the existing
+	// listener.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err = noRedirect.Get("http://" + d.apiAddr() + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / = %d, want 200 (the Web Panel)", resp.StatusCode)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("GET / = %d, want 302 (the redirect to the Stats page)", resp.StatusCode)
 	}
-	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
-		t.Errorf("GET / Content-Type = %q, want text/html", got)
+	if loc := resp.Header.Get("Location"); loc != "/stats" {
+		t.Errorf("GET / Location = %q, want /stats", loc)
 	}
-	for _, want := range []string{"Statistic", "Reports"} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("GET / body lacks the %q tab slot, body:\n%s", want, body)
+
+	for _, page := range []struct{ path, active string }{
+		{"/stats", `class="active" href="/stats"`},
+		{"/reports", `class="active" href="/reports"`},
+	} {
+		resp, err = apiClient.Get("http://" + d.apiAddr() + page.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", page.path, err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200 (the Web Panel)", page.path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", page.path, got)
+		}
+		for _, want := range []string{"Stats", "Reports", page.active} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("GET %s body lacks the %q header chrome, body:\n%s", page.path, want, body)
+			}
 		}
 	}
 
-	for _, path := range []string{"/debug", "/reports", "/stats", "/reports/1", "/api/reports/1"} {
+	for _, path := range []string{"/debug", "/reports/1", "/api/reports/1"} {
 		resp, err := apiClient.Get("http://" + d.apiAddr() + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

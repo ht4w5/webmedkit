@@ -1,19 +1,40 @@
+/* derived from google/pprof, Copyright Google Inc., Apache License 2.0 */
 "use strict";
 
-// Web Panel: tab switching plus the two tabs' manual reloads - the
-// Statistic snapshot and the report review table. Data comes from the
-// machine API only; nothing here polls - the Refresh button is the only
-// reload trigger.
+// Web Panel: the replicated pprof dropdown menus plus the two views'
+// manual reloads - the Stats snapshot and the report review table.
+// Data comes from the machine API only; nothing here polls - the
+// REFRESH menu item is the only reload trigger.
 
-function showTab(name) {
-	for (const tab of document.querySelectorAll(".tab")) {
-		const active = tab.getAttribute("data-tab") === name;
-		tab.classList.toggle("active", active);
-		tab.setAttribute("aria-selected", active ? "true" : "false");
+// Menu dropdowns open on their menu-name click and retract on any
+// outside press - pprof's menu behavior, kept minimal.
+(function initMenus() {
+	let openMenu = null;
+	for (const item of document.querySelectorAll(".menu-item")) {
+		const name = item.querySelector(".menu-name");
+		const menu = item.querySelector(".submenu");
+		if (!name || !menu) continue;
+		name.addEventListener("click", (event) => {
+			event.stopPropagation();
+			const opening = openMenu !== menu;
+			closeMenus();
+			if (opening) {
+				menu.style.display = "block";
+				openMenu = menu;
+			}
+		});
 	}
-	document.getElementById("panel-statistic").hidden = name !== "statistic";
-	document.getElementById("panel-reports").hidden = name !== "reports";
-}
+	function closeMenus() {
+		if (openMenu === null) return;
+		openMenu.style.display = "none";
+		openMenu = null;
+	}
+	document.addEventListener("mousedown", (event) => {
+		if (openMenu !== null && !event.target.closest(".menu-item")) {
+			closeMenus();
+		}
+	});
+})();
 
 // fetchJSON fetches one machine API document and rejects on a non-OK
 // response, so each loader's catch renders "error: ..." in its own slot.
@@ -26,8 +47,11 @@ function fetchJSON(method, url) {
 	});
 }
 
-function loadStatistic() {
-	const out = document.getElementById("statistic");
+// loadStats renders the Stats snapshot - the human-facing document with
+// no format contract (ADR 0006) - into the page's snapshot slot.
+function loadStats() {
+	const out = document.getElementById("stats");
+	if (out === null) return;
 	out.textContent = "Loading...";
 	fetchJSON("GET", "/api/stats")
 		.then((snapshot) => {
@@ -71,6 +95,7 @@ function reportRow(report) {
 	detail.hidden = true;
 	const td = document.createElement("td");
 	td.colSpan = REPORT_COLUMNS;
+	td.className = "report-detail-cell";
 	const pre = document.createElement("pre");
 	pre.className = "json";
 	// The full report body pretty-printed: reason, penalty, sample,
@@ -126,6 +151,7 @@ function showReportsError(err) {
 
 function loadReports() {
 	const rows = document.getElementById("report-rows");
+	if (rows === null) return;
 	rows.textContent = "";
 	rows.appendChild(messageRow("Loading..."));
 	fetchJSON("GET", "/api/reports")
@@ -199,19 +225,21 @@ function deleteReport(report) {
 		.catch(showReportsError);
 }
 
-// Report filter: one regex box narrowing the fetched Reports
-// client-side - an unanchored, case-insensitive search across rule,
-// target, and the stringified body. This is a panel convenience over
-// stored Reports, deliberately independent of the Filter DSL's regex
-// matchers, which evaluate Events during rule evaluation.
-
-// fetchedReports holds the full list from the last fetch; the filter
-// only ever re-renders a narrowed view of it.
+// fetchedReports holds the full list from the last fetch; anything
+// narrowing the view only ever re-renders a filtered list of it.
 let fetchedReports = [];
 
+// Report filtering: the header's regexp search box narrows the fetched
+// report list client-side - an unanchored, case-insensitive search over
+// rule, target, and the stringified body, the same behaviour the
+// panel's old report filter had. This is a panel convenience over
+// stored Reports, deliberately independent of the Filter DSL's regex
+// matchers, which evaluate Events during rule evaluation.
 function applyReportFilter() {
-	const pattern = document.getElementById("report-filter").value;
-	const error = document.getElementById("report-filter-error");
+	const rows = document.getElementById("report-rows");
+	if (rows === null) return;
+	const pattern = document.getElementById("search").value;
+	const error = document.getElementById("search-error");
 	let match = null;
 	if (pattern !== "") {
 		try {
@@ -239,7 +267,6 @@ function applyReportFilter() {
 		match.test(report.rule + "\n" + report.target + "\n" + JSON.stringify(report)),
 	);
 	if (narrowed.length === 0 && fetchedReports.length > 0) {
-		const rows = document.getElementById("report-rows");
 		rows.textContent = "";
 		rows.appendChild(messageRow("No reports match the filter."));
 		return;
@@ -247,18 +274,14 @@ function applyReportFilter() {
 	renderReports(narrowed);
 }
 
-// refreshAll is the one manual reload trigger: both tabs refetch on
-// Refresh; nothing here polls.
+// refreshAll is the one manual reload trigger: both views' data refetch
+// on REFRESH (each page renders its own slot); nothing here polls.
 function refreshAll() {
-	loadStatistic();
+	loadStats();
 	loadReports();
 }
 
 document.getElementById("refresh").addEventListener("click", refreshAll);
-document.getElementById("report-filter").addEventListener("input", applyReportFilter);
-
-for (const tab of document.querySelectorAll(".tab")) {
-	tab.addEventListener("click", () => showTab(tab.getAttribute("data-tab")));
-}
+document.getElementById("search").addEventListener("input", applyReportFilter);
 
 refreshAll();
