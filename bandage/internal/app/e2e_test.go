@@ -988,9 +988,9 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	}
 }
 
-// TestE2EStatisticsLogAgreesWithStats: the periodic statistics log line's
+// TestE2EStatsLogAgreesWithStats: the periodic stats log line's
 // counters agree with /api/stats (both render the same snapshot).
-func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
+func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
@@ -1001,15 +1001,15 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
 	d.send("this is not json")
 	d.waitProcessed(t, 4)
-	d.logStatistics()
+	d.logStats()
 
 	_, doc := d.getStats(t)
-	recs := d.logs.withMessage("statistics")
+	recs := d.logs.withMessage("stats")
 	if len(recs) != 1 {
-		t.Fatalf("statistics records = %d, want 1", len(recs))
+		t.Fatalf("stats records = %d, want 1", len(recs))
 	}
 	if recs[0].Level != zerolog.DebugLevel {
-		t.Errorf("statistics level = %v, want debug (happy-path self-reporting)", recs[0].Level)
+		t.Errorf("stats level = %v, want debug (happy-path self-reporting)", recs[0].Level)
 	}
 	// attrInto fails on a missing field, so asserting every value also
 	// asserts that the line keeps its long-standing fields.
@@ -1029,10 +1029,10 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 		var v int64
 		attrInto(t, recs[0], f.key, &v)
 		if v != f.abs {
-			t.Errorf("statistics log %s = %d, want %d", f.key, v, f.abs)
+			t.Errorf("stats log %s = %d, want %d", f.key, v, f.abs)
 		}
 		if want := statsNum(t, doc, f.block, f.field); float64(v) != want {
-			t.Errorf("statistics log %s = %d, /api/stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
+			t.Errorf("stats log %s = %d, /api/stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
 		}
 	}
 }
@@ -1670,7 +1670,7 @@ chains:
 }
 
 // TestE2EHappyPathSweepRecordsLoggedAtDebug: the sweep pass' happy-path
-// self-reporting - the periodic statistics record and the sweep-deleted
+// self-reporting - the periodic stats record and the sweep-deleted
 // record - is debug level: present with their event context at debug,
 // silent at info. Steady-state logs carry events, not the daemon's
 // self-reporting.
@@ -1730,7 +1730,7 @@ chains:
 			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, nil, WithLogger(NewLogger(buf, tt.level)))
 			trigger(t, clock, d)
 
-			for _, msg := range []string{"statistics", "swept expired reports"} {
+			for _, msg := range []string{"stats", "swept expired reports"} {
 				var line string
 				for _, l := range strings.Split(buf.String(), "\n") {
 					if strings.Contains(l, msg) {
