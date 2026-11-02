@@ -160,18 +160,83 @@ func TestPanelStylesheetCarriesPprofDesignLanguage(t *testing.T) {
 }
 
 // The Stats page renders the Stats snapshot (the human-facing
-// cumulative-since-start document, no format contract - ADR 0006):
-// fetched from the machine API's /api/stats into the page's snapshot
-// slot (JSON rendering at this stage).
-func TestStatsPageRendersSnapshotFromStatsAPI(t *testing.T) {
+// cumulative-since-start document, no format contract - ADR 0006) as
+// grouped key/value tables - identity, pipeline, tracker cache -
+// fetched from the machine API's /api/stats, instead of a JSON blob.
+func TestStatsPageRendersSnapshotAsGroupedKeyValueTables(t *testing.T) {
 	srv := apiTestServer(nil)
 	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
-	if !strings.Contains(page, `id="stats"`) {
-		t.Errorf("GET /stats body lacks the snapshot's render slot, body:\n%s", page)
+	for _, want := range []string{
+		`<h2 class="group-title">identity</h2>`, `id="group-identity"`,
+		`<h2 class="group-title">pipeline</h2>`, `id="group-pipeline"`,
+		`<h2 class="group-title">tracker cache</h2>`, `id="group-tracker-cache"`,
+		`<th>Key</th>`, `<th>Value</th>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /stats body lacks the grouped key/value table slot %s, body:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, `id="stats"`) {
+		t.Errorf("GET /stats body still renders the snapshot as a JSON blob, body:\n%s", page)
 	}
 	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
-	if !strings.Contains(js, "/api/stats") {
-		t.Errorf("common.js does not fetch /api/stats; the Stats page must render the snapshot, body:\n%s", js)
+	for _, want := range []string{
+		"/api/stats", // the snapshot comes from the machine API
+		`"build"`, `"pipeline"`, `"tracker_cache"`, // the snapshot blocks that feed the groups
+		"group-identity", "group-pipeline", "group-tracker-cache",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not render the snapshot's %s into the grouped key/value tables, body:\n%s", want, js)
+		}
+	}
+}
+
+// The key/value rows are generated per key the daemon reports - the
+// row builder iterates the snapshot's entries, never a fixed field
+// list - so keys added to the snapshot later (ADR 0006: fields may be
+// added) appear as generic extra rows and nothing the daemon reports
+// is dropped by the panel. The rendering itself is verified
+// interactively per the user stories; this pins the generic row
+// builder's served vocabulary.
+func TestStatsRowsAreGeneratedPerReportedKey(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{"Object.entries", "kv-row", "kv-key", "kv-value"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the generic key/value row builder's %s; rows must be generated per reported key, body:\n%s", want, js)
+		}
+	}
+}
+
+// The header's search box narrows the key/value rows on the Stats view
+// the way it narrows report rows on Reports: the same unanchored,
+// case-insensitive regex semantics, with an invalid pattern called out
+// inline instead of silently matching nothing (the narrowing itself is
+// covered manually per the stories).
+func TestStatsSearchNarrowsKeyValueRows(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	if !strings.Contains(page, `id="search-error"`) {
+		t.Errorf("GET /stats body lacks the inline search-error slot, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	if !strings.Contains(js, "No keys match") {
+		t.Errorf("common.js lacks the Stats search's no-match copy; the search box must narrow the key/value rows, body:\n%s", js)
+	}
+}
+
+// The right-aligned header legend on the Stats view shows the build
+// identity and uptime, so the running binary's identity is on screen
+// at a glance (the identity table carries the full snapshot).
+func TestStatsLegendShowsBuildIdentityAndUptime(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`("legend")`,                           // the right-aligned legend slot
+		"build.name", "build.version", "build.commit", // the build identity
+		" · uptime ", // the uptime copy
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the Stats legend's %s; the legend must show build identity and uptime, body:\n%s", want, js)
+		}
 	}
 }
 

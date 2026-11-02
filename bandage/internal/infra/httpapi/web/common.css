@@ -150,6 +150,12 @@ a {
   overflow-y: scroll;
   padding: 1em;
 }
+/* The Stats view's group titles above each key/value table. */
+.group-title {
+  margin: 1em 0 0.25em;
+  font-family: 'Roboto Medium', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  font-size: 1.15em;
+}
 pre.json {
   text-align: left;
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;

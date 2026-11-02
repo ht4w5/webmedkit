@@ -47,18 +47,128 @@ function fetchJSON(method, url) {
 	});
 }
 
+// The Stats view renders the snapshot as grouped key/value tables -
+// identity, pipeline, tracker cache - one row per key the daemon
+// reports. Rows are generated per reported key, never a fixed field
+// list, so keys added to the snapshot later (ADR 0006: fields may be
+// added) appear as generic extra rows and nothing the daemon reports
+// is dropped by the panel.
+
+// STATS_SLOTS names each group's row slot, in display order.
+const STATS_SLOTS = ["group-identity", "group-pipeline", "group-tracker-cache"];
+
+// valueText renders one reported value as row text.
+function valueText(value) {
+	return typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
+}
+
+// statsGroups maps the snapshot document onto the three groups: the
+// pipeline and tracker_cache blocks feed their own tables field by
+// field; the build block's identity fields and every other top-level
+// entry - generated_at, uptime, and any key added later - become
+// identity rows. A new top-level block flattens into dotted generic
+// rows rather than being hidden.
+function statsGroups(snapshot) {
+	const groups = { "group-identity": [], "group-pipeline": [], "group-tracker-cache": [] };
+	for (const [key, value] of Object.entries(snapshot)) {
+		let rows;
+		if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+			const bare = key === "build" || key === "pipeline" || key === "tracker_cache";
+			rows = Object.entries(value).map(([field, v]) => ({
+				key: bare ? field : key + "." + field,
+				value: valueText(v),
+			}));
+		} else {
+			rows = [{ key: key, value: valueText(value) }];
+		}
+		if (key === "pipeline") {
+			groups["group-pipeline"].push(...rows);
+		} else if (key === "tracker_cache") {
+			groups["group-tracker-cache"].push(...rows);
+		} else {
+			groups["group-identity"].push(...rows);
+		}
+	}
+	return groups;
+}
+
+// kvRow builds one key/value row; kvMessageRow the full-width message
+// row (loading, error) the key/value tables share.
+function kvRow(row) {
+	const tr = document.createElement("tr");
+	tr.className = "kv-row";
+	for (const [className, text] of [["kv-key", row.key], ["kv-value", row.value]]) {
+		const td = document.createElement("td");
+		td.className = className;
+		td.textContent = text;
+		tr.appendChild(td);
+	}
+	return tr;
+}
+
+function kvMessageRow(text) {
+	const td = document.createElement("td");
+	td.colSpan = 2;
+	td.className = "empty";
+	td.textContent = text;
+	const tr = document.createElement("tr");
+	tr.appendChild(td);
+	return tr;
+}
+
+// renderStatsGroups renders each group's rows through the same row
+// builder - the full fetched set or the search's narrowed view - so
+// narrowing composes with everything the tables show.
+function renderStatsGroups(groups, match) {
+	for (const [slot, rows] of Object.entries(groups)) {
+		const tbody = document.getElementById(slot);
+		if (tbody === null) continue;
+		tbody.textContent = "";
+		const shown = match === null ? rows : rows.filter((row) => match.test(row.key + "\n" + row.value));
+		if (shown.length === 0) {
+			tbody.appendChild(kvMessageRow(match === null ? "Loading..." : "No keys match the filter."));
+			continue;
+		}
+		for (const row of shown) {
+			tbody.appendChild(kvRow(row));
+		}
+	}
+}
+
+// fetchedStatsGroups holds the three groups' rows from the last fetch;
+// anything narrowing the view only ever re-renders a filtered view.
+let fetchedStatsGroups = {};
+
+// fillLegend puts the running binary's identity and uptime in the
+// header's right-aligned legend - build identity and uptime at a
+// glance (the identity table carries the full snapshot).
+function fillLegend(snapshot) {
+	const legend = document.getElementById("legend");
+	if (legend === null) return;
+	const build = snapshot.build || {};
+	const identity = [build.name, build.version].filter(Boolean).join(" ");
+	legend.textContent = (build.commit ? identity + " (" + build.commit + ")" : identity) +
+		" · uptime " + snapshot.uptime;
+}
+
 // loadStats renders the Stats snapshot - the human-facing document with
-// no format contract (ADR 0006) - into the page's snapshot slot.
+// no format contract (ADR 0006) - as the page's grouped key/value
+// tables.
 function loadStats() {
-	const out = document.getElementById("stats");
-	if (out === null) return;
-	out.textContent = "Loading...";
+	if (document.getElementById("group-identity") === null) return;
 	fetchJSON("GET", "/api/stats")
 		.then((snapshot) => {
-			out.textContent = JSON.stringify(snapshot, null, 2);
+			fetchedStatsGroups = statsGroups(snapshot);
+			fillLegend(snapshot);
+			applyStatsFilter();
 		})
 		.catch((err) => {
-			out.textContent = "error: " + err.message;
+			for (const slot of STATS_SLOTS) {
+				const tbody = document.getElementById(slot);
+				if (tbody === null) continue;
+				tbody.textContent = "";
+				tbody.appendChild(kvMessageRow("error: " + err.message));
+			}
 		});
 }
 
@@ -235,27 +345,40 @@ let fetchedReports = [];
 // panel's old report filter had. This is a panel convenience over
 // stored Reports, deliberately independent of the Filter DSL's regex
 // matchers, which evaluate Events during rule evaluation.
+
+// searchMatcher compiles the header's search box for either view: null
+// for the empty box (no narrowing), a RegExp otherwise. A typo never
+// blanks the view - an invalid pattern is called out inline and the
+// full rows stay visible until it is fixed.
+function searchMatcher() {
+	const pattern = document.getElementById("search").value;
+	const error = document.getElementById("search-error");
+	if (pattern === "") {
+		error.hidden = true;
+		error.textContent = "";
+		return { match: null, invalid: false };
+	}
+	try {
+		const match = new RegExp(pattern, "i");
+		error.hidden = true;
+		error.textContent = "";
+		return { match: match, invalid: false };
+	} catch (err) {
+		error.textContent = "invalid pattern: " + err.message;
+		error.hidden = false;
+		return { match: null, invalid: true };
+	}
+}
+
 function applyReportFilter() {
 	const rows = document.getElementById("report-rows");
 	if (rows === null) return;
-	const pattern = document.getElementById("search").value;
-	const error = document.getElementById("search-error");
-	let match = null;
-	if (pattern !== "") {
-		try {
-			match = new RegExp(pattern, "i");
-		} catch (err) {
-			// A typo never blanks the view: report the bad pattern
-			// inline and leave the full list visible until it is fixed.
-			error.textContent = "invalid pattern: " + err.message;
-			error.hidden = false;
-			renderReports(fetchedReports);
-			return;
-		}
+	const { match, invalid } = searchMatcher();
+	if (invalid) {
+		renderReports(fetchedReports);
+		return;
 	}
 	// Clearing the box restores the full list.
-	error.hidden = true;
-	error.textContent = "";
 	if (match === null) {
 		renderReports(fetchedReports);
 		return;
@@ -274,6 +397,23 @@ function applyReportFilter() {
 	renderReports(narrowed);
 }
 
+// applyStatsFilter narrows the visible key/value rows to the search
+// box's matches - over key and value, unanchored and
+// case-insensitive - so the search box behaves the same whichever
+// view is on screen. An invalid pattern leaves the full rows visible.
+function applyStatsFilter() {
+	if (document.getElementById("group-identity") === null) return;
+	const { match, invalid } = searchMatcher();
+	renderStatsGroups(fetchedStatsGroups, invalid ? null : match);
+}
+
+// applySearch runs the search box against whichever view's rows are on
+// the page (each filter bails when its slots are absent).
+function applySearch() {
+	applyReportFilter();
+	applyStatsFilter();
+}
+
 // refreshAll is the one manual reload trigger: both views' data refetch
 // on REFRESH (each page renders its own slot); nothing here polls.
 function refreshAll() {
@@ -282,6 +422,6 @@ function refreshAll() {
 }
 
 document.getElementById("refresh").addEventListener("click", refreshAll);
-document.getElementById("search").addEventListener("input", applyReportFilter);
+document.getElementById("search").addEventListener("input", applySearch);
 
 refreshAll();
