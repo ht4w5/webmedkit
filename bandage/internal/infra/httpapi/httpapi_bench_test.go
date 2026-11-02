@@ -14,19 +14,19 @@ import (
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 )
 
-// BenchmarkReportsList measures the read path (GET /reports) at
+// BenchmarkReportsList measures the read path (GET /api/reports) at
 // 10/1k/10k seeded rows. One op is one request, with the request and
 // recorder reused, so B/op is the read path alone.
 
 // benchNow is the shared fixture epoch (internal/bench.Epoch).
 func benchNow() time.Time { return bench.Epoch }
 
-// benchStats is a StatsSource the /reports read path never calls.
+// benchStats is a StatsSource the /api/reports read path never calls.
 type benchStats struct{}
 
 func (benchStats) Stats() Stats { return Stats{} }
 
-// benchRuntime is a RuntimeSource the /reports read path never calls.
+// benchRuntime is a RuntimeSource the /api/reports read path never calls.
 type benchRuntime struct{}
 
 func (benchRuntime) Runtime() Runtime { return Runtime{} }
@@ -80,13 +80,13 @@ func BenchmarkReportsList(b *testing.B) {
 			b.Cleanup(func() { repo.Close() })
 			seedReports(b, repo, tt.rows)
 			srv := New(report.NewService(repo), benchStats{}, benchRuntime{}, benchNow)
-			req := httptest.NewRequest(http.MethodGet, "/reports", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/reports", nil)
 			w := httptest.NewRecorder()
 			for b.Loop() {
 				w.Body.Reset()
 				srv.ServeHTTP(w, req)
 				if w.Code != http.StatusOK {
-					b.Fatalf("GET /reports: status %d", w.Code)
+					b.Fatalf("GET /api/reports: status %d", w.Code)
 				}
 			}
 		})

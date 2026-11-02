@@ -15,7 +15,9 @@ _Avoid_: request, log entry, record
 
 **Filter**:
 A predicate over an Event deciding whether a rule or the enrichment path
-considers the event.
+considers the event. The regex matchers (`path regex`, `agent regex`)
+search unanchored, case-sensitive unless the pattern carries `(?i)`.
+Distinct from the Web Panel's client-side report filter.
 _Avoid_: where clause, condition
 
 **Filesize**:
@@ -120,6 +122,8 @@ _Avoid_: capped drop, drop, expiry
 **Report**:
 The document recording that a rule matched for a target, carrying its
 tracker reading, sample, and penalty, alive until expiry or deletion.
+Deleting a Report withdraws the enforcement derived from it at the
+enforcing consumer's next sync.
 _Avoid_: finding, record, ban
 
 **Reason**:
@@ -146,6 +150,7 @@ _Avoid_: excerpt, summary, example, evidence
 **Statistic**:
 The human-facing cumulative-since-start snapshot of the daemon's
 counters and identity, served for operator eyes with no format contract.
+The Web Panel is an in-repo consumer of the snapshot.
 _Avoid_: stats, metrics
 
 **Metric**:
@@ -153,6 +158,13 @@ A named, typed series in the daemon's machine contract for scrapers,
 cumulative or instantaneous; series may be added, never silently renamed
 or removed.
 _Avoid_: statistic, stat
+
+**Web Panel**:
+The human-facing page served at the web root from assets embedded in the
+daemon binary: tabbed operator views over the Statistic and the reports,
+fetched client-side from the machine API and reloaded only on manual
+refresh.
+_Avoid_: dashboard, UI, console
 
 ### Enforcement
 

@@ -1,6 +1,8 @@
-// Package httpapi serves the daemon's read-only HTTP surface: GET /reports,
-// DELETE /reports, GET /ping, GET /stats and GET /metrics (no URL version, no
-// report writes).
+// Package httpapi serves the daemon's read-only HTTP surface: GET / (the Web
+// Panel), GET /api/reports, DELETE /api/reports, GET /ping, GET /api/stats and
+// GET /metrics (no URL version, no report writes). The machine API lives under
+// /api/ (ADR 0022); /ping and /metrics stay at the root as infrastructure
+// endpoints.
 package httpapi
 
 import (
@@ -20,7 +22,7 @@ type ReportStore interface {
 	Delete(ctx context.Context, q report.Query) (int, error)
 }
 
-// Stats is the /stats snapshot: build identity plus cumulative-since-start counters.
+// Stats is the /api/stats snapshot: build identity plus cumulative-since-start counters.
 type Stats struct {
 	// StartedAt is the source's start time; uptime is measured from it.
 	StartedAt    time.Time
@@ -29,7 +31,7 @@ type Stats struct {
 	TrackerCache TrackerCache
 }
 
-// Build is the /stats build block: the identity of the running binary.
+// Build is the /api/stats build block: the identity of the running binary.
 type Build struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
@@ -40,7 +42,7 @@ type Build struct {
 	Platform  string `json:"platform"`
 }
 
-// Pipeline is the /stats pipeline block: worker count and line accounting, cumulative.
+// Pipeline is the /api/stats pipeline block: worker count and line accounting, cumulative.
 type Pipeline struct {
 	Workers  int   `json:"workers"`
 	Received int64 `json:"received"`
@@ -48,7 +50,7 @@ type Pipeline struct {
 	Dropped  int64 `json:"dropped"`
 }
 
-// TrackerCache is the /stats tracker cache block: track.Statistics with the entry cap.
+// TrackerCache is the /api/stats tracker cache block: track.Statistics with the entry cap.
 type TrackerCache struct {
 	Gets      int64 `json:"gets"`
 	Sets      int64 `json:"sets"`
@@ -93,9 +95,12 @@ type Server struct {
 
 func New(reports ReportStore, stats StatsSource, runtime RuntimeSource, now func() time.Time) *Server {
 	s := &Server{reports: reports, stats: stats, runtime: runtime, now: now, mux: http.NewServeMux()}
-	s.mux.HandleFunc("GET /reports", s.handleReports)
-	s.mux.HandleFunc("DELETE /reports", s.handleDeleteReports)
-	s.mux.HandleFunc("GET /stats", s.handleStats)
+	s.mux.HandleFunc("GET /{$}", servePanelAsset("web/index.html", "text/html; charset=utf-8"))
+	s.mux.HandleFunc("GET /panel.css", servePanelAsset("web/panel.css", "text/css; charset=utf-8"))
+	s.mux.HandleFunc("GET /panel.js", servePanelAsset("web/panel.js", "text/javascript; charset=utf-8"))
+	s.mux.HandleFunc("GET /api/reports", s.handleReports)
+	s.mux.HandleFunc("DELETE /api/reports", s.handleDeleteReports)
+	s.mux.HandleFunc("GET /api/stats", s.handleStats)
 	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ping", s.handlePing)
 	return s
@@ -138,7 +143,7 @@ func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// deleteResponse is the DELETE /reports body.
+// deleteResponse is the DELETE /api/reports body.
 type deleteResponse struct {
 	Deleted int `json:"deleted"`
 }
@@ -165,7 +170,7 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("pong"))
 }
 
-// statsDocument is the rendered /stats document (ADR 0006): the snapshot plus
+// statsDocument is the rendered /api/stats document (ADR 0006): the snapshot plus
 // generation timestamp and uptime; no format version (human-facing, unversioned).
 type statsDocument struct {
 	GeneratedAt  string       `json:"generated_at"`

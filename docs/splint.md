@@ -1,7 +1,7 @@
 # splint: installing ban rules
 
 `splint` is the companion binary that turns bandage's advice into
-enforcement. It fetches the report document (`GET /reports`, see
+enforcement. It fetches the report document (`GET /api/reports`, see
 [the report document](reports.md)) on a fixed interval, compiles every
 [Report](../GLOSSARY.md) the document publishes into
 [ban rules](../GLOSSARY.md) - the Report's [Target](../GLOSSARY.md)
@@ -94,7 +94,7 @@ nftables driver options:
 | flag | default | meaning |
 |---|---|---|
 | `--firewall` | `nftables` | Firewall driver selected from the registry. An unknown value is refused at startup, listing the known drivers. Driver-specific flags live in their driver's own group (`--nft-*` for nftables); a flag of an unselected driver, set explicitly, is a usage error. |
-| `--url`, `-u` | (required) | URL of the report document - bandage's `GET /reports`, e.g. `http://127.0.0.1:8080/reports`. `http` or `https` with a host. |
+| `--url`, `-u` | (required) | URL of the report document - bandage's `GET /api/reports`, e.g. `http://127.0.0.1:8080/api/reports`. `http` or `https` with a host. |
 | `--cacert` | - | CA certificate file used to verify the bandage server's certificate (HTTPS). |
 | `--cert` | - | Client certificate file presented to the server (mutual TLS). Must be given together with `--key`. |
 | `--key` | - | Client key file. Must be given together with `--cert`. |
@@ -169,7 +169,7 @@ and scope flags change the driver's effective rules and hash, so audit
 exactly what you will deploy:
 
 ```console
-$ bin/splint --dry-run --url http://127.0.0.1:8080/reports \
+$ bin/splint --dry-run --url http://127.0.0.1:8080/api/reports \
     --nft-ingress-daddr 203.0.113.10/32 --nft-ingress-dport 443 \
     --nft-egress-saddr 203.0.113.10/32 --nft-egress-sport 443
 ```
@@ -324,7 +324,7 @@ namespace PID lives in (root required):
 
 ```console
 $ ip netns attach splint-web "$(pgrep -n nginx)"
-$ splint --url http://127.0.0.1:8080/reports --nft-netns /run/netns/splint-web
+$ splint --url http://127.0.0.1:8080/api/reports --nft-netns /run/netns/splint-web
 ```
 
 When the process is recreated, re-attach the name to its new pid
@@ -342,7 +342,7 @@ host:
 ```console
 $ docker inspect -f '{{.State.Pid}}' web
 23456
-$ splint --url http://127.0.0.1:8080/reports --nft-netns /proc/23456/ns/net
+$ splint --url http://127.0.0.1:8080/api/reports --nft-netns /proc/23456/ns/net
 ```
 
 This handle dies with the container: a recreated container has a new
@@ -352,7 +352,7 @@ restart:
 
 ```console
 $ ip netns attach splint-web "$(docker inspect -f '{{.State.Pid}}' web)"
-$ splint --url http://127.0.0.1:8080/reports --nft-netns /run/netns/splint-web
+$ splint --url http://127.0.0.1:8080/api/reports --nft-netns /run/netns/splint-web
 ```
 
 **One instance per enforcement point.** Each instance wholly owns the
@@ -444,7 +444,7 @@ client outright (`drop` on `203.0.113.7/32`) and meters another
 (`limit-bandwidth` on `203.0.113.8/32`):
 
 ```console
-$ bin/splint --dry-run --url http://127.0.0.1:8080/reports \
+$ bin/splint --dry-run --url http://127.0.0.1:8080/api/reports \
     --nft-hook prerouting \
     --nft-ingress-daddr 203.0.113.10/32 --nft-ingress-dport 443 \
     --nft-egress-saddr 172.17.0.2/32 --nft-egress-sport 8443
@@ -607,7 +607,7 @@ The repo ships a sample unit at
 `splint` against a bandage endpoint on the host namespace:
 
 ```text
-ExecStart=/usr/local/bin/splint --url http://127.0.0.1:8080/reports
+ExecStart=/usr/local/bin/splint --url http://127.0.0.1:8080/api/reports
 ```
 
 Install and enable:
@@ -651,7 +651,7 @@ INF compiled ban rules reports=2 rules=2 skipped=0
 INF installed ban rules declined=1 hash=329a9886 point=current rules=2
 WRN declined ban rule feature feature=limit-req-rate point=current reason="application-layer intent; never faked at the packet layer" rule=1
 INF startup test install ok
-ERR update failed; keeping last installed rules error="fetch: Get \"http://127.0.0.1:18090/reports\": dial tcp 127.0.0.1:18090: connect: connection refused"
+ERR update failed; keeping last installed rules error="fetch: Get \"http://127.0.0.1:18090/api/reports\": dial tcp 127.0.0.1:18090: connect: connection refused"
 INF compiled ban rules reports=3 rules=2 skipped=0
 INF ban rule hit in the replaced ruleset bytes=2280 packets=10 point=current rule=0
 INF meter hit in the replaced ruleset bytes=2280 packets=10 point=current prefix=203.0.113.7/32 rule=0

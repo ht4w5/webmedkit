@@ -69,7 +69,7 @@ func TestFilterMatch(t *testing.T) {
 		{"method mismatch", "method POST", nil, false},
 		{"method case-sensitive", "method get", nil, false},
 
-		// path: exact / prefix / suffix / keyword, case-sensitive.
+		// path: exact / prefix / suffix / keyword / regex, case-sensitive.
 		{"path exact", `path "/releases/24.04.iso"`, nil, true},
 		{"path exact mismatch", `path "/releases"`, nil, false},
 		{"path prefix match", `path prefix "/releases"`, nil, true},
@@ -79,13 +79,24 @@ func TestFilterMatch(t *testing.T) {
 		{"path suffix mismatch", `path suffix ".img"`, nil, false},
 		{"path keyword match", `path keyword "24.04"`, nil, true},
 		{"path keyword mismatch", `path keyword "22.04"`, nil, false},
+		{"path regex match", `path regex "\\.iso$"`, nil, true},
+		{"path regex unanchored", `path regex "releases"`, nil, true},
+		{"path regex mismatch", `path regex "\\.deb$"`, nil, false},
+		{"path regex anchors respected", `path regex "^24\\.04"`, nil, false},
+		{"path regex case-sensitive", `path regex "RELEASES"`, nil, false},
+		{"path regex case-insensitive flag", `path regex "(?i)RELEASES"`, nil, true},
 
-		// agent: exact / keyword, case-sensitive.
+		// agent: exact / keyword / regex, case-sensitive.
 		{"agent exact", `agent "curl/8.5.0"`, nil, true},
 		{"agent exact mismatch", `agent "curl"`, nil, false},
 		{"agent exact case-sensitive", `agent "CURL/8.5.0"`, nil, false},
 		{"agent keyword match", `agent keyword "curl"`, nil, true},
 		{"agent keyword mismatch", `agent keyword "wget"`, nil, false},
+		{"agent regex match", `agent regex "curl"`, nil, true},
+		{"agent regex alternation", `agent regex "curl|wget"`, nil, true},
+		{"agent regex mismatch", `agent regex "bot"`, nil, false},
+		{"agent regex case-sensitive", `agent regex "CURL"`, nil, false},
+		{"agent regex case-insensitive flag", `agent regex "(?i)CURL"`, nil, true},
 
 		// status: code or class.
 		{"status exact", "status 200", nil, true},
@@ -164,8 +175,12 @@ func TestConstructorValidation(t *testing.T) {
 		{"empty path prefix", func() error { _, err := NewFilterPathPrefix(""); return err }()},
 		{"empty path suffix", func() error { _, err := NewFilterPathSuffix(""); return err }()},
 		{"empty path keyword", func() error { _, err := NewFilterPathKeyword(""); return err }()},
+		{"empty path pattern", func() error { _, err := NewFilterPathRegex(""); return err }()},
+		{"invalid path pattern", func() error { _, err := NewFilterPathRegex("("); return err }()},
 		{"empty agent", func() error { _, err := NewFilterAgent(""); return err }()},
 		{"empty agent keyword", func() error { _, err := NewFilterAgentKeyword(""); return err }()},
+		{"empty agent pattern", func() error { _, err := NewFilterAgentRegex(""); return err }()},
+		{"invalid agent pattern", func() error { _, err := NewFilterAgentRegex("["); return err }()},
 		{"status below range", func() error { _, err := NewFilterStatus(99); return err }()},
 		{"status above range", func() error { _, err := NewFilterStatus(600); return err }()},
 		{"class below range", func() error { _, err := NewFilterStatusClass(0); return err }()},
@@ -192,6 +207,12 @@ func TestConstructorValidation(t *testing.T) {
 	}
 	if _, err := NewFilterRemoteAddr(validPrefix); err != nil {
 		t.Errorf("NewFilterRemoteAddr error: %v", err)
+	}
+	if _, err := NewFilterPathRegex(`\.iso$`); err != nil {
+		t.Errorf("NewFilterPathRegex error: %v", err)
+	}
+	if _, err := NewFilterAgentRegex(`(?i)curl`); err != nil {
+		t.Errorf("NewFilterAgentRegex error: %v", err)
 	}
 }
 

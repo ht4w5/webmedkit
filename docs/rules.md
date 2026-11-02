@@ -47,7 +47,7 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
   write. Only the tracker cache's TTL and eviction restart a record.
 - A failed report write is not a Trigger outcome: the tracker stays
   intact and the next matching event retries the report.
-- Deleting a report (`DELETE /reports`) or letting its `ttl` expire
+- Deleting a report (`DELETE /api/reports`) or letting its `ttl` expire
   re-arms writing: the next matching event writes a fresh report at the
   accumulation's current stance - a dead report's stance is not
   remembered, and one event's writes climb the crossed rungs, each
@@ -62,10 +62,21 @@ Validate config and rules before deploying: `bandage -t -c bandage.yml
 Rule filters and the enrichment gate share one expression language over
 Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
-`path prefix|suffix|keyword "text"` (`agent` takes the same text forms),
+`path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
+`keyword`, and `regex` forms),
 and `sent >= 1MB` / `sent <= 1MB` (size units are allowed only here) -
 combined with `and`, `or`, `not`, where `not` binds tighter than `and`,
 which binds tighter than `or`.
+
+`path regex "…"` and `agent regex "…"` compile their pattern when the
+rules load, with the DSL's string escapes (a regex `\.` is written
+`"\\."` in the source) - an invalid pattern aborts loading, never a
+silent no-match at runtime. Matching is an unanchored search over the
+Event's path or user agent, case-sensitive unless the pattern carries
+Go's `(?i)` inline flag (e.g. `agent regex "(?i)curl"`). These matchers
+decide over Events during rule evaluation; the web panel's report
+filter is a separate client-side search over stored Reports, and the
+two are deliberately independent.
 
 `enrichment.filter` - the rules file's top-level `enrichment` block,
 between `version` and `chains` - gates the enrichment path (the
@@ -388,7 +399,7 @@ How it behaves:
   prefix - per address for IPv4, per /64 for IPv6. A tracker-less rule
   has no `target_prefix` to configure; each offending source gets one
   report of its own.
-- Re-arm: `DELETE /reports?rule=ua-trip&target=203.0.113.7` or expiry
+- Re-arm: `DELETE /api/reports?rule=ua-trip&target=203.0.113.7` or expiry
   at `ttl` re-arms writing - the next matching event writes a fresh
   report immediately. A still-offending source keeps matching (and its
   other actions keep running) while suppressed, so nothing is lost by
@@ -406,8 +417,9 @@ How it behaves:
   will carry.
 - The filter above is a case-sensitive substring match on the Event's
   user agent (`agent "…"` matches the agent exactly). Values match
-  case-sensitively without normalization; `and`, `or` and `not` are
-  reserved and must be quoted when used as values.
+  case-sensitively without normalization (a `regex` pattern is
+  case-sensitive too, unless it carries `(?i)`); `and`, `or` and `not`
+  are reserved and must be quoted when used as values.
 
 Rules with a tracker work the same way with one difference in the
 Match semantics: a Match additionally requires the tracker to overflow

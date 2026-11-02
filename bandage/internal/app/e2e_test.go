@@ -25,7 +25,7 @@ import (
 )
 
 // Primary seam: the assembled daemon driven by raw nginx-JSON syslog messages
-// at a real ingest listener, asserted through GET /reports JSON.
+// at a real ingest listener, asserted through GET /api/reports JSON.
 
 // testBuild is the build identity the test daemons are assembled with;
 // the pins below assert the daemon mirrors it exactly.
@@ -416,11 +416,11 @@ type reportDoc struct {
 	Reports     []reportEntry `json:"reports"`
 }
 
-// del issues DELETE /reports with the query and returns the response
+// del issues DELETE /api/reports with the query and returns the response
 // status and the {"deleted": n} count.
 func (d *testDaemon) del(t *testing.T, query url.Values) (int, int) {
 	t.Helper()
-	u := "http://" + d.apiAddr() + "/reports"
+	u := "http://" + d.apiAddr() + "/api/reports"
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -475,24 +475,24 @@ func (d *testDaemon) get(t *testing.T, path string, query url.Values) (int, repo
 
 func (d *testDaemon) getReports(t *testing.T, query url.Values) reportDoc {
 	t.Helper()
-	status, doc := d.get(t, "/reports", query)
+	status, doc := d.get(t, "/api/reports", query)
 	if status != http.StatusOK {
-		t.Fatalf("GET /reports status = %d, want 200", status)
+		t.Fatalf("GET /api/reports status = %d, want 200", status)
 	}
 	return doc
 }
 
-// statsDoc is the /stats document decoded loosely into a generic map:
+// statsDoc is the /api/stats document decoded loosely into a generic map:
 // the shape is human-facing and unversioned, so never assert field-for-field.
 type statsDoc map[string]any
 
-// getStats issues GET /stats and returns the raw body plus the decoded
+// getStats issues GET /api/stats and returns the raw body plus the decoded
 // document.
 func (d *testDaemon) getStats(t *testing.T) ([]byte, statsDoc) {
 	t.Helper()
-	resp, err := apiClient.Get("http://" + d.apiAddr() + "/stats")
+	resp, err := apiClient.Get("http://" + d.apiAddr() + "/api/stats")
 	if err != nil {
-		t.Fatalf("GET /stats: %v", err)
+		t.Fatalf("GET /api/stats: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -500,53 +500,53 @@ func (d *testDaemon) getStats(t *testing.T) ([]byte, statsDoc) {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /stats status = %d, want 200 (body %q)", resp.StatusCode, body)
+		t.Fatalf("GET /api/stats status = %d, want 200 (body %q)", resp.StatusCode, body)
 	}
 	var doc statsDoc
 	if err := json.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("GET /stats: bad JSON %q: %v", body, err)
+		t.Fatalf("GET /api/stats: bad JSON %q: %v", body, err)
 	}
 	return body, doc
 }
 
-// statsNum reads one numeric field out of a /stats block.
+// statsNum reads one numeric field out of a /api/stats block.
 func statsNum(t *testing.T, doc statsDoc, block, field string) float64 {
 	t.Helper()
 	b, ok := doc[block].(map[string]any)
 	if !ok {
-		t.Fatalf("/stats has no %q block: %v", block, doc)
+		t.Fatalf("/api/stats has no %q block: %v", block, doc)
 	}
 	v, ok := b[field].(float64)
 	if !ok {
-		t.Fatalf("/stats %q has no numeric %q: %v", block, field, b)
+		t.Fatalf("/api/stats %q has no numeric %q: %v", block, field, b)
 	}
 	return v
 }
 
-// statsStr reads one string field out of a /stats block.
+// statsStr reads one string field out of a /api/stats block.
 func statsStr(t *testing.T, doc statsDoc, block, field string) string {
 	t.Helper()
 	b, ok := doc[block].(map[string]any)
 	if !ok {
-		t.Fatalf("/stats has no %q block: %v", block, doc)
+		t.Fatalf("/api/stats has no %q block: %v", block, doc)
 	}
 	v, ok := b[field].(string)
 	if !ok {
-		t.Fatalf("/stats %q has no string %q: %v", block, field, b)
+		t.Fatalf("/api/stats %q has no string %q: %v", block, field, b)
 	}
 	return v
 }
 
-// statsBool reads one boolean field out of a /stats block.
+// statsBool reads one boolean field out of a /api/stats block.
 func statsBool(t *testing.T, doc statsDoc, block, field string) bool {
 	t.Helper()
 	b, ok := doc[block].(map[string]any)
 	if !ok {
-		t.Fatalf("/stats has no %q block: %v", block, doc)
+		t.Fatalf("/api/stats has no %q block: %v", block, doc)
 	}
 	v, ok := b[field].(bool)
 	if !ok {
-		t.Fatalf("/stats %q has no boolean %q: %v", block, field, b)
+		t.Fatalf("/api/stats %q has no boolean %q: %v", block, field, b)
 	}
 	return v
 }
@@ -789,7 +789,7 @@ chains:
 	}
 }
 
-// TestE2EReportFiltersAndExpiry: GET /reports filters by ?rule= and ?target=
+// TestE2EReportFiltersAndExpiry: GET /api/reports filters by ?rule= and ?target=
 // and never returns expired reports.
 func TestE2EReportFiltersAndExpiry(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -904,7 +904,7 @@ func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	}
 }
 
-// TestE2EStatsBuildAndCumulativeCounters: /stats answers with the build
+// TestE2EStatsBuildAndCumulativeCounters: /api/stats answers with the build
 // identity and cumulative counters, as human-facing indented JSON.
 func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -920,10 +920,10 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 
 	body, doc := d.getStats(t)
 	if !bytes.HasPrefix(body, []byte("{\n  \"")) {
-		t.Errorf("/stats body = %q, want indented JSON", body)
+		t.Errorf("/api/stats body = %q, want indented JSON", body)
 	}
 	if _, ok := doc["version"]; ok {
-		t.Errorf("/stats carries a format version %v, want none (human-facing, unversioned)", doc["version"])
+		t.Errorf("/api/stats carries a format version %v, want none (human-facing, unversioned)", doc["version"])
 	}
 	if got := doc["generated_at"]; got != "2025-10-17T18:01:30Z" {
 		t.Errorf("generated_at = %v, want %q", got, "2025-10-17T18:01:30Z")
@@ -987,7 +987,7 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 }
 
 // TestE2EStatisticsLogAgreesWithStats: the periodic statistics log line's
-// counters agree with /stats (both render the same snapshot).
+// counters agree with /api/stats (both render the same snapshot).
 func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
@@ -1027,12 +1027,12 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 			t.Errorf("statistics log %s = %d, want %d", f.key, v, f.abs)
 		}
 		if want := statsNum(t, doc, f.block, f.field); float64(v) != want {
-			t.Errorf("statistics log %s = %d, /stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
+			t.Errorf("statistics log %s = %d, /api/stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
 		}
 	}
 }
 
-// TestE2EStatsCountsEvictions: evictions surface in /stats' tracker cache
+// TestE2EStatsCountsEvictions: evictions surface in /api/stats' tracker cache
 // block, counting the same events the eviction log records.
 func TestE2EStatsCountsEvictions(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -1073,8 +1073,9 @@ chains:
 }
 
 // TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
-// the scrapeable machine contract (text exposition 0.0.4); nothing else is
-// exposed beyond the report API and the /stats snapshot.
+// the scrapeable machine contract (text exposition 0.0.4); GET / serves the
+// Web Panel from the daemon binary's embedded assets. Nothing else is
+// exposed beyond the report API and the /api/stats snapshot.
 func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
@@ -1106,7 +1107,27 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 		t.Errorf("GET /metrics body lacks the pipeline counter family, body:\n%s", body)
 	}
 
-	for _, path := range []string{"/", "/debug", "/reports/1"} {
+	// GET / serves the Web Panel: the tab shell with its Statistic and
+	// Reports slots, embedded in the binary on the existing listener.
+	resp, err = apiClient.Get("http://" + d.apiAddr() + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200 (the Web Panel)", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("GET / Content-Type = %q, want text/html", got)
+	}
+	for _, want := range []string{"Statistic", "Reports"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("GET / body lacks the %q tab slot, body:\n%s", want, body)
+		}
+	}
+
+	for _, path := range []string{"/debug", "/reports", "/stats", "/reports/1", "/api/reports/1"} {
 		resp, err := apiClient.Get("http://" + d.apiAddr() + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -1318,6 +1339,92 @@ chains:
 	}
 }
 
+// TestE2EEvictionLoggedAtDebugLevel: the tracker cache eviction record is
+// debug level (eviction is steady state) - present with its event context
+// at debug, silent at warn.
+func TestE2EEvictionLoggedAtDebugLevel(t *testing.T) {
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: bursty-api
+        tracker: {track: rate, leak: 0, volume: 2}
+        actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
+`
+	// max_entries 2 with a per-shard budget of one: the fixed keys place
+	// both tracker targets in one shard and the filesize record in the
+	// other, so the second target's insert evicts the first one's bucket
+	// (same key placement as TestE2EEvictedBucketAccumulatesFresh).
+	trigger := func(t *testing.T, d *testDaemon) {
+		t.Helper()
+		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
+		d.waitProcessed(t, 1)
+		d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
+		d.waitProcessed(t, 2)
+	}
+
+	// The record itself is a debug record carrying the same event context
+	// as before the demotion.
+	t.Run("record", func(t *testing.T) {
+		clock := newTestClock(mustTime(t, wallBase))
+		d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
+			c.Cache.MaxEntries = 2
+		})
+		trigger(t, d)
+
+		evictions := d.logs.withMessage("tracker cache eviction")
+		if len(evictions) != 1 {
+			t.Fatalf("eviction logs = %v, want 1 (logged and counted together)", evictions)
+		}
+		rec := evictions[0]
+		if rec.Level != zerolog.DebugLevel {
+			t.Errorf("eviction level = %v, want debug (eviction is steady state)", rec.Level)
+		}
+		if rec.Attrs["namespace"] != "bursty-api" || rec.Attrs["target"] != "203.0.113.7/32" {
+			t.Errorf("eviction attrs = %v, want namespace=bursty-api target=203.0.113.7/32 (same event context as before)", rec.Attrs)
+		}
+	})
+
+	// A configured level shows eviction lines at debug and silences them
+	// at warn.
+	for _, tt := range []struct {
+		level domain.Level
+		want  bool
+	}{
+		{level: domain.LevelDebug, want: true},
+		{level: domain.LevelWarn, want: false},
+	} {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			buf := &syncBuffer{}
+			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
+				c.Cache.MaxEntries = 2
+			}, WithLogger(NewLogger(buf, tt.level)))
+			trigger(t, d)
+
+			var line string
+			for _, l := range strings.Split(buf.String(), "\n") {
+				if strings.Contains(l, "tracker cache eviction") {
+					line = l
+					break
+				}
+			}
+			if (line != "") != tt.want {
+				t.Errorf("eviction lines at %s level: present = %v, want %v:\n%s", tt.level, line != "", tt.want, buf.String())
+			}
+			if tt.want {
+				// The debug line carries the same event context as before.
+				for _, attr := range []string{"namespace=bursty-api", "target=203.0.113.7/32"} {
+					if !strings.Contains(line, attr) {
+						t.Errorf("debug eviction line missing %q:\n%s", attr, line)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestE2ESyslogFramedMessage: real syslog framing (RFC3164-style) carries
 // the nginx JSON as content.
 func TestE2ESyslogFramedMessage(t *testing.T) {
@@ -1339,7 +1446,7 @@ chains:
 	}
 }
 
-// TestE2EDeleteByFilterCounts: DELETE /reports requires ?rule= and/or
+// TestE2EDeleteByFilterCounts: DELETE /api/reports requires ?rule= and/or
 // ?target= (400 without) and returns deleted-row counts per filter.
 func TestE2EDeleteByFilterCounts(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bandage Web Panel</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+<header class="top">
+  <h1>bandage <span class="subtitle">Web Panel</span></h1>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<nav class="tabs" aria-label="Panel sections">
+  <button type="button" class="tab active" data-tab="statistic" aria-selected="true">Statistic</button>
+  <button type="button" class="tab" data-tab="reports" aria-selected="false">Reports</button>
+</nav>
+<main>
+  <section id="panel-statistic" class="tab-panel">
+    <h2>Statistic</h2>
+    <p class="hint">The daemon's cumulative-since-start snapshot, fetched from <code>GET /api/stats</code>. Reload with Refresh.</p>
+    <pre id="statistic" class="json">Loading...</pre>
+  </section>
+  <section id="panel-reports" class="tab-panel" hidden>
+    <h2>Reports</h2>
+    <p class="hint">Every live Report fetched from <code>GET /api/reports</code> - expired reports never reach the wire. Click a row for the full report body. Reload with Refresh.</p>
+    <div class="report-filter">
+      <label for="report-filter">Filter</label>
+      <input id="report-filter" type="search" autocomplete="off" spellcheck="false">
+      <span class="hint">unanchored, case-insensitive regex over rule, target, and body</span>
+      <p id="report-filter-error" class="filter-error" role="alert" hidden></p>
+    </div>
+    <table class="reports">
+      <thead>
+        <tr><th>Rule</th><th>Target</th><th>Tracker reading</th><th>Updated</th><th>Delete</th></tr>
+      </thead>
+      <tbody id="report-rows">
+        <tr><td class="empty" colspan="5">Loading...</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<script src="panel.js"></script>
+</body>
+</html>

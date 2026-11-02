@@ -274,7 +274,7 @@ func readGC() benchGC {
 }
 
 // reportBenchStats records throughput plus evictions/op, gc-cpu-frac and the
-// /stats snapshot beside it.
+// /api/stats snapshot beside it.
 func reportBenchStats(b *testing.B, d *Daemon, lines int, before, after benchGC) {
 	b.Helper()
 	bench.ReportLinesPerSec(b, lines)
@@ -289,7 +289,7 @@ func reportBenchStats(b *testing.B, d *Daemon, lines int, before, after benchGC)
 	if dCPU := after.cpuSeconds - before.cpuSeconds; dCPU > 0 {
 		b.ReportMetric((after.gcSeconds-before.gcSeconds)/dCPU, "gc-cpu-frac")
 	}
-	b.Logf("/stats workers=%d received=%d parsed=%d dropped=%d writes=%d cache={gets:%d sets:%d misses:%d evictions:%d size:%d cap:%d} gc=%d gomaxprocs=%d",
+	b.Logf("/api/stats workers=%d received=%d parsed=%d dropped=%d writes=%d cache={gets:%d sets:%d misses:%d evictions:%d size:%d cap:%d} gc=%d gomaxprocs=%d",
 		st.Pipeline.Workers, st.Pipeline.Received, st.Pipeline.Parsed, st.Pipeline.Dropped, writes,
 		st.TrackerCache.Gets, st.TrackerCache.Sets, st.TrackerCache.Misses,
 		st.TrackerCache.Evictions, st.TrackerCache.Size, st.TrackerCache.EntryCap,

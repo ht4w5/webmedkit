@@ -11,7 +11,7 @@ rules.
   udp/unixgram/tcp, the tcp framing cost, the UDP kernel-buffer caveat
 - [docs/metrics.md](docs/metrics.md) - the metrics contract at
   `GET /metrics`: exposition format, metric families, counter
-  semantics and evolution policy; plus the human-facing `GET /stats`
+  semantics and evolution policy; plus the human-facing `GET /api/stats`
   Statistic
 - [docs/reports.md](docs/reports.md) - the report document contract:
   envelope, report fields and penalty, evolution policy
