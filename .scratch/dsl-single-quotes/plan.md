@@ -1,8 +1,11 @@
 # Filter DSL single-quoted strings - plan
 
-**Status:** open - design-session record feeding the grilling session; a
-`spec.md` in this directory supersedes it when it lands (the
-`firewall-drivers` plan/spec convention).
+**Status:** superseded by `spec.md` in this directory (the grilling
+session settled the naming as "single-quoted strings", multi-line
+parity, the shared unterminated-string error, in-change docs
+migration, all-text-value scope, and the quote character as a
+bare-word terminator - see `spec.md`, which is authoritative). Kept as
+the design-session record.
 
 **Base:** on top of `main` (the Filter DSL it extends is `dsl-extensions`,
 merged at `b0df22b`).
