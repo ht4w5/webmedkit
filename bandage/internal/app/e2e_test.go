@@ -1318,6 +1318,92 @@ chains:
 	}
 }
 
+// TestE2EEvictionLoggedAtDebugLevel: the tracker cache eviction record is
+// debug level (eviction is steady state) - present with its event context
+// at debug, silent at warn.
+func TestE2EEvictionLoggedAtDebugLevel(t *testing.T) {
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: bursty-api
+        tracker: {track: rate, leak: 0, volume: 2}
+        actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
+`
+	// max_entries 2 with a per-shard budget of one: the fixed keys place
+	// both tracker targets in one shard and the filesize record in the
+	// other, so the second target's insert evicts the first one's bucket
+	// (same key placement as TestE2EEvictedBucketAccumulatesFresh).
+	trigger := func(t *testing.T, d *testDaemon) {
+		t.Helper()
+		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
+		d.waitProcessed(t, 1)
+		d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
+		d.waitProcessed(t, 2)
+	}
+
+	// The record itself is a debug record carrying the same event context
+	// as before the demotion.
+	t.Run("record", func(t *testing.T) {
+		clock := newTestClock(mustTime(t, wallBase))
+		d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
+			c.Cache.MaxEntries = 2
+		})
+		trigger(t, d)
+
+		evictions := d.logs.withMessage("tracker cache eviction")
+		if len(evictions) != 1 {
+			t.Fatalf("eviction logs = %v, want 1 (logged and counted together)", evictions)
+		}
+		rec := evictions[0]
+		if rec.Level != zerolog.DebugLevel {
+			t.Errorf("eviction level = %v, want debug (eviction is steady state)", rec.Level)
+		}
+		if rec.Attrs["namespace"] != "bursty-api" || rec.Attrs["target"] != "203.0.113.7/32" {
+			t.Errorf("eviction attrs = %v, want namespace=bursty-api target=203.0.113.7/32 (same event context as before)", rec.Attrs)
+		}
+	})
+
+	// A configured level shows eviction lines at debug and silences them
+	// at warn.
+	for _, tt := range []struct {
+		level domain.Level
+		want  bool
+	}{
+		{level: domain.LevelDebug, want: true},
+		{level: domain.LevelWarn, want: false},
+	} {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			buf := &syncBuffer{}
+			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
+				c.Cache.MaxEntries = 2
+			}, WithLogger(NewLogger(buf, tt.level)))
+			trigger(t, d)
+
+			var line string
+			for _, l := range strings.Split(buf.String(), "\n") {
+				if strings.Contains(l, "tracker cache eviction") {
+					line = l
+					break
+				}
+			}
+			if (line != "") != tt.want {
+				t.Errorf("eviction lines at %s level: present = %v, want %v:\n%s", tt.level, line != "", tt.want, buf.String())
+			}
+			if tt.want {
+				// The debug line carries the same event context as before.
+				for _, attr := range []string{"namespace=bursty-api", "target=203.0.113.7/32"} {
+					if !strings.Contains(line, attr) {
+						t.Errorf("debug eviction line missing %q:\n%s", attr, line)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestE2ESyslogFramedMessage: real syslog framing (RFC3164-style) carries
 // the nginx JSON as content.
 func TestE2ESyslogFramedMessage(t *testing.T) {

@@ -47,7 +47,7 @@ type entry struct {
 }
 
 // New returns an empty store bounded to maxEntries (clamped to at least 1);
-// now is the wall clock expiry runs on, logger receives a warning per eviction.
+// now is the wall clock expiry runs on, logger receives a debug record per eviction.
 func New(maxEntries int, now func() time.Time, logger zerolog.Logger) *Store {
 	return newStore(maxEntries, defaultShards, now, logger)
 }
@@ -93,7 +93,7 @@ func (s *Store) Update(ctx context.Context, ns, key string, ttl time.Duration, f
 	// the store's locks, since a log sink may call back into the store.
 	for _, e := range evicted {
 		s.evictions.Add(1)
-		evictionAttrs(s.logger.Warn(), e).Msg("tracker cache eviction")
+		evictionAttrs(s.logger.Debug(), e).Msg("tracker cache eviction")
 	}
 	return rec, nil
 }
