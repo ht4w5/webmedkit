@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
+	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
@@ -1006,6 +1008,9 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("statistics records = %d, want 1", len(recs))
 	}
+	if recs[0].Level != zerolog.DebugLevel {
+		t.Errorf("statistics level = %v, want debug (happy-path self-reporting)", recs[0].Level)
+	}
 	// attrInto fails on a missing field, so asserting every value also
 	// asserts that the line keeps its long-standing fields.
 	for _, f := range []struct {
@@ -1640,6 +1645,116 @@ chains:
 	if _, n := d.del(t, url.Values{"rule": {"rule-two"}}); n != 1 {
 		t.Errorf("delete of a live row = %d, want 1 (sweeper leaves it)", n)
 	}
+}
+
+// TestE2EHappyPathSweepRecordsLoggedAtDebug: the sweep pass' happy-path
+// self-reporting - the periodic statistics record and the sweep-deleted
+// record - is debug level: present with their event context at debug,
+// silent at info. Steady-state logs carry events, not the daemon's
+// self-reporting.
+func TestE2EHappyPathSweepRecordsLoggedAtDebug(t *testing.T) {
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: one-shot
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: one-shot, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	// One report row expires at the injected clock, so the sweep pass
+	// deletes exactly one row and the sweep-deleted record fires.
+	trigger := func(t *testing.T, clock *testClock, d *testDaemon) {
+		t.Helper()
+		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+		d.waitProcessed(t, 1)
+		clock.Advance(90 * time.Minute)
+		d.sweepTick()
+	}
+
+	// The record itself is a debug record carrying the deletion count.
+	t.Run("record", func(t *testing.T) {
+		clock := newTestClock(mustTime(t, wallBase))
+		d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+		trigger(t, clock, d)
+
+		recs := d.logs.withMessage("swept expired reports")
+		if len(recs) != 1 {
+			t.Fatalf("sweep-deleted logs = %v, want 1", recs)
+		}
+		rec := recs[0]
+		if rec.Level != zerolog.DebugLevel {
+			t.Errorf("sweep-deleted level = %v, want debug (sweep is steady state)", rec.Level)
+		}
+		var n int
+		attrInto(t, rec, "count", &n)
+		if n != 1 {
+			t.Errorf("sweep-deleted count = %d, want 1", n)
+		}
+	})
+
+	// A configured level shows both happy-path records at debug and
+	// silences them at info.
+	for _, tt := range []struct {
+		level domain.Level
+		want  bool
+	}{
+		{level: domain.LevelDebug, want: true},
+		{level: domain.LevelInfo, want: false},
+	} {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			buf := &syncBuffer{}
+			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, nil, WithLogger(NewLogger(buf, tt.level)))
+			trigger(t, clock, d)
+
+			for _, msg := range []string{"statistics", "swept expired reports"} {
+				var line string
+				for _, l := range strings.Split(buf.String(), "\n") {
+					if strings.Contains(l, msg) {
+						line = l
+						break
+					}
+				}
+				if (line != "") != tt.want {
+					t.Errorf("%q lines at %s level: present = %v, want %v:\n%s", msg, tt.level, line != "", tt.want, buf.String())
+				}
+			}
+		})
+	}
+}
+
+// sweepFailureStore fails DeleteExpired, modeling a broken report store.
+type sweepFailureStore struct {
+	*sqlite.ReportRepository
+}
+
+func (s *sweepFailureStore) DeleteExpired(context.Context, time.Time) (int, error) {
+	return 0, errors.New("injected sweep failure")
+}
+
+// TestE2ESweepFailureLoggedAtErrorLevel: a sweep pass that cannot delete
+// expired reports keeps its voice at error level (bad news is not
+// happy-path self-reporting).
+func TestE2ESweepFailureLoggedAtErrorLevel(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	inner, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", bandwidthRules, nil,
+		withStore(&sweepFailureStore{ReportRepository: inner}))
+	d.sweepTick()
+
+	recs := d.logs.withMessage("sweep expired reports")
+	if len(recs) != 1 {
+		t.Fatalf("sweep failure logs = %v, want 1", recs)
+	}
+	if recs[0].Level != zerolog.ErrorLevel {
+		t.Errorf("sweep failure level = %v, want error (bad news keeps its voice)", recs[0].Level)
+	}
+	var msg string
+	attrInto(t, recs[0], "error", &msg)
 }
 
 // TestE2EExpiresAtRecomputedOnWrite: expires_at recomputes from each landed
@@ -2658,6 +2773,21 @@ func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
 	}
 	if stats.Parsed != 3 {
 		t.Errorf("stats parsed = %d, want 3 (the lines count as normal traffic)", stats.Parsed)
+	}
+}
+
+// TestE2EAPIStartedLoggedAtInfoLevel: the API-started record keeps its
+// info level - a state change, not happy-path self-reporting.
+func TestE2EAPIStartedLoggedAtInfoLevel(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	recs := d.logs.withMessage("api started")
+	if len(recs) != 1 {
+		t.Fatalf("api started records = %d, want 1", len(recs))
+	}
+	if recs[0].Level != zerolog.InfoLevel {
+		t.Errorf("api started level = %v, want info (a state change)", recs[0].Level)
 	}
 }
 
