@@ -377,8 +377,8 @@ func NewFilterSentAtLeast(limit int64) (*FilterSentAtLeast, error) {
 	return &FilterSentAtLeast{limit: limit}, nil
 }
 
-func (fsat *FilterSentAtLeast) Match(event *domain.Event) bool {
-	return event.SentBytes >= fsat.limit
+func (fsatl *FilterSentAtLeast) Match(event *domain.Event) bool {
+	return event.SentBytes >= fsatl.limit
 }
 
 // FilterSentAtMost matches events that sent at most limit bytes (inclusive).
@@ -395,8 +395,14 @@ func NewFilterSentAtMost(limit int64) (*FilterSentAtMost, error) {
 	return &FilterSentAtMost{limit: limit}, nil
 }
 
-func (fsam *FilterSentAtMost) Match(event *domain.Event) bool {
-	return event.SentBytes <= fsam.limit
+func (fsatm *FilterSentAtMost) Match(event *domain.Event) bool {
+	return event.SentBytes <= fsatm.limit
+}
+
+// sizeKnown reports whether the event's Filesize estimate is known; size 0
+// means unknown (ADR 0024).
+func sizeKnown(event *domain.Event) bool {
+	return event.SizeBytes != domain.FilesizeUnknown
 }
 
 // FilterSizeAtLeast matches events whose Filesize estimate is known and at
@@ -416,8 +422,8 @@ func NewFilterSizeAtLeast(limit int64) (*FilterSizeAtLeast, error) {
 	return &FilterSizeAtLeast{limit: limit}, nil
 }
 
-func (fsal *FilterSizeAtLeast) Match(event *domain.Event) bool {
-	return event.SizeBytes != domain.FilesizeUnknown && event.SizeBytes >= fsal.limit
+func (fsizl *FilterSizeAtLeast) Match(event *domain.Event) bool {
+	return sizeKnown(event) && event.SizeBytes >= fsizl.limit
 }
 
 // FilterSizeAtMost matches events whose Filesize estimate is known and at
@@ -437,20 +443,15 @@ func NewFilterSizeAtMost(limit int64) (*FilterSizeAtMost, error) {
 	return &FilterSizeAtMost{limit: limit}, nil
 }
 
-func (fsam *FilterSizeAtMost) Match(event *domain.Event) bool {
-	return event.SizeBytes != domain.FilesizeUnknown && event.SizeBytes <= fsam.limit
+func (fsizm *FilterSizeAtMost) Match(event *domain.Event) bool {
+	return sizeKnown(event) && event.SizeBytes <= fsizm.limit
 }
 
 // FilterSizeUnknown matches events whose Filesize estimate is unknown - the
-// complement of the size comparisons (size 0 means unknown, ADR 0024).
+// complement of the size comparisons (size 0 means unknown, ADR 0024). Like
+// any/none it takes no argument and is built directly, with no constructor.
 type FilterSizeUnknown struct{}
 
-// NewFilterSizeUnknown returns a filter matching events whose Filesize
-// estimate is unknown; it takes no argument, like any/none.
-func NewFilterSizeUnknown() (*FilterSizeUnknown, error) {
-	return &FilterSizeUnknown{}, nil
-}
-
 func (fsu *FilterSizeUnknown) Match(event *domain.Event) bool {
-	return event.SizeBytes == domain.FilesizeUnknown
+	return !sizeKnown(event)
 }

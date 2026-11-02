@@ -3,31 +3,43 @@ package filter
 import (
 	"fmt"
 	"testing"
+
+	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
 // benchMatch sinks Match results so the calls cannot be elided.
 var benchMatch bool
 
+// knownSize gives an event a known Filesize: a size comparison matches
+// nothing without one (size 0 means unknown).
+func knownSize(e *domain.Event) { e.SizeBytes = 1 << 20 }
+
 // leafCases pairs each leaf filter type with sources that do and do not match
-// the benchmark event - baseEvent with a known Filesize, so the size leaves
-// have a match case.
-var leafCases = []struct{ name, match, miss string }{
-	{"remote-addr", `src 203.0.113.0/24`, `src 198.51.100.0/24`},
-	{"method", `method GET`, `method POST`},
-	{"path", `path "/releases/24.04.iso"`, `path "/releases/other.iso"`},
-	{"path-prefix", `path prefix "/releases/"`, `path prefix "/other/"`},
-	{"path-suffix", `path suffix ".iso"`, `path suffix ".img"`},
-	{"path-keyword", `path keyword "24.04"`, `path keyword "debian"`},
-	{"path-regex", `path regex "\\.iso$"`, `path regex "\\.deb$"`},
-	{"agent", `agent "curl/8.5.0"`, `agent "Wget/1.21"`},
-	{"agent-keyword", `agent keyword "curl"`, `agent keyword "Wget"`},
-	{"agent-regex", `agent regex "curl"`, `agent regex "Wget"`},
-	{"status", `status 200`, `status 404`},
-	{"status-class", `status class 2`, `status class 5`},
-	{"sent-at-least", `sent >= 1k`, `sent >= 10m`},
-	{"sent-at-most", `sent <= 10k`, `sent <= 100`},
-	{"size-at-least", `size >= 1k`, `size >= 10m`},
-	{"size-at-most", `size <= 10m`, `size <= 1k`},
+// the case's event - baseEvent, with mut adjusting it where the leaves need
+// more than its defaults. Each case mutates only its own event, so an
+// adjustment cannot skew any other benchmark's baseline; only the size leaves
+// set and read SizeBytes.
+var leafCases = []struct {
+	name        string
+	match, miss string
+	mut         func(*domain.Event) // applied to baseEvent
+}{
+	{"remote-addr", `src 203.0.113.0/24`, `src 198.51.100.0/24`, nil},
+	{"method", `method GET`, `method POST`, nil},
+	{"path", `path "/releases/24.04.iso"`, `path "/releases/other.iso"`, nil},
+	{"path-prefix", `path prefix "/releases/"`, `path prefix "/other/"`, nil},
+	{"path-suffix", `path suffix ".iso"`, `path suffix ".img"`, nil},
+	{"path-keyword", `path keyword "24.04"`, `path keyword "debian"`, nil},
+	{"path-regex", `path regex "\\.iso$"`, `path regex "\\.deb$"`, nil},
+	{"agent", `agent "curl/8.5.0"`, `agent "Wget/1.21"`, nil},
+	{"agent-keyword", `agent keyword "curl"`, `agent keyword "Wget"`, nil},
+	{"agent-regex", `agent regex "curl"`, `agent regex "Wget"`, nil},
+	{"status", `status 200`, `status 404`, nil},
+	{"status-class", `status class 2`, `status class 5`, nil},
+	{"sent-at-least", `sent >= 1k`, `sent >= 10m`, nil},
+	{"sent-at-most", `sent <= 10k`, `sent <= 100`, nil},
+	{"size-at-least", `size >= 1k`, `size >= 10m`, knownSize},
+	{"size-at-most", `size <= 10m`, `size <= 1k`, knownSize},
 }
 
 // benchFilter parses src or fails the benchmark: fixture construction is
@@ -58,8 +70,6 @@ func benchChain(b *testing.B, n int, matchLast bool) []Filter {
 }
 
 func BenchmarkFilterMatch(b *testing.B) {
-	ev := baseEvent()
-	ev.SizeBytes = 1 << 20 // known Filesize: a comparison matches nothing without one
 	b.Run("leaf", func(b *testing.B) {
 		for _, leaf := range leafCases {
 			for _, path := range []struct {
@@ -68,6 +78,10 @@ func BenchmarkFilterMatch(b *testing.B) {
 			}{{"match", leaf.match}, {"no-match", leaf.miss}} {
 				b.Run(leaf.name+"/"+path.name, func(b *testing.B) {
 					f := benchFilter(b, path.src)
+					ev := baseEvent()
+					if leaf.mut != nil {
+						leaf.mut(&ev)
+					}
 					for b.Loop() {
 						benchMatch = f.Match(&ev)
 					}
@@ -76,6 +90,7 @@ func BenchmarkFilterMatch(b *testing.B) {
 		}
 	})
 	b.Run("chain", func(b *testing.B) {
+		ev := baseEvent()
 		for _, n := range []int{1, 10, 100} {
 			for _, path := range []struct {
 				name      string

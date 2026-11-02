@@ -279,9 +279,6 @@ func TestConstructorValidation(t *testing.T) {
 	if _, err := NewFilterSizeAtMost(0); err != nil {
 		t.Errorf("NewFilterSizeAtMost error: %v", err)
 	}
-	if _, err := NewFilterSizeUnknown(); err != nil {
-		t.Errorf("NewFilterSizeUnknown error: %v", err)
-	}
 }
 
 // ParseError stays a *ParseError through the public API (errors.As).
