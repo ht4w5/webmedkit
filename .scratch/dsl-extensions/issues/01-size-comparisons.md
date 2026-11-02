@@ -16,14 +16,14 @@ not rejected at load).
 
 **Status:** ready-for-agent
 
-- [ ] `size >= N` / `size <= N` accept N as a byte count or a binary-unit size (`k`, `m`, `g`), like `sent`
-- [ ] Matches are inclusive at the boundary and consider only events whose Filesize is known; unknown-size events never match a comparison
-- [ ] Malformed forms (bare `size 5`, a missing or overflowing limit) abort load with 1-based positions, like every DSL error
-- [ ] Size units are accepted only after `sent` and `size`; the rejection error names both keywords (e.g. `status 200k` still fails)
-- [ ] New Filter implementations for at-least / at-most with validating constructors rejecting negative limits
-- [ ] Rules-file format version stays 0; existing rules files parse identically
-- [ ] Rules docs list the predicates, the unit note, and the enrichment-gate trap
-- [ ] Tests at the existing Filter seam (Parse -> Match tables), mirroring the `sent` tables
+- [x] `size >= N` / `size <= N` accept N as a byte count or a binary-unit size (`k`, `m`, `g`), like `sent`
+- [x] Matches are inclusive at the boundary and consider only events whose Filesize is known; unknown-size events never match a comparison
+- [x] Malformed forms (bare `size 5`, a missing or overflowing limit) abort load with 1-based positions, like every DSL error
+- [x] Size units are accepted only after `sent` and `size`; the rejection error names both keywords (e.g. `status 200k` still fails)
+- [x] New Filter implementations for at-least / at-most with validating constructors rejecting negative limits
+- [x] Rules-file format version stays 0; existing rules files parse identically
+- [x] Rules docs list the predicates, the unit note, and the enrichment-gate trap
+- [x] Tests at the existing Filter seam (Parse -> Match tables), mirroring the `sent` tables
 
 Context: spec `../spec.md`, ADR `0024` (size 0 means unknown), ADR
 `0019`, ADR `0021`.
