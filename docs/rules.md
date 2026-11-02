@@ -62,8 +62,8 @@ Validate config and rules before deploying: `bandage -t -c bandage.yml
 Rule filters and the enrichment gate share one expression language over
 Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
-`path prefix|suffix|keyword|regex 'text'` (`agent` takes the exact,
-`keyword`, and `regex` forms, plus `agent prefix|suffix 'text'` -
+`path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
+`keyword`, and `regex` forms, plus `agent prefix|suffix "text"` -
 matching the user agent's literal start or end, exactly like
 `path prefix|suffix`),
 `sent >= 1m` / `sent <= 1m`, `size >= 100m` / `size <= 1m`, and
@@ -81,9 +81,11 @@ tab; any other `\X` aborts loading with `unknown escape sequence \X`.
 Single-quoted strings have exactly one escape: `''` is a single quote.
 Every other character - backslashes included - is literal, and the
 string ends at the first unpaired quote, so `'foo\'` is `foo\` and
-`''''` is two quotes. Both spellings may span newlines, and empty text
-is rejected by the `prefix`/`suffix` matchers under either. Single
-quotes are the recommended spelling for regex patterns
+`''''` is one literal quote (`''''''` is two). Both spellings may
+span newlines, and empty text is rejected wherever a text value is
+required (the `path`/`agent` exact form and the
+`prefix`/`suffix`/`keyword`/`regex` modifiers) under either spelling.
+Single quotes are the recommended spelling for regex patterns
 (`path regex '\.iso$'`): the pattern reads exactly as the regex engine
 sees it - in the double-quoted spelling a regex `\.` must instead be
 doubled to `"\\."`.

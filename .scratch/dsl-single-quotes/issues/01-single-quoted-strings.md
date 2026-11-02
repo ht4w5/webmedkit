@@ -29,3 +29,27 @@ regex examples single-quoted.
 
 Context: spec `../spec.md`, plan `../plan.md` (superseded design
 record; the grilling decisions it lists are binding).
+
+## Comments
+
+- 2026-11-02: Code-review adjudication - bare-word terminator vs
+  story 15. The quote character stays a bare-word terminator (parity
+  with `"`; grilling-settled Implementation Decision, normative), even
+  though story 15 ("every rules file that loads today parses
+  identically") is literally unsatisfiable alongside the feature: a
+  token-start `'` must lex as a string, so e.g. `method 'GET'` cannot
+  keep lexing as the bare word `'GET'`. Parity kept. Residual breakage
+  is bounded to method values containing a quote character - the one
+  input class that loads today and lexes differently after - and is a
+  loud load-time failure, never a silent semantic change (story 16's
+  principle preserved): `method don't` fails with
+  `filter: L:C: unterminated string` at the quote, `method 'GET'`
+  fails with the expected-bare-method-name error. Spec Implementation
+  Decisions corrected accordingly (bare words can also be method
+  names); story 15's wording and the terminator decision itself are
+  unchanged.
+- 2026-11-02: Code-review correction - `''''` spelling. Per story 3
+  (`''` yields one literal quote) and the first-unpaired-quote rule,
+  `''''` is ONE literal quote (`''''''` is two); the code and its
+  assertion were already correct. The spec example, the docs sentence,
+  and the test row name that said "two quotes" are fixed to match.

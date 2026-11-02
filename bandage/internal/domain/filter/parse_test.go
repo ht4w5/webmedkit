@@ -132,8 +132,9 @@ func TestParseTrees(t *testing.T) {
 		{"single-quoted agent regex", `agent regex '(?i)curl'`, `agent regex "(?i)curl"`},
 		{"single-quoted doubled quote is one quote", `path 'a''b'`, `path "a'b"`},
 		{"single-quoted string ends at unpaired quote", `path 'foo\'`, `path "foo\"`},
-		{"single-quoted doubled quotes are two quotes", `path ''''`, `path "'"`},
-		{"single-quoted backslash sequences are literal", `path 'a\qb'`, `path "a\qb"`},
+		{"single-quoted '''' is one literal quote", `path ''''`, `path "'"`},
+		{"single-quoted '''''' is two literal quotes", `path ''''''`, `path "''"`},
+		{"single-quoted backslash sequences are literal", `path 'a\.b'`, `path "a\.b"`},
 		{"single-quoted string spans newlines", "path 'a\nb'", "path \"a\nb\""},
 		{"single quote terminates bare words", "path'foo'", `path "foo"`},
 		{"double quote terminates bare words", `path"foo"`, `path "foo"`},
@@ -189,7 +190,7 @@ func TestParseErrorPositions(t *testing.T) {
 		{"trailing backslash in string", `path "abc\`, "filter: 1:6: unterminated string"},
 		// "unknown escape sequence" is exclusive to the double-quoted spelling:
 		// the same text in a single-quoted string is literal (see parse trees).
-		{"bad escape points at escape char", `path "a\qb"`, `filter: 1:9: unknown escape sequence \q`},
+		{"bad escape points at escape char", `path "a\.b"`, `filter: 1:9: unknown escape sequence \.`},
 
 		// Parser errors at the offending token.
 		{"missing operand", "any and", "filter: 1:8: unexpected end of filter, expected an operand"},
@@ -205,6 +206,10 @@ func TestParseErrorPositions(t *testing.T) {
 		{"src bad prefix length", "src 10.0.0.0/33", `filter: 1:5: invalid IP address or prefix "10.0.0.0/33"`},
 		{"method missing value", "method", `filter: 1:7: expected a bare method name after "method", got end of filter`},
 		{"method number value", "method 5m", `filter: 1:8: expected a bare method name after "method", got "5m"`},
+		// A bare word cannot contain a quote character (a quote starts a string):
+		// a method name carrying one loads today and now fails loudly at load.
+		{"method name containing a quote", "method don't", `filter: 1:11: unterminated string`},
+		{"method quoted value is not a bare word", `method 'GET'`, `filter: 1:8: expected a bare method name after "method", got "GET"`},
 		{"path missing value", "path", `filter: 1:5: expected a quoted text value after "path", got end of filter`},
 		{"path bare word value", "path x", `filter: 1:6: expected a quoted text value after "path", got "x"`},
 		{"path prefix missing value", `path prefix`, `filter: 1:12: expected a quoted text value after "path", got end of filter`},
