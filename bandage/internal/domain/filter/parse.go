@@ -172,6 +172,8 @@ func (p *parser) parsePrimitive() (Filter, error) {
 		return p.parseStatus(kw)
 	case "sent":
 		return p.parseSent(kw)
+	case "size":
+		return p.parseSize(kw)
 	default:
 		return nil, p.errorf(kw, "unknown keyword %q", kw.text)
 	}
@@ -208,7 +210,7 @@ func (p *parser) takeNumber(kw token, what string, allowUnit bool) (token, error
 		return token{}, p.errorf(tok, "expected a %s after %q, got %s", what, kw.text, tok.desc())
 	}
 	if tok.unit != 0 && !allowUnit {
-		return token{}, p.errorf(tok, `size units are only allowed after "sent"`)
+		return token{}, p.errorf(tok, `size units are only allowed after "sent" or "size"`)
 	}
 	if err := p.advance(); err != nil {
 		return token{}, err
@@ -375,6 +377,36 @@ func (p *parser) parseSent(kw token) (Filter, error) {
 		return f, nil
 	}
 	f, err := NewFilterSentAtMost(limit)
+	if err != nil {
+		return nil, p.wrap(tok, err)
+	}
+	return f, nil
+}
+
+func (p *parser) parseSize(kw token) (Filter, error) {
+	op := p.tok
+	if op.kind != tokGte && op.kind != tokLte {
+		return nil, p.errorf(op, `expected ">=" or "<=" after %q, got %s`, kw.text, op.desc())
+	}
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+	tok, err := p.takeNumber(kw, "size", true)
+	if err != nil {
+		return nil, err
+	}
+	limit, err := sizeLimit(tok)
+	if err != nil {
+		return nil, p.wrap(tok, err)
+	}
+	if op.kind == tokGte {
+		f, err := NewFilterSizeAtLeast(limit)
+		if err != nil {
+			return nil, p.wrap(tok, err)
+		}
+		return f, nil
+	}
+	f, err := NewFilterSizeAtMost(limit)
 	if err != nil {
 		return nil, p.wrap(tok, err)
 	}
