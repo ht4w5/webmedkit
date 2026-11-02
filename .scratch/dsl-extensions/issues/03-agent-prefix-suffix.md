@@ -11,11 +11,11 @@ forms.
 
 **Status:** ready-for-agent
 
-- [ ] `agent prefix "text"` matches agents starting with text; `agent suffix "text"` matches agents ending with it
-- [ ] Both match literally and case-sensitive, like `path prefix|suffix`
-- [ ] Empty text aborts load (prefix/suffix must not be empty), like every other text matcher
-- [ ] Exact/keyword/regex agent forms unchanged; existing rules files parse identically
-- [ ] Rules docs list the new forms
-- [ ] Tests at the existing Filter seam (Parse -> Match tables), mirroring the `path prefix|suffix` tables
+- [x] `agent prefix "text"` matches agents starting with text; `agent suffix "text"` matches agents ending with it
+- [x] Both match literally and case-sensitive, like `path prefix|suffix`
+- [x] Empty text aborts load (prefix/suffix must not be empty), like every other text matcher
+- [x] Exact/keyword/regex agent forms unchanged; existing rules files parse identically
+- [x] Rules docs list the new forms
+- [x] Tests at the existing Filter seam (Parse -> Match tables), mirroring the `path prefix|suffix` tables
 
 Context: spec `../spec.md`.

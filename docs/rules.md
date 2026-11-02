@@ -63,7 +63,9 @@ Rule filters and the enrichment gate share one expression language over
 Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
 `path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
-`keyword`, and `regex` forms),
+`keyword`, and `regex` forms, plus `agent prefix|suffix "text"` -
+matching the user agent's literal start or end, exactly like
+`path prefix|suffix`),
 `sent >= 1m` / `sent <= 1m`, and `size >= 100m` / `size <= 1m`
 (size units `k`, `m`, `g` are binary - `1k` is 1024 bytes - and are
 allowed only after `sent` and `size`) -

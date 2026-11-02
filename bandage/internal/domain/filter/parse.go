@@ -297,7 +297,7 @@ func (p *parser) parsePath(kw token) (Filter, error) {
 }
 
 func (p *parser) parseAgent(kw token) (Filter, error) {
-	mod, err := p.takeMod("keyword", "regex")
+	mod, err := p.takeMod("prefix", "suffix", "keyword", "regex")
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +306,18 @@ func (p *parser) parseAgent(kw token) (Filter, error) {
 		return nil, err
 	}
 	switch mod {
+	case "prefix":
+		f, err := NewFilterAgentPrefix(tok.text)
+		if err != nil {
+			return nil, p.wrap(tok, err)
+		}
+		return f, nil
+	case "suffix":
+		f, err := NewFilterAgentSuffix(tok.text)
+		if err != nil {
+			return nil, p.wrap(tok, err)
+		}
+		return f, nil
 	case "keyword":
 		f, err := NewFilterAgentKeyword(tok.text)
 		if err != nil {
