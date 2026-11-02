@@ -95,7 +95,7 @@ func isWordRune(r rune) bool {
 		return false
 	}
 	switch r {
-	case '(', ')', '"', '<', '>', '!', '|', '&':
+	case '(', ')', '"', '\'', '<', '>', '!', '|', '&':
 		return false
 	}
 	return true
@@ -148,6 +148,8 @@ func (l *lexer) next() (token, error) {
 		return token{kind: tokLte, text: "<=", line: line, col: col}, nil
 	case '"':
 		return l.scanString(line, col)
+	case '\'':
+		return l.scanSingleQuotedString(line, col)
 	default:
 		return l.scanWord(line, col)
 	}
@@ -181,6 +183,28 @@ func (l *lexer) scanString(line, col int) (token, error) {
 		default:
 			text = append(text, r)
 		}
+	}
+	return token{}, l.errAt(line, col, "unterminated string")
+}
+
+// scanSingleQuotedString scans a single-quoted string. The only escape is a
+// doubled quote, yielding one literal quote; every other character -
+// backslashes included - is literal, and the string ends at the first unpaired
+// quote.
+func (l *lexer) scanSingleQuotedString(line, col int) (token, error) {
+	l.nextRune() // opening quote
+	var text []rune
+	for l.pos < len(l.runes) {
+		r := l.nextRune()
+		if r == '\'' {
+			if l.peekRune() == '\'' {
+				l.nextRune()
+				text = append(text, '\'')
+				continue
+			}
+			return token{kind: tokString, text: string(text), line: line, col: col}, nil
+		}
+		text = append(text, r)
 	}
 	return token{}, l.errAt(line, col, "unterminated string")
 }
