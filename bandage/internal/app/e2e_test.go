@@ -1073,7 +1073,8 @@ chains:
 }
 
 // TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
-// the scrapeable machine contract (text exposition 0.0.4); nothing else is
+// the scrapeable machine contract (text exposition 0.0.4); GET / serves the
+// Web Panel from the daemon binary's embedded assets. Nothing else is
 // exposed beyond the report API and the /api/stats snapshot.
 func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -1106,7 +1107,27 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 		t.Errorf("GET /metrics body lacks the pipeline counter family, body:\n%s", body)
 	}
 
-	for _, path := range []string{"/", "/debug", "/reports", "/stats", "/reports/1", "/api/reports/1"} {
+	// GET / serves the Web Panel: the tab shell with its Statistic and
+	// Reports slots, embedded in the binary on the existing listener.
+	resp, err = apiClient.Get("http://" + d.apiAddr() + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200 (the Web Panel)", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("GET / Content-Type = %q, want text/html", got)
+	}
+	for _, want := range []string{"Statistic", "Reports"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("GET / body lacks the %q tab slot, body:\n%s", want, body)
+		}
+	}
+
+	for _, path := range []string{"/debug", "/reports", "/stats", "/reports/1", "/api/reports/1"} {
 		resp, err := apiClient.Get("http://" + d.apiAddr() + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

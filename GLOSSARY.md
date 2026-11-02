@@ -156,6 +156,13 @@ cumulative or instantaneous; series may be added, never silently renamed
 or removed.
 _Avoid_: statistic, stat
 
+**Web Panel**:
+The human-facing page served at the web root from assets embedded in the
+daemon binary: tabbed operator views over the Statistic and the reports,
+fetched client-side from the machine API and reloaded only on manual
+refresh.
+_Avoid_: dashboard, UI, console
+
 ### Enforcement
 
 **Ban rule**:

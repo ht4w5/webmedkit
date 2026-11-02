@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bandage Web Panel</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+<header class="top">
+  <h1>bandage <span class="subtitle">Web Panel</span></h1>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<nav class="tabs" aria-label="Panel sections">
+  <button type="button" class="tab active" data-tab="statistic" aria-selected="true">Statistic</button>
+  <button type="button" class="tab" data-tab="reports" aria-selected="false">Reports</button>
+</nav>
+<main>
+  <section id="panel-statistic" class="tab-panel">
+    <h2>Statistic</h2>
+    <p class="hint">The daemon's cumulative-since-start snapshot, fetched from <code>GET /api/stats</code>. Reload with Refresh.</p>
+    <pre id="statistic" class="json">Loading...</pre>
+  </section>
+  <section id="panel-reports" class="tab-panel" hidden>
+    <h2>Reports</h2>
+    <p class="placeholder">Placeholder - the report review table is not implemented yet.</p>
+  </section>
+</main>
+<script src="panel.js"></script>
+</body>
+</html>

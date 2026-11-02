@@ -1,7 +1,8 @@
-// Package httpapi serves the daemon's read-only HTTP surface: GET /api/reports,
-// DELETE /api/reports, GET /ping, GET /api/stats and GET /metrics (no URL
-// version, no report writes). The machine API lives under /api/ (ADR 0022);
-// /ping and /metrics stay at the root as infrastructure endpoints.
+// Package httpapi serves the daemon's read-only HTTP surface: GET / (the Web
+// Panel), GET /api/reports, DELETE /api/reports, GET /ping, GET /api/stats and
+// GET /metrics (no URL version, no report writes). The machine API lives under
+// /api/ (ADR 0022); /ping and /metrics stay at the root as infrastructure
+// endpoints.
 package httpapi
 
 import (
@@ -94,6 +95,9 @@ type Server struct {
 
 func New(reports ReportStore, stats StatsSource, runtime RuntimeSource, now func() time.Time) *Server {
 	s := &Server{reports: reports, stats: stats, runtime: runtime, now: now, mux: http.NewServeMux()}
+	s.mux.HandleFunc("GET /{$}", servePanelAsset("web/index.html", "text/html; charset=utf-8"))
+	s.mux.HandleFunc("GET /panel.css", servePanelAsset("web/panel.css", "text/css; charset=utf-8"))
+	s.mux.HandleFunc("GET /panel.js", servePanelAsset("web/panel.js", "text/javascript; charset=utf-8"))
 	s.mux.HandleFunc("GET /api/reports", s.handleReports)
 	s.mux.HandleFunc("DELETE /api/reports", s.handleDeleteReports)
 	s.mux.HandleFunc("GET /api/stats", s.handleStats)
