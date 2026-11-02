@@ -144,7 +144,7 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 		// every start.
 		path := cfg.DB.SQLite.Path
 		if cfg.DB.SQLite.Memory {
-			path = ":memory:"
+			path = sqlite.MemoryPath
 		}
 		r, err := sqlite.Open(path)
 		if err != nil {
