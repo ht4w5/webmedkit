@@ -12,19 +12,39 @@ annotated where a chain's later rules now run.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A rung carrying a report action is not terminal: the event
+- [x] A rung carrying a report action is not terminal: the event
   reaches the chain's remaining rules (pinned at the daemon
   end-to-end seam).
-- [ ] `stop` and `goto` remain terminal; `jump` remains non-terminal;
+- [x] `stop` and `goto` remain terminal; `jump` remains non-terminal;
   ladder firing (decided once, lowest first, no rung cancelled) is
   unchanged.
-- [ ] Shipped example rules audited; behaviour changes annotated where
+- [x] Shipped example rules audited; behaviour changes annotated where
   a chain's later rules now evaluate reported events.
-- [ ] Rules-format documentation's terminality statements updated; the
+- [x] Rules-format documentation's terminality statements updated; the
   decision recorded as an ADR amending the escalation-ladder premise.
-- [ ] Tests pin report-then-continue beside the goto/stop terminality
+- [x] Tests pin report-then-continue beside the goto/stop terminality
   cases and the unchanged ladder traversal.
+
+## Answer
+
+Implemented on `ticket/ep-02-nonterminal-report` (commit `33a14d3`),
+merged into `integration/eval-pipeline` (`e32a509`).
+`Escalation.Terminal()` shrinks to goto/stop: a report action writes
+and the Event continues through the chain's remaining rules; `jump`
+stays non-terminal; ladder firing (decided once pre-action, lowest
+first, no rung cancelled) unchanged. The three tests pinning report
+terminality were rewritten to report-then-continue
+(`TestE2EReportContinuesTheChainTraversal`,
+`TestE2EEscalationReportRungContinuesTheChain`, replay-ladder marks
+updated). Shipped `configs/rules.yml` audited: one behaviour change,
+annotated at `iso-download-flood` (`download-abuse` chain) - a later
+rule now evaluates Events `sustained-iso-egress` reported; `stop`
+restores the old traversal. docs/rules.md terminality statements
+follow ADR 0027. The release-notes callout landed in the review fix
+pass (`0c52ba5`, merged `a9da2ad`).
+
+Context: spec `../spec.md`, ADR `docs/adr/0027` (amending ADR 0013).
 
 ## Comments
