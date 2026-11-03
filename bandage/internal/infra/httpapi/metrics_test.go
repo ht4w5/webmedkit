@@ -27,6 +27,13 @@ var metricsFixture = metricsSnapshot{
 		},
 		Pipeline:     Pipeline{Workers: 4, Received: 1000, Parsed: 990, Dropped: 10},
 		TrackerCache: TrackerCache{Gets: 800, Sets: 400, Misses: 200, Evictions: 5, Size: 350, EntryCap: 1024},
+		// Rules in rules-file order (zeta before alpha), so the golden
+		// pins that metric series render sorted by rule ID; alpha's zero
+		// counts pin the zero series.
+		Rules: []RuleCounter{
+			{ID: "zeta", Total: 12, Matched: 3},
+			{ID: "alpha", Total: 0, Matched: 0},
+		},
 	},
 	runtime: Runtime{
 		Version:        "go1.27.0",
@@ -93,6 +100,14 @@ bandage_tracker_cache_entries 350
 # HELP bandage_tracker_cache_entry_cap Configured tracker cache entry capacity.
 # TYPE bandage_tracker_cache_entry_cap gauge
 bandage_tracker_cache_entry_cap 1024
+# HELP bandage_rule_events_total Events evaluated against the rule since daemon start.
+# TYPE bandage_rule_events_total counter
+bandage_rule_events_total{rule="alpha"} 0
+bandage_rule_events_total{rule="zeta"} 12
+# HELP bandage_rule_events_matched_total Events that matched the rule since daemon start.
+# TYPE bandage_rule_events_matched_total counter
+bandage_rule_events_matched_total{rule="alpha"} 0
+bandage_rule_events_matched_total{rule="zeta"} 3
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1
@@ -156,6 +171,8 @@ func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 		{"bandage_tracker_cache_evictions_total", "counter"},
 		{"bandage_tracker_cache_entries", "gauge"},
 		{"bandage_tracker_cache_entry_cap", "gauge"},
+		{"bandage_rule_events_total", "counter"},
+		{"bandage_rule_events_matched_total", "counter"},
 		{"go_info", "gauge"},
 		{"go_goroutines", "gauge"},
 		{"go_threads", "gauge"},
@@ -169,6 +186,30 @@ func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 		}
 		if want := "# TYPE " + f.name + " " + f.kind + "\n"; !strings.Contains(body, want) {
 			t.Errorf("body lacks %q", want)
+		}
+	}
+}
+
+// The rule families' series count is the number of counters enabled
+// in the rules file - no counters means HELP/TYPE headers and no
+// samples, never a bogus unlabeled series (cardinality fixed per
+// configuration).
+func TestMetricsRuleFamiliesRenderNoSeriesWithoutCounters(t *testing.T) {
+	snap := metricsFixture
+	snap.stats.Rules = nil
+	w := metricsRequest(t, snap, http.MethodGet)
+	body := w.Body.String()
+	for _, family := range []string{"bandage_rule_events_total", "bandage_rule_events_matched_total"} {
+		if !strings.Contains(body, "# HELP "+family+" ") {
+			t.Errorf("body lacks # HELP for %s", family)
+		}
+		if want := "# TYPE " + family + " counter\n"; !strings.Contains(body, want) {
+			t.Errorf("body lacks %q", want)
+		}
+		for _, line := range strings.Split(body, "\n") {
+			if strings.HasPrefix(line, family) {
+				t.Errorf("body renders a %s sample with no counter configured: %q", family, line)
+			}
 		}
 	}
 }
