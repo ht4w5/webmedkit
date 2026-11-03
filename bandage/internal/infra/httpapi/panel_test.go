@@ -256,6 +256,63 @@ func TestStatsSearchNarrowsKeyValueRows(t *testing.T) {
 	}
 }
 
+// The Stats page gains a rule counters section after the tracker cache
+// group: a three-column rule/total/matched table in the established
+// table styling, fed by the /api/stats rules block (GLOSSARY: Rule
+// counter).
+func TestStatsPageShowsRuleCountersTableAfterTrackerCache(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	for _, want := range []string{
+		`<h2 class="group-title">rule counters</h2>`,
+		`id="group-rule-counters"`,
+		`<th>rule</th>`, `<th>total</th>`, `<th>matched</th>`,
+		`class="kv-table"`, // the rule counters table carries the stats table's skin
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /stats body lacks the rule counters table slot %s, body:\n%s", want, page)
+		}
+	}
+	if strings.Index(page, `id="group-tracker-cache"`) > strings.Index(page, `id="group-rule-counters"`) {
+		t.Errorf("GET /stats body places the rule counters table before the tracker cache group, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`group-rule-counters`, // the rules block's own row slot
+		`snapshot.rules`,      // fed by the /api/stats rules block
+		`rule-counter-row`,    // its own row builder
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not render the rules block into the rule counters table via %s, body:\n%s", want, js)
+		}
+	}
+}
+
+// When no rule enables a counter the rule counters table shows the
+// explicit empty state - "No rule counters configured." - so silence
+// is never mistaken for a broken panel.
+func TestStatsRuleCountersShowExplicitEmptyState(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	if !strings.Contains(js, "No rule counters configured.") {
+		t.Errorf("common.js lacks the rule counters' explicit empty state copy; a table with nothing configured must say so, body:\n%s", js)
+	}
+}
+
+// The shared search box narrows the rule counter rows like every other
+// row: the same unanchored, case-insensitive regex, over rule, total
+// and matched.
+func TestStatsSearchNarrowsRuleCountersRows(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`renderRuleCounters(fetchedRuleCounters`, // the search re-renders the rule counters table
+		`match.test(counter.id + "\n" + counter.total + "\n" + counter.matched)`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not narrow the rule counter rows by the shared search box via %s, body:\n%s", want, js)
+		}
+	}
+}
+
 // The right-aligned header legend on the Stats view shows the build
 // identity and uptime, so the running binary's identity is on screen
 // at a glance (the identity table carries the full snapshot).

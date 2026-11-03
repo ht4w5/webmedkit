@@ -180,6 +180,33 @@ func TestParseRulesReasonPrefix(t *testing.T) {
 	}
 }
 
+// TestParseRulesCounterFlag: the rule-level counter key enables the
+// rule's Rule counter (GLOSSARY: Rule counter); it defaults to false,
+// so upgrading adds no noise until asked for.
+func TestParseRulesCounterFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		want  bool
+	}{
+		{"omitted defaults to false", "", false},
+		{"true enables the rule counter", "counter: true\n", true},
+		{"false keeps the rule counter off", "counter: false\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        " + tt.extra
+			doc, err := ParseRules([]byte(yaml))
+			if err != nil {
+				t.Fatalf("ParseRules error: %v", err)
+			}
+			if got := doc.Chains[0].Rules[0].Counter; got != tt.want {
+				t.Errorf("counter = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRulesValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -370,6 +397,11 @@ chains:
 		{name: "unknown key at top level", yaml: "version: 0\nchainz: []\n", wantErr: "chainz"},
 		{name: "unknown key in rule", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        buckets: []\n", wantErr: "buckets"},
 		{name: "unknown key in tracker", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2, ttl: 5}\n", wantErr: "ttl"},
+
+		// Rule counter (rule-level counter key).
+		{name: "string counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: sometimes\n", wantErr: `counter: must be true or false`},
+		{name: "numeric counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: 1\n", wantErr: `counter: must be true or false`},
+		{name: "sequence counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: [true]\n", wantErr: `counter: must be true or false`},
 
 		// Enrichment block.
 		{name: "enrichment filter accepted", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n"},

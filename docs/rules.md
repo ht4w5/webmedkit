@@ -445,6 +445,38 @@ rungs carry every threshold) and its `ttl` from the top rung:
     rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop
 ```
 
+## Rule counters
+
+A rule may carry the rule-level `counter: true` key (default `false`),
+enabling its **Rule counter** ([GLOSSARY.md](../GLOSSARY.md)): the
+events the rule is evaluated against and the subset that matched it,
+cumulative since daemon start and reset on restart like every other
+Stats number. Two quantities, counted exactly under the worker pool:
+
+- `total` counts every event the rule is evaluated against - events
+  its filter rejected and replay warm-up skips included. A chain
+  dispatched more than once for one event counts one visit per
+  dispatch.
+- `matched` counts exactly the rule's Matches - one per matching
+  Event, a ladder counting once however many rungs fired.
+
+The counts surface on the operator's Stats surfaces: the `/api/stats`
+snapshot's `rules` block lists every counter-enabled rule as `id`,
+`total` and `matched` in rules-file order, and the Web Panel's Stats
+page shows the same as its rule counters table. Rules without
+`counter` count nothing and stay out of both.
+
+```yaml
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-download-flood
+        counter: true
+        tracker: {track: rate, leak: 10, volume: 100}
+        actions: [{report: {reason: iso-download-flood, ttl: 24h, penalty: limit-req-rate, rate: 200}}]
+```
+
 ## Pattern: the tracker-less tripwire
 
 The tripwire flags every request carrying a known-bad signal (classically
