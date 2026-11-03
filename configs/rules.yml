@@ -43,6 +43,10 @@ chains:
               penalty: limit-bandwidth
               rate: 1MB
 
+      # A report no longer ends the chain (ADR 0027): iso-download-flood
+      # now also evaluates events sustained-iso-egress reported, so both
+      # rules' reasons accrue per event. Add a stop action after the
+      # report above to end traversal there again.
       - id: iso-download-flood
         filter: any
         tracker:
