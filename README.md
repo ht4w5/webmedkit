@@ -23,6 +23,8 @@ rules.
   deployment and caveats
 - [docs/storage.md](docs/storage.md) - the report store on sqlite WAL:
   the files beside the database and backing them up
+- [RELEASE-NOTES.md](RELEASE-NOTES.md) - upgrade notes per release:
+  behavior changes to rules files and new capabilities
 
 Example configuration lives in [configs/](configs/) (`bandage.yml`,
 `rules.yml`, the `nginx/bandage_log.conf` log-format snippet, and the
