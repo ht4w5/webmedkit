@@ -163,6 +163,11 @@ func (r Rule) TopRung() (Escalation, bool) {
 // and ordered actions. It matches when the filter accepts and the tracker (if any) overflows; the ID namespaces tracker state.
 type Rule struct {
 	ID string
+	// Counter marks the rule's Rule counter enabled (the rules
+	// format's counter key, default false); the evaluator counts its
+	// visits and Matches and the daemon exposes them (GLOSSARY: Rule
+	// counter).
+	Counter bool
 	// FilterSource is the effective filter expression as written
 	// ("any" when omitted), kept for the --test plan print.
 	FilterSource string

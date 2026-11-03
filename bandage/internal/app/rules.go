@@ -37,9 +37,12 @@ type rawChain struct {
 	Rules []rawRule `yaml:"rules"`
 }
 
+// rawRule carries the rule's keys; counter is a yaml.Node so presence
+// is validated (default false).
 type rawRule struct {
 	ID      string      `yaml:"id"`
 	Filter  string      `yaml:"filter"`
+	Counter yaml.Node   `yaml:"counter"`
 	Tracker *rawTracker `yaml:"tracker"`
 	// Actions is the rule's action list (nil key absent, empty list a
 	// declared empty list).
@@ -211,6 +214,12 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 
 	rule := domain.Rule{ID: id}
 
+	counter, err := parseCounter(id, &raw.Counter)
+	if err != nil {
+		return domain.Rule{}, err
+	}
+	rule.Counter = counter
+
 	if raw.Escalations != nil && raw.Actions != nil {
 		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside actions", id)
 	}
@@ -272,6 +281,20 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		rule.Actions = append(rule.Actions, action)
 	}
 	return rule, nil
+}
+
+// parseCounter parses the rule's optional counter flag (default false):
+// true enables the rule's Rule counter (GLOSSARY: Rule counter); the
+// value must be a boolean, anything else names the key.
+func parseCounter(id string, node *yaml.Node) (bool, error) {
+	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
+		return false, nil
+	}
+	var on bool
+	if node.Kind != yaml.ScalarNode || node.Decode(&on) != nil {
+		return false, fmt.Errorf("rules: rule %q: counter: must be true or false", id)
+	}
+	return on, nil
 }
 
 // parseTracker builds the single-volume rule's tracker config: rate and bandwidth
