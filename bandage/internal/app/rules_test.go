@@ -1199,7 +1199,8 @@ func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 	}
 }
 
-// ADR 0017 at the plan seam: a renamed binary's plan shows its own namespace.
+// The program-name fallback at the plan seam (ADR 0026): absent a
+// reason_prefix, a renamed binary's plan shows its own namespace.
 func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")

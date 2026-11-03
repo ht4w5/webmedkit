@@ -218,8 +218,8 @@ func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYA
 	return startTestDaemonBuildCfg(t, clock, network, dbPath, rulesYAML, testBuild, mutate, extra...)
 }
 
-// startTestDaemonBuildCfg lets the caller pick the build identity: the
-// reason namespace follows its name (ADR 0017).
+// startTestDaemonBuildCfg lets the caller pick the build identity: absent
+// a reason_prefix, the reason namespace follows its name (ADR 0026).
 func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, build identity.Build, mutate func(*Config), extra ...Option) *testDaemon {
 	t.Helper()
 	listen := filepath.Join(t.TempDir(), "log.sock")
@@ -887,7 +887,8 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	}
 }
 
-// ADR 0017 pinned behaviorally: a renamed build re-namespaces every reason.
+// The program-name fallback pinned behaviorally (ADR 0026): absent a
+// reason_prefix, a renamed build re-namespaces every reason.
 func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", bandwidthRules, identity.For("bandage-canary"), nil)

@@ -36,7 +36,7 @@ type Report struct {
 }
 
 // NamespacedReason composes a Reason's namespaced form (GLOSSARY): prefix, dot,
-// authored code (ADR 0016, ADR 0017) -- the one join, so plan and report agree.
+// authored code (ADR 0016, ADR 0026) -- the one join, so plan and report agree.
 func NamespacedReason(prefix, code string) string {
 	return prefix + "." + code
 }
