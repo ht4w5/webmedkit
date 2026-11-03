@@ -1225,6 +1225,97 @@ func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 	}
 }
 
+// The --test plan prints the effective reason prefix - the configured
+// reason_prefix, else the passed build's name - and namespaces the
+// printed reasons with it; an invalid prefix fails the plan at load,
+// naming the key (ADR 0026).
+func TestPlanReasonPrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		build   string
+		want    []string
+		wantErr string
+	}{
+		{
+			name:  "absent key prints the build name as the effective prefix",
+			build: "bandage-canary",
+			yaml: `version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
+`,
+			want: []string{
+				"reason prefix: bandage-canary",
+				"action report reason=bandage-canary.iso-egress-overflow ttl=1h0m0s penalty=drop",
+			},
+		},
+		{
+			name:  "configured prefix wins and namespaces the printed reasons",
+			build: "bandage",
+			yaml: `reason_prefix: acme-prod
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
+`,
+			want: []string{
+				"reason prefix: acme-prod",
+				"action report reason=acme-prod.iso-egress-overflow ttl=1h0m0s penalty=drop",
+			},
+		},
+		{
+			name:  "invalid prefix fails the plan naming the key",
+			build: "bandage",
+			yaml: `reason_prefix: Acme.Prod
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]
+`,
+			wantErr: `rules: reason_prefix: "Acme.Prod" is not a valid slug`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "bandage.yml")
+			rulesPath := filepath.Join(dir, "rules.yml")
+			if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rulesPath, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Test(cfgPath, rulesPath, identity.For(tt.build))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Test succeeded, want error naming the key %q:\n%s", tt.wantErr, plan)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q does not contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Test error: %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(plan, want) {
+					t.Errorf("plan does not contain %q:\n%s", want, plan)
+				}
+			}
+		})
+	}
+}
+
 func TestPrintsValidatedPlan(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")

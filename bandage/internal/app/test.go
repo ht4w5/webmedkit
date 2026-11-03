@@ -10,8 +10,9 @@ import (
 )
 
 // Test validates the config and rules files and returns the plan (bandage
-// --test); it opens no sockets. Plan contract (ADR 0016, ADR 0017): the
-// report carries the code namespaced; the rules file declares it bare.
+// --test); it opens no sockets. Plan contract (ADR 0016, ADR 0026): the
+// report carries the code namespaced under the effective reason prefix;
+// the rules file declares it bare.
 func Test(configPath, rulesPath string, build identity.Build) (string, error) {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
@@ -25,12 +26,14 @@ func Test(configPath, rulesPath string, build identity.Build) (string, error) {
 }
 
 func planText(cfg Config, rules Rules, build identity.Build) string {
+	prefix := rules.effectiveReasonPrefix(build.Name())
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", build.Header())
 	fmt.Fprintf(&b, "config: ingest syslog/%s %s %s\n", cfg.Ingest.Parser, cfg.Ingest.Syslog.Network, cfg.Ingest.Syslog.Listen)
 	fmt.Fprintf(&b, "config: db %s %s\n", cfg.DB.Driver, cfg.DB.SQLite.Path)
 	fmt.Fprintf(&b, "config: api %s\n", cfg.API.Listen)
 	fmt.Fprintf(&b, "config: cache max_entries %d\n", cfg.Cache.MaxEntries)
+	fmt.Fprintf(&b, "reason prefix: %s\n", prefix)
 	fmt.Fprintf(&b, "enrichment.filter: %s\n", rules.Enrichment.FilterSource)
 	for _, chain := range rules.Chains {
 		fmt.Fprintf(&b, "chain %s\n", chain.Name)
@@ -54,14 +57,14 @@ func planText(cfg Config, rules Rules, build identity.Build) string {
 				}
 			}
 			for _, action := range rule.Actions {
-				fmt.Fprintf(&b, "    action %s\n", actionText(action, build.Name()))
+				fmt.Fprintf(&b, "    action %s\n", actionText(action, prefix))
 			}
 			for _, rung := range rule.Escalations {
 				fmt.Fprintf(&b, "    rung at=%s", fmtFloat(rung.At))
 				if len(rung.Actions) > 0 {
 					parts := make([]string, 0, len(rung.Actions))
 					for _, action := range rung.Actions {
-						parts = append(parts, actionText(action, build.Name()))
+						parts = append(parts, actionText(action, prefix))
 					}
 					fmt.Fprintf(&b, " %s", strings.Join(parts, ", "))
 				}
@@ -73,20 +76,20 @@ func planText(cfg Config, rules Rules, build identity.Build) string {
 }
 
 // actionText renders one action's plan text (no indentation or newline); the describer cannot fail.
-func actionText(a domain.Action, progName string) string {
+func actionText(a domain.Action, prefix string) string {
 	var ab strings.Builder
-	_ = a.Accept(actionDescriber{b: &ab, progName: progName})
+	_ = a.Accept(actionDescriber{b: &ab, prefix: prefix})
 	return ab.String()
 }
 
 // actionDescriber is the --test side of Action.Accept, appending one action's text to the plan.
 type actionDescriber struct {
-	b        *strings.Builder
-	progName string // the build's program name: the namespace of the report reason (ADR 0017)
+	b      *strings.Builder
+	prefix string // the effective reason prefix: the namespace of the report reason (ADR 0026)
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.progName, a.Reason), a.TTL, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.prefix, a.Reason), a.TTL, a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}
