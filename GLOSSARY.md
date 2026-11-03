@@ -169,6 +169,12 @@ from the machine API behind a shared header with a regexp search box;
 reload is manual only - the REFRESH control or a page load.
 _Avoid_: dashboard, UI, console
 
+**Rule counter**:
+The per-rule accounting of events: the events a rule is evaluated against and
+the subset that matched it, cumulative since daemon start. Unlike a Tracker,
+which accumulates a quantity per Target, a Rule counter counts events per rule.
+_Avoid_: tally, rule stats, hit counter
+
 ### Enforcement
 
 **Ban rule**:
