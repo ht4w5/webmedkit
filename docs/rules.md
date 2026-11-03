@@ -153,7 +153,10 @@ action.
 The prefix is slug-shaped like the authored code -
 `^[a-z0-9][a-z0-9_-]*$` - and validated at load: a typo fails
 `bandage -t` naming the key, never renaming the namespace silently at
-runtime. When the key is absent the prefix is the program name exactly
+runtime. An absent key and a written key are all-or-nothing: absent
+means the default below, while a written key must carry the slug - a
+written null or non-string value fails load like any other typo. When
+the key is absent the prefix is the program name exactly
 as before
 ([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md) kept as
 the default), so existing rules files keep producing byte-identical
@@ -451,7 +454,10 @@ A rule may carry the rule-level `counter: true` key (default `false`),
 enabling its **Rule counter** ([GLOSSARY.md](../GLOSSARY.md)): the
 events the rule is evaluated against and the subset that matched it,
 cumulative since daemon start and reset on restart like every other
-Stats number. Two quantities, counted exactly under the worker pool:
+Stats number. As with `reason_prefix`, the key is all-or-nothing: an
+absent key means the default, while a written `counter` must carry
+`true` or `false` - a written null fails load like any other typo.
+Two quantities, counted exactly under the worker pool:
 
 - `total` counts every event the rule is evaluated against - events
   its filter rejected and replay warm-up skips included. A chain

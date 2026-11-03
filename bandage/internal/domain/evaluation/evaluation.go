@@ -40,21 +40,25 @@ type Counters interface {
 	Match(ruleID string)
 }
 
-// nopCounters discards every count (the Service default).
-type nopCounters struct{}
+// NopCounters discards every count: the Counters implementation for
+// callers that observe nothing, passed explicitly - nothing silently
+// substitutes for a missing dependency.
+type NopCounters struct{}
 
-func (nopCounters) Visit(string) {}
-func (nopCounters) Match(string) {}
+func (NopCounters) Visit(string) {}
+func (NopCounters) Match(string) {}
 
 // Logger is the log action's logging port (ADR 0005); it carries only the domain's four levels, so a rule can never exit the process.
 type Logger interface {
 	Log(level domain.Level, msg string, fields map[string]any)
 }
 
-// nopLogger discards every record (the Service default).
-type nopLogger struct{}
+// NopLogger discards every record: the Logger implementation for
+// callers that observe nothing, passed explicitly - nothing silently
+// substitutes for a missing dependency.
+type NopLogger struct{}
 
-func (nopLogger) Log(domain.Level, string, map[string]any) {}
+func (NopLogger) Log(domain.Level, string, map[string]any) {}
 
 // Service evaluates events against the loaded chains.
 type Service struct {
@@ -68,22 +72,36 @@ type Service struct {
 	logger       Logger
 }
 
-// NewService assembles the evaluator. reasonPrefix namespaces report
-// reasons at creation (ADR 0016): the rules file's reason_prefix, else
-// the program name (ADR 0026). counters receives the rule-counter
-// counts (nil = nop).
-func NewService(reasonPrefix string, chains []domain.Chain, cache TrackerCache, reports ReportSink, counters Counters, now func() time.Time, logger Logger) *Service {
-	if logger == nil {
-		logger = nopLogger{}
-	}
-	if counters == nil {
-		counters = nopCounters{}
-	}
-	byName := make(map[string]int, len(chains))
-	for i, chain := range chains {
+// Deps are the Service's dependencies and settings, assembled once at
+// daemon assembly or a test fixture: one named struct rather than a
+// positional argument list, so the prefix and the ports can never
+// swap places. Counters and Logger are required - pass NopCounters
+// and NopLogger to discard their output.
+type Deps struct {
+	// ReasonPrefix namespaces report reasons at creation (ADR 0016):
+	// the rules file's reason_prefix, else the program name (ADR 0026).
+	ReasonPrefix string
+	// Chains are the loaded chains; the entry chain is domain.EntryChain.
+	Chains []domain.Chain
+	// Cache is the tracker-state port and Reports the report write port.
+	Cache   TrackerCache
+	Reports ReportSink
+	// Counters receives the rule-counter counts (GLOSSARY: Rule
+	// counter); the daemon owns the registry behind it.
+	Counters Counters
+	// Now is the clock report timestamps read at Trigger time.
+	Now func() time.Time
+	// Logger is the log action's logging port (ADR 0005).
+	Logger Logger
+}
+
+// NewService assembles the evaluator from its dependencies.
+func NewService(d Deps) *Service {
+	byName := make(map[string]int, len(d.Chains))
+	for i, chain := range d.Chains {
 		byName[chain.Name] = i
 	}
-	return &Service{reasonPrefix: reasonPrefix, chains: chains, byName: byName, cache: cache, reports: reports, counters: counters, now: now, logger: logger}
+	return &Service{reasonPrefix: d.ReasonPrefix, chains: d.Chains, byName: byName, cache: d.Cache, reports: d.Reports, counters: d.Counters, now: d.Now, logger: d.Logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs

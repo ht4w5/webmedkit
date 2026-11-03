@@ -59,12 +59,12 @@ var metricFamilies = []metricFamily{
 		name: "bandage_start_time_seconds",
 		kind: metricGauge,
 		help: "Seconds since the Unix epoch at which the daemon started.",
-		series: func(s metricsSnapshot) []metricSeries {
+		series: scalar(func(s metricsSnapshot) float64 {
 			// Whole-second Unix() plus the nanosecond fraction: exact
 			// where UnixNano()/1e9 rounds at this magnitude.
 			t := s.stats.StartedAt
-			return []metricSeries{{value: float64(t.Unix()) + float64(t.Nanosecond())/1e9}}
-		},
+			return float64(t.Unix()) + float64(t.Nanosecond())/1e9
+		}),
 	},
 	{
 		name: "bandage_build_info",
@@ -84,84 +84,64 @@ var metricFamilies = []metricFamily{
 		},
 	},
 	{
-		name: "bandage_pipeline_events_received_total",
-		kind: metricCounter,
-		help: "Log lines received from the wire since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.Pipeline.Received)}}
-		},
+		name:   "bandage_pipeline_events_received_total",
+		kind:   metricCounter,
+		help:   "Log lines received from the wire since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Received) }),
 	},
 	{
-		name: "bandage_pipeline_events_parsed_total",
-		kind: metricCounter,
-		help: "Log lines parsed into events since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.Pipeline.Parsed)}}
-		},
+		name:   "bandage_pipeline_events_parsed_total",
+		kind:   metricCounter,
+		help:   "Log lines parsed into events since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Parsed) }),
 	},
 	{
-		name: "bandage_pipeline_events_dropped_total",
-		kind: metricCounter,
-		help: "Malformed or invalid log lines dropped since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.Pipeline.Dropped)}}
-		},
+		name:   "bandage_pipeline_events_dropped_total",
+		kind:   metricCounter,
+		help:   "Malformed or invalid log lines dropped since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Dropped) }),
 	},
 	{
-		name: "bandage_pipeline_workers",
-		kind: metricGauge,
-		help: "Pipeline workers processing log lines.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.Pipeline.Workers)}}
-		},
+		name:   "bandage_pipeline_workers",
+		kind:   metricGauge,
+		help:   "Pipeline workers processing log lines.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.Pipeline.Workers) }),
 	},
 	{
-		name: "bandage_tracker_cache_gets_total",
-		kind: metricCounter,
-		help: "Tracker cache lookups since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.Gets)}}
-		},
+		name:   "bandage_tracker_cache_gets_total",
+		kind:   metricCounter,
+		help:   "Tracker cache lookups since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Gets) }),
 	},
 	{
-		name: "bandage_tracker_cache_sets_total",
-		kind: metricCounter,
-		help: "Tracker cache writes since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.Sets)}}
-		},
+		name:   "bandage_tracker_cache_sets_total",
+		kind:   metricCounter,
+		help:   "Tracker cache writes since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Sets) }),
 	},
 	{
-		name: "bandage_tracker_cache_misses_total",
-		kind: metricCounter,
-		help: "Tracker cache lookups that found no entry since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.Misses)}}
-		},
+		name:   "bandage_tracker_cache_misses_total",
+		kind:   metricCounter,
+		help:   "Tracker cache lookups that found no entry since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Misses) }),
 	},
 	{
-		name: "bandage_tracker_cache_evictions_total",
-		kind: metricCounter,
-		help: "Tracker cache evictions since daemon start.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.Evictions)}}
-		},
+		name:   "bandage_tracker_cache_evictions_total",
+		kind:   metricCounter,
+		help:   "Tracker cache evictions since daemon start.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Evictions) }),
 	},
 	{
-		name: "bandage_tracker_cache_entries",
-		kind: metricGauge,
-		help: "Tracker cache entries currently held.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.Size)}}
-		},
+		name:   "bandage_tracker_cache_entries",
+		kind:   metricGauge,
+		help:   "Tracker cache entries currently held.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.Size) }),
 	},
 	{
-		name: "bandage_tracker_cache_entry_cap",
-		kind: metricGauge,
-		help: "Configured tracker cache entry capacity.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.stats.TrackerCache.EntryCap)}}
-		},
+		name:   "bandage_tracker_cache_entry_cap",
+		kind:   metricGauge,
+		help:   "Configured tracker cache entry capacity.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.stats.TrackerCache.EntryCap) }),
 	},
 	{
 		name:   "bandage_rule_events_total",
@@ -184,53 +164,50 @@ var metricFamilies = []metricFamily{
 		},
 	},
 	{
-		name: "go_goroutines",
-		kind: metricGauge,
-		help: "Number of goroutines that currently exist.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.runtime.Goroutines)}}
-		},
+		name:   "go_goroutines",
+		kind:   metricGauge,
+		help:   "Number of goroutines that currently exist.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.runtime.Goroutines) }),
 	},
 	{
-		name: "go_threads",
-		kind: metricGauge,
-		help: "Number of OS threads created.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.runtime.Threads)}}
-		},
+		name:   "go_threads",
+		kind:   metricGauge,
+		help:   "Number of OS threads created.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.runtime.Threads) }),
 	},
 	{
-		name: "go_memstats_alloc_bytes",
-		kind: metricGauge,
-		help: "Number of bytes allocated and still in use.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.runtime.AllocBytes)}}
-		},
+		name:   "go_memstats_alloc_bytes",
+		kind:   metricGauge,
+		help:   "Number of bytes allocated and still in use.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.runtime.AllocBytes) }),
 	},
 	{
-		name: "go_memstats_heap_inuse_bytes",
-		kind: metricGauge,
-		help: "Number of heap bytes that are in use.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.runtime.HeapInuseBytes)}}
-		},
+		name:   "go_memstats_heap_inuse_bytes",
+		kind:   metricGauge,
+		help:   "Number of heap bytes that are in use.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.runtime.HeapInuseBytes) }),
 	},
 	{
-		name: "go_memstats_sys_bytes",
-		kind: metricGauge,
-		help: "Number of bytes obtained from system.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: float64(s.runtime.SysBytes)}}
-		},
+		name:   "go_memstats_sys_bytes",
+		kind:   metricGauge,
+		help:   "Number of bytes obtained from system.",
+		series: scalar(func(s metricsSnapshot) float64 { return float64(s.runtime.SysBytes) }),
 	},
 	{
-		name: "go_memstats_gc_cpu_fraction",
-		kind: metricGauge,
-		help: "The fraction of this program's available CPU time used by the GC since the program started.",
-		series: func(s metricsSnapshot) []metricSeries {
-			return []metricSeries{{value: s.runtime.GCCPUFraction}}
-		},
+		name:   "go_memstats_gc_cpu_fraction",
+		kind:   metricGauge,
+		help:   "The fraction of this program's available CPU time used by the GC since the program started.",
+		series: scalar(func(s metricsSnapshot) float64 { return s.runtime.GCCPUFraction }),
 	},
+}
+
+// scalar wraps a one-value family's source into its series function:
+// one unlabeled series carrying fn's value. The one-value families'
+// shared shape, so no family re-implements the wrapper.
+func scalar(fn func(metricsSnapshot) float64) func(metricsSnapshot) []metricSeries {
+	return func(s metricsSnapshot) []metricSeries {
+		return []metricSeries{{value: fn(s)}}
+	}
 }
 
 // ruleSeries is the Rule counter families' series function: one series
