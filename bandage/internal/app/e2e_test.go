@@ -218,8 +218,8 @@ func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYA
 	return startTestDaemonBuildCfg(t, clock, network, dbPath, rulesYAML, testBuild, mutate, extra...)
 }
 
-// startTestDaemonBuildCfg lets the caller pick the build identity: the
-// reason namespace follows its name (ADR 0017).
+// startTestDaemonBuildCfg lets the caller pick the build identity: absent
+// a reason_prefix, the reason namespace follows its name (ADR 0026).
 func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, build identity.Build, mutate func(*Config), extra ...Option) *testDaemon {
 	t.Helper()
 	listen := filepath.Join(t.TempDir(), "log.sock")
@@ -887,7 +887,8 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	}
 }
 
-// ADR 0017 pinned behaviorally: a renamed build re-namespaces every reason.
+// The program-name fallback pinned behaviorally (ADR 0026): absent a
+// reason_prefix, a renamed build re-namespaces every reason.
 func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", bandwidthRules, identity.For("bandage-canary"), nil)
@@ -903,6 +904,39 @@ func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	}
 	if r := doc.Reports[0]; r.Reason != "bandage-canary.egress-overflow" {
 		t.Errorf("reason = %q, want %q (the namespace follows the build name)", r.Reason, "bandage-canary.egress-overflow")
+	}
+}
+
+// The rules file's reason_prefix re-namespaces served report reasons
+// without touching the build identity: the configured prefix wins over
+// the program-name fallback and the authored code stays the reason's
+// second label (ADR 0026).
+func TestE2EConfiguredReasonPrefixNamespacesServedReports(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", "reason_prefix: acme-prod\n"+bandwidthRules, identity.For("bandage-canary"), nil)
+
+	// 6000 + 6000 - 1000*1s = 11000 > 10000: the second event overflows.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.waitProcessed(t, 2)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.Reason != "acme-prod.egress-overflow" {
+		t.Errorf("reason = %q, want %q (the configured prefix namespaces the reason; the authored code stays its second label)", r.Reason, "acme-prod.egress-overflow")
+	}
+	// The build identity keeps the program name - version stamps and
+	// build_info are unaffected; only reasons move.
+	_, stats := d.getStats(t)
+	for _, f := range []struct{ field, want string }{
+		{"name", "bandage-canary"},
+		{"version", identity.For("bandage-canary").Version()},
+	} {
+		if got := statsStr(t, stats, "build", f.field); got != f.want {
+			t.Errorf("build.%s = %q, want %q", f.field, got, f.want)
+		}
 	}
 }
 

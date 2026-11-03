@@ -35,18 +35,19 @@ func (nopLogger) Log(domain.Level, string, map[string]any) {}
 
 // Service evaluates events against the loaded chains.
 type Service struct {
-	progName string
-	chains   []domain.Chain
-	byName   map[string]int
-	cache    TrackerCache
-	reports  ReportSink
-	now      func() time.Time
-	logger   Logger
+	reasonPrefix string
+	chains       []domain.Chain
+	byName       map[string]int
+	cache        TrackerCache
+	reports      ReportSink
+	now          func() time.Time
+	logger       Logger
 }
 
-// NewService assembles the evaluator. progName namespaces report reasons;
-// renaming the program re-namespaces all of them (ADR 0016, ADR 0017).
-func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
+// NewService assembles the evaluator. reasonPrefix namespaces report
+// reasons at creation (ADR 0016): the rules file's reason_prefix, else
+// the program name (ADR 0026).
+func NewService(reasonPrefix string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
 	if logger == nil {
 		logger = nopLogger{}
 	}
@@ -54,7 +55,7 @@ func NewService(progName string, chains []domain.Chain, cache TrackerCache, repo
 	for i, chain := range chains {
 		byName[chain.Name] = i
 	}
-	return &Service{progName: progName, chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
+	return &Service{reasonPrefix: reasonPrefix, chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs
@@ -240,7 +241,7 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
-		Reason:    domain.NamespacedReason(s.progName, action.Reason), // namespaced at creation only (ADR 0016)
+		Reason:    domain.NamespacedReason(s.reasonPrefix, action.Reason), // namespaced at creation only (ADR 0016)
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,

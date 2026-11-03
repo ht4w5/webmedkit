@@ -115,9 +115,12 @@ recoverable as the reason's second label
 ([ADR 0016](adr/0016-report-reasons-are-namespaced.md)). The contract
 constrains the shape only: any prefix matching `^[a-z0-9][a-z0-9_-]*\.`
 is legal for a report, and never any producer's naming choice - what a
-producer's literal prefix is (bandage's is its program name plus a dot)
-is a producer-side decision outside this contract
-([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md)) that a
+producer's literal prefix is (bandage's is its rules file's
+`reason_prefix`, defaulting to its program name) is a producer-side
+decision outside this contract
+([ADR 0026](adr/0026-reason-prefix-configured-in-rules-file.md),
+superseding
+[ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md)) that a
 consumer must not depend on. The pattern tightens the contract
 pre-release: the document stays at `version` 0, with no version
 migration.

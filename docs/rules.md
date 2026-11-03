@@ -139,6 +139,35 @@ enrichment:
 chains:
 ```
 
+## `reason_prefix`
+
+The top-level `reason_prefix` key - beside `version`, `enrichment` and
+`chains` - names the namespace every report of the file carries: a
+reason is `<prefix>.<code>`, the code being the bare slug the report
+action declares
+([ADR 0016](adr/0016-report-reasons-are-namespaced.md),
+[ADR 0026](adr/0026-reason-prefix-configured-in-rules-file.md)). One
+file, one namespace: the key is file-wide, never per rule or per
+action.
+
+The prefix is slug-shaped like the authored code -
+`^[a-z0-9][a-z0-9_-]*$` - and validated at load: a typo fails
+`bandage -t` naming the key, never renaming the namespace silently at
+runtime. When the key is absent the prefix is the program name exactly
+as before
+([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md) kept as
+the default), so existing rules files keep producing byte-identical
+reasons with no edit. Only reasons move: the build identity and the
+version stamps keep the program name regardless. The `--test` plan
+prints the effective prefix as `reason prefix: <prefix>` above the
+chains and namespaces every `report reason=` line with it.
+
+```yaml
+version: 0
+reason_prefix: acme-prod
+chains:
+```
+
 ## Entry chains and dispatch
 
 Every event is evaluated by entering exactly one chain: the **entry
@@ -454,9 +483,12 @@ How it behaves:
   shared freely between rules; the rule id is internal provenance.
   bandage produces reports and never ban rules. Codes are authored bare
   and carried namespaced: the report carries the code namespaced as
-  `<program name>.<code>` (ADR 0016, ADR 0017) while the rules file
-  declares it bare - the plan prints the namespaced reason the report
-  will carry.
+  `<prefix>.<code>` (ADR 0016) under the file's
+  [`reason_prefix`](#reason_prefix) - the program name when the key is
+  absent
+  ([ADR 0026](adr/0026-reason-prefix-configured-in-rules-file.md)) -
+  while the rules file declares it bare - the plan prints the
+  namespaced reason the report will carry.
 - The filter above is a case-sensitive substring match on the Event's
   user agent (`agent "…"` matches the agent exactly). Values match
   case-sensitively without normalization (a `regex` pattern is

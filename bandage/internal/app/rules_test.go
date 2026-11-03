@@ -132,6 +132,54 @@ func TestParseRulesTargetPrefixDefaults(t *testing.T) {
 	}
 }
 
+// TestParseRulesReasonPrefix: the optional top-level reason_prefix is
+// carried through slug-validated; an absent key carries no configured
+// prefix (the program-name fallback is chosen where the program name
+// is known - daemon assembly and the plan printer, ADR 0026). Load
+// errors name the key and quote the authored value.
+func TestParseRulesReasonPrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefix  string // the authored reason_prefix line ("" = the key is absent)
+		want    string
+		wantErr string
+	}{
+		{name: "absent key carries no configured prefix"},
+		{name: "slug prefix carried through", prefix: "reason_prefix: acme-prod", want: "acme-prod"},
+		{name: "digits and underscores carried through", prefix: "reason_prefix: acme_2_prod", want: "acme_2_prod"},
+		{name: "dotted value refused quoting the authored value", prefix: "reason_prefix: Acme.Prod", wantErr: `rules: reason_prefix: "Acme.Prod" is not a valid slug (want `},
+		{name: "uppercase value refused", prefix: "reason_prefix: Acme", wantErr: `rules: reason_prefix: "Acme" is not a valid slug (want `},
+		{name: "spaced value refused", prefix: `reason_prefix: "has space"`, wantErr: `rules: reason_prefix: "has space" is not a valid slug (want `},
+		{name: "empty value refused", prefix: `reason_prefix: ""`, wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
+		{name: "null value refused", prefix: "reason_prefix:", wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "version: 0\n"
+			if tt.prefix != "" {
+				src += tt.prefix + "\n"
+			}
+			src += "chains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]\n"
+			doc, err := ParseRules([]byte(src))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ParseRules succeeded, want error naming the key %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q does not contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRules error: %v", err)
+			}
+			if doc.ReasonPrefix != tt.want {
+				t.Errorf("ReasonPrefix = %q, want %q", doc.ReasonPrefix, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRulesValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1151,7 +1199,8 @@ func TestPlanBannerFollowsThePassedBuild(t *testing.T) {
 	}
 }
 
-// ADR 0017 at the plan seam: a renamed binary's plan shows its own namespace.
+// The program-name fallback at the plan seam (ADR 0026): absent a
+// reason_prefix, a renamed binary's plan shows its own namespace.
 func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")
@@ -1174,6 +1223,97 @@ func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
 		}
+	}
+}
+
+// The --test plan prints the effective reason prefix - the configured
+// reason_prefix, else the passed build's name - and namespaces the
+// printed reasons with it; an invalid prefix fails the plan at load,
+// naming the key (ADR 0026).
+func TestPlanReasonPrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		build   string
+		want    []string
+		wantErr string
+	}{
+		{
+			name:  "absent key prints the build name as the effective prefix",
+			build: "bandage-canary",
+			yaml: `version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
+`,
+			want: []string{
+				"reason prefix: bandage-canary",
+				"action report reason=bandage-canary.iso-egress-overflow ttl=1h0m0s penalty=drop",
+			},
+		},
+		{
+			name:  "configured prefix wins and namespaces the printed reasons",
+			build: "bandage",
+			yaml: `reason_prefix: acme-prod
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
+`,
+			want: []string{
+				"reason prefix: acme-prod",
+				"action report reason=acme-prod.iso-egress-overflow ttl=1h0m0s penalty=drop",
+			},
+		},
+		{
+			name:  "invalid prefix fails the plan naming the key",
+			build: "bandage",
+			yaml: `reason_prefix: Acme.Prod
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]
+`,
+			wantErr: `rules: reason_prefix: "Acme.Prod" is not a valid slug`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "bandage.yml")
+			rulesPath := filepath.Join(dir, "rules.yml")
+			if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rulesPath, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Test(cfgPath, rulesPath, identity.For(tt.build))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Test succeeded, want error naming the key %q:\n%s", tt.wantErr, plan)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q does not contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Test error: %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(plan, want) {
+					t.Errorf("plan does not contain %q:\n%s", want, plan)
+				}
+			}
+		})
 	}
 }
 

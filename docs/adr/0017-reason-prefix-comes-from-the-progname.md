@@ -19,3 +19,8 @@ Consequences: `progName` must stay slug-shaped
 (`^[a-z0-9][a-z0-9_-]*$`) - pinned by a test at the prefix-composition
 seam rather than by startup validation of a compile-time constant;
 report-document examples pin `bandage.` as the current value only.
+
+Superseded by ADR 0026: the prefix is now the rules file's top-level
+`reason_prefix` key, slug-validated at load, with this decision's
+program-name choice surviving as the key's absent-key default and the
+consequences above surviving as the fallback's guard.

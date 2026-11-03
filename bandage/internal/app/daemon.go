@@ -124,7 +124,9 @@ type Daemon struct {
 }
 
 // New assembles the daemon from validated config and rules; Pipeline.Workers
-// must be at least 1. The build's name namespaces report reasons (ADR 0017).
+// must be at least 1. The effective reason prefix - the rules file's
+// reason_prefix, else the build's name - namespaces report reasons
+// (ADR 0026).
 func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon, error) {
 	if cfg.Pipeline.Workers < 1 {
 		return nil, fmt.Errorf("app: pipeline.workers must be at least 1 (got %d)", cfg.Pipeline.Workers)
@@ -177,7 +179,7 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 		repo:      repo,
 		reports:   reports,
 		cache:     cache,
-		eval:      evaluation.NewService(build.Name(), rules.Chains, cache, reports, o.now, domainLogger{o.logger}),
+		eval:      evaluation.NewService(rules.effectiveReasonPrefix(build.Name()), rules.Chains, cache, reports, o.now, domainLogger{o.logger}),
 		lines:     make(chan string),
 		processed: newProgress(),
 		stopSweep: make(chan struct{}),
