@@ -55,15 +55,28 @@ function fetchJSON(method, url) {
 // generic extra rows and nothing the daemon reports is dropped by the
 // panel.
 
+// RULE_COUNTERS_KEY is the snapshot block feeding the rule counters
+// table; its entries are counter rows, never key/value rows.
+const RULE_COUNTERS_KEY = "rules";
+
+// RULE_COUNTERS_SLOT is the rule counters table's row slot.
+const RULE_COUNTERS_SLOT = "group-rule-counters";
+
 // STATS_GROUPS maps the snapshot's known top-level blocks onto their
 // group tables' row slots. The one map serves both the group dispatch
 // and the row keys: a block the map names renders plain field keys -
 // its group names the block - while any other block's generic extra
-// rows keep the block-key prefix.
+// rows keep the block-key prefix. The rules entry is the map's one
+// documented shape exception: its entries are Rule counter rows
+// (rule, total, matched; GLOSSARY: Rule counter), which key/value
+// rows cannot render (an array block has no field keys), so the
+// single dispatch below routes its value to the counters table's own
+// row builder - still through this map, never a hard-coded key check.
 const STATS_GROUPS = new Map([
 	["build", "group-identity"],
 	["pipeline", "group-pipeline"],
 	["tracker_cache", "group-tracker-cache"],
+	[RULE_COUNTERS_KEY, RULE_COUNTERS_SLOT],
 ]);
 
 // GENERIC_GROUP_PREFIX marks a dynamically created group's row slot;
@@ -79,21 +92,29 @@ function valueText(value) {
 	return typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
 }
 
-// statsGroups maps the snapshot document onto the groups: the pipeline
-// and tracker_cache blocks feed their own tables field by field; the
-// build block's fields and every other top-level scalar - generated_at,
-// uptime, and any key added later - become identity rows. An unknown
-// top-level block renders within its own generic group - a generic
-// extra group table named for the block - never flattened into the
-// identity table or hidden.
-function statsGroups(snapshot) {
+// statsTables maps the snapshot document onto the groups - the one
+// dispatch site: every top-level block routes through STATS_GROUPS.
+// The pipeline and tracker_cache blocks feed their own tables field by
+// field; the build block's fields and every other top-level scalar -
+// generated_at, uptime, and any key added later - become identity rows.
+// An unknown top-level block renders within its own generic group - a
+// generic extra group table named for the block - never flattened into
+// the identity table or hidden. The rules block (the map's documented
+// shape exception) routes its entries to the rule counters table's own
+// row builder instead of key/value rows.
+function statsTables(snapshot) {
 	const groups = { "group-identity": [], "group-pipeline": [], "group-tracker-cache": [] };
+	let ruleCounters = [];
 	for (const [key, value] of Object.entries(snapshot)) {
-		// The rules block feeds the rule counters table through its own
-		// row builder, never generic key/value rows.
-		if (key === RULE_COUNTERS_KEY) continue;
+		const slot = STATS_GROUPS.get(key);
+		if (slot === RULE_COUNTERS_SLOT) {
+			// The map's documented shape exception: Rule counter rows,
+			// never generic key/value rows.
+			if (Array.isArray(value)) ruleCounters = value;
+			continue;
+		}
 		const block = typeof value === "object" && value !== null && !Array.isArray(value);
-		const slot = STATS_GROUPS.get(key) ??
+		const target = slot ??
 			(block ? GENERIC_GROUP_PREFIX + key : "group-identity");
 		const noKeyPrefix = STATS_GROUPS.has(key);
 		const rows = block
@@ -102,9 +123,9 @@ function statsGroups(snapshot) {
 				value: valueText(v),
 			}))
 			: [{ key: key, value: valueText(value) }];
-		(groups[slot] = groups[slot] || []).push(...rows);
+		(groups[target] = groups[target] || []).push(...rows);
 	}
-	return groups;
+	return { groups: groups, ruleCounters: ruleCounters };
 }
 
 // kvRow builds one key/value row.
@@ -195,14 +216,13 @@ function groupBody(slot) {
 // snapshot's rules block (GLOSSARY: Rule counter) - rule, total,
 // matched.
 
-// RULE_COUNTERS_KEY is the snapshot block feeding the rule counters
-// table; its entries are counter rows, never key/value rows.
-const RULE_COUNTERS_KEY = "rules";
-
-// RULE_COUNTERS_SLOT is the rule counters table's row slot;
-// RULE_COUNTERS_COLUMNS its rule, total and matched columns.
-const RULE_COUNTERS_SLOT = "group-rule-counters";
-const RULE_COUNTERS_COLUMNS = 3;
+// ruleCountersColumns takes the rule counters table's column count
+// from its own header row - the served markup is the table's one shape
+// source - so the full-width message rows and the page's columns
+// cannot drift.
+function ruleCountersColumns() {
+	return document.getElementById(RULE_COUNTERS_SLOT).closest("table").querySelectorAll("thead th").length;
+}
 
 // ruleCounterRow builds one rule counter row: rule, total, matched.
 function ruleCounterRow(counter) {
@@ -232,7 +252,7 @@ function renderRuleCounters(counters, match) {
 		if (counters === null) copy = "Loading...";
 		else if (match !== null) copy = "No keys match the filter.";
 		else copy = "No rule counters configured.";
-		tbody.appendChild(messageRow(copy, RULE_COUNTERS_COLUMNS));
+		tbody.appendChild(messageRow(copy, ruleCountersColumns()));
 		return;
 	}
 	for (const counter of shown) {
@@ -269,8 +289,9 @@ function loadStats() {
 	if (document.getElementById("group-identity") === null) return;
 	fetchJSON("GET", "/api/stats")
 		.then((snapshot) => {
-			fetchedStatsGroups = statsGroups(snapshot);
-			fetchedRuleCounters = Array.isArray(snapshot.rules) ? snapshot.rules : [];
+			const tables = statsTables(snapshot);
+			fetchedStatsGroups = tables.groups;
+			fetchedRuleCounters = tables.ruleCounters;
 			fillLegend(snapshot);
 			applyStatsFilter();
 		})

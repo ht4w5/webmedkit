@@ -278,13 +278,51 @@ func TestStatsPageShowsRuleCountersTableAfterTrackerCache(t *testing.T) {
 	}
 	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
 	for _, want := range []string{
-		`group-rule-counters`, // the rules block's own row slot
-		`snapshot.rules`,      // fed by the /api/stats rules block
-		`rule-counter-row`,    // its own row builder
+		`group-rule-counters`,         // the rules block's own row slot
+		`RULE_COUNTERS_KEY = "rules"`, // fed by the /api/stats rules block
+		`rule-counter-row`,            // its own row builder
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("common.js does not render the rules block into the rule counters table via %s, body:\n%s", want, js)
 		}
+	}
+}
+
+// The rules block dispatches through STATS_GROUPS like every other
+// block: its map entry names the counters table's slot and drives the
+// dispatch, and its non-key/value shape - Rule counter rows, which
+// the generic key/value rows cannot render - is documented at the
+// map, never a hard-coded key check beside the dispatch.
+func TestStatsRulesBlockDispatchesThroughTheGroupMap(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`RULE_COUNTERS_KEY = "rules"`,             // the snapshot block the map names
+		`[RULE_COUNTERS_KEY, RULE_COUNTERS_SLOT]`, // its map entry drives the dispatch
+		`shape exception`,                         // the exception is documented at the map
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the rules block's group-map route %q; the block must dispatch through STATS_GROUPS, body:\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, "key === RULE_COUNTERS_KEY") {
+		t.Errorf("common.js bypasses the STATS_GROUPS dispatch with a hard-coded rules key check, body:\n%s", js)
+	}
+}
+
+// The rule counters table's shape has one source: the served header
+// row. The JS derives its full-width message rows' span from that
+// header and the page carries no hard-coded span of its own, so the
+// markup and the JS cannot drift.
+func TestRuleCountersTableShapeIsSingleSourced(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	if strings.Contains(page, `colspan="3"`) {
+		t.Errorf("GET /stats body hard-codes the rule counters span beside its three header cells; the header must be the table's one shape source, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	const derive = `document.getElementById(RULE_COUNTERS_SLOT).closest("table").querySelectorAll("thead th").length`
+	if !strings.Contains(js, derive) {
+		t.Errorf("common.js does not derive the rule counters message-row span from the table's header row via %s, body:\n%s", derive, js)
 	}
 }
 
