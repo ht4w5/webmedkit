@@ -167,6 +167,7 @@ function groupBody(slot) {
 	heading.className = "group-title";
 	heading.textContent = slot.slice(GENERIC_GROUP_PREFIX.length);
 	const table = document.createElement("table");
+	table.className = "kv-table";
 	const headRow = document.createElement("tr");
 	for (const text of ["Key", "Value"]) {
 		const th = document.createElement("th");

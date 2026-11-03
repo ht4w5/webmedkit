@@ -32,7 +32,7 @@ func TestWebRootRedirectsToStatsPage(t *testing.T) {
 // Both view pages serve as HTML from the daemon's embedded assets.
 func TestViewPagesServeHTML(t *testing.T) {
 	srv := apiTestServer(nil)
-	for _, path := range []string{"/stats", "/reports"} {
+	for path, wantTitle := range map[string]string{"/stats": `<title>Stats</title>`, "/reports": `<title>Reports</title>`} {
 		w := apiRequest(t, srv, http.MethodGet, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s status = %d, want 200", path, w.Code)
@@ -42,6 +42,9 @@ func TestViewPagesServeHTML(t *testing.T) {
 		}
 		if w.Body.Len() == 0 {
 			t.Errorf("GET %s served an empty body", path)
+		}
+		if body := w.Body.String(); !strings.Contains(body, wantTitle) {
+			t.Errorf("GET %s body lacks the plain view title %s, body:\n%s", path, wantTitle, body)
 		}
 	}
 	// The stub's markup hook only - a legitimate placeholder= input
@@ -171,6 +174,7 @@ func TestStatsPageRendersSnapshotAsGroupedKeyValueTables(t *testing.T) {
 		`<h2 class="group-title">pipeline</h2>`, `id="group-pipeline"`,
 		`<h2 class="group-title">tracker cache</h2>`, `id="group-tracker-cache"`,
 		`<th>Key</th>`, `<th>Value</th>`,
+		`class="kv-table"`, // the key/value tables carry the stats table's skin
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("GET /stats body lacks the grouped key/value table slot %s, body:\n%s", want, page)
@@ -187,6 +191,12 @@ func TestStatsPageRendersSnapshotAsGroupedKeyValueTables(t *testing.T) {
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("common.js does not render the snapshot's %s into the grouped key/value tables, body:\n%s", want, js)
+		}
+	}
+	css := apiRequest(t, srv, http.MethodGet, "/common.css").Body.String()
+	for _, want := range []string{".kv-table", "text-align: left"} { // the Stats columns read left-aligned
+		if !strings.Contains(css, want) {
+			t.Errorf("common.css lacks the key/value table's left-aligned %q, css head:\n%s", want, head(css, 200))
 		}
 	}
 }
@@ -220,6 +230,7 @@ func TestStatsUnknownBlocksGetTheirOwnGenericGroup(t *testing.T) {
 		"group-extra-",                // the generic group's row slot, named for the block
 		"group-title",                 // its heading names the block
 		`createElement("table")`,      // its key/value table
+		`className = "kv-table"`,      // its table carries the stats table's skin
 		`key + "." + field`,           // an unknown block's generic extra rows keep the block-key prefix
 	} {
 		if !strings.Contains(js, want) {

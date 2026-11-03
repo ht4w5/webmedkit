@@ -40,8 +40,9 @@ a {
 }
 .header .title h1 {
   font-size: 1.75em;
-  margin-right: 1rem;
-  margin-bottom: 4px;
+  margin: 0 1rem 0 0;
+  /* The header's fixed height as the line box: the brand sits dead-center. */
+  line-height: 44px;
 }
 .header .title a {
   color: #212121;
@@ -198,5 +199,10 @@ tr.report-row:hover td {
   background-color: #ebf5fb;
 }
 td.empty, td.report-detail-cell {
+  text-align: left;
+}
+/* The Stats view's key/value tables read left-aligned columns, not
+   pprof's right-aligned numeric skin. */
+.kv-table tr th, .kv-table tr td {
   text-align: left;
 }
