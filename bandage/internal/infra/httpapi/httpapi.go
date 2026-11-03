@@ -30,6 +30,9 @@ type Stats struct {
 	Build        Build
 	Pipeline     Pipeline
 	TrackerCache TrackerCache
+	// Rules is the rules block: the counter-enabled rules' Rule
+	// counters in rules-file order (GLOSSARY: Rule counter).
+	Rules []RuleCounter
 }
 
 // Build is the /api/stats build block: the identity of the running binary.
@@ -59,6 +62,14 @@ type TrackerCache struct {
 	Evictions int64 `json:"evictions"`
 	Size      int64 `json:"size"`
 	EntryCap  int64 `json:"entry_cap"`
+}
+
+// RuleCounter is one rule's entry in the /api/stats rules block: the
+// rule ID and its cumulative counts (GLOSSARY: Rule counter).
+type RuleCounter struct {
+	ID      string `json:"id"`
+	Total   int64  `json:"total"`
+	Matched int64  `json:"matched"`
 }
 
 // StatsSource is the narrow stats port beside its consumer: one snapshot in.
@@ -176,11 +187,12 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 // statsDocument is the rendered /api/stats document (ADR 0006): the snapshot plus
 // generation timestamp and uptime; no format version (human-facing, unversioned).
 type statsDocument struct {
-	GeneratedAt  string       `json:"generated_at"`
-	Uptime       string       `json:"uptime"`
-	Build        Build        `json:"build"`
-	Pipeline     Pipeline     `json:"pipeline"`
-	TrackerCache TrackerCache `json:"tracker_cache"`
+	GeneratedAt  string        `json:"generated_at"`
+	Uptime       string        `json:"uptime"`
+	Build        Build         `json:"build"`
+	Pipeline     Pipeline      `json:"pipeline"`
+	TrackerCache TrackerCache  `json:"tracker_cache"`
+	Rules        []RuleCounter `json:"rules"`
 }
 
 // handleStats serves the human-facing ops snapshot as indented JSON (ADR 0006):
@@ -188,6 +200,9 @@ type statsDocument struct {
 func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	st := s.stats.Stats()
 	now := s.now()
+	if st.Rules == nil {
+		st.Rules = []RuleCounter{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -197,5 +212,6 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 		Build:        st.Build,
 		Pipeline:     st.Pipeline,
 		TrackerCache: st.TrackerCache,
+		Rules:        st.Rules,
 	})
 }

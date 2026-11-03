@@ -23,6 +23,29 @@ type ReportSink interface {
 	Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error
 }
 
+// Counters is the rule-counter port: per-rule visit and match
+// accounting at the evaluator's counting points (GLOSSARY: Rule
+// counter). The daemon owns the registry behind it and exposes the
+// counts - the registry is an internal seam between evaluator and
+// daemon, not a public contract. Implementations must be exact under
+// the worker pool.
+type Counters interface {
+	// Visit counts one rule visit: every event the rule is evaluated
+	// against, filter rejects and replay warm-up skips included; a
+	// chain dispatched more than once for one event counts one visit
+	// per dispatch.
+	Visit(ruleID string)
+	// Match counts one Match of the rule: once per matching Event
+	// however many ladder rungs fired.
+	Match(ruleID string)
+}
+
+// nopCounters discards every count (the Service default).
+type nopCounters struct{}
+
+func (nopCounters) Visit(string) {}
+func (nopCounters) Match(string) {}
+
 // Logger is the log action's logging port (ADR 0005); it carries only the domain's four levels, so a rule can never exit the process.
 type Logger interface {
 	Log(level domain.Level, msg string, fields map[string]any)
@@ -40,21 +63,25 @@ type Service struct {
 	byName   map[string]int
 	cache    TrackerCache
 	reports  ReportSink
+	counters Counters
 	now      func() time.Time
 	logger   Logger
 }
 
 // NewService assembles the evaluator. progName namespaces report reasons;
 // renaming the program re-namespaces all of them (ADR 0016, ADR 0017).
-func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
+func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, counters Counters, now func() time.Time, logger Logger) *Service {
 	if logger == nil {
 		logger = nopLogger{}
+	}
+	if counters == nil {
+		counters = nopCounters{}
 	}
 	byName := make(map[string]int, len(chains))
 	for i, chain := range chains {
 		byName[chain.Name] = i
 	}
-	return &Service{progName: progName, chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
+	return &Service{progName: progName, chains: chains, byName: byName, cache: cache, reports: reports, counters: counters, now: now, logger: logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs
@@ -82,10 +109,14 @@ func (m matchContext) target() string {
 }
 
 // runChain traverses one chain's rules in order; also entered by name from goto/jump actions.
+// A Rule counter counts one visit per rule per traversal (a chain
+// dispatched more than once for one event counts one visit per
+// dispatch) and one Match per matching Event (GLOSSARY: Rule counter).
 func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) error {
 	chain := &s.chains[ci]
 	for ri := range chain.Rules {
 		rule := &chain.Rules[ri]
+		s.counters.Visit(rule.ID) // total: filter rejects and replay warm-up skips are visits too
 		if !rule.Filter.Match(event) {
 			continue
 		}
@@ -100,6 +131,7 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 		if len(rungs) == 0 {
 			continue
 		}
+		s.counters.Match(rule.ID) // matched: once per Match, a ladder's fired rungs count once
 		if err := s.runRungs(ctx, matchContext{chain: chain, rule: rule, reading: reading, event: event}, rungs); err != nil {
 			return err
 		}
