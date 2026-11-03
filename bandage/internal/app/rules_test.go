@@ -132,6 +132,54 @@ func TestParseRulesTargetPrefixDefaults(t *testing.T) {
 	}
 }
 
+// TestParseRulesReasonPrefix: the optional top-level reason_prefix is
+// carried through slug-validated; an absent key carries no configured
+// prefix (the program-name fallback is chosen where the program name
+// is known - daemon assembly and the plan printer, ADR 0026). Load
+// errors name the key and quote the authored value.
+func TestParseRulesReasonPrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefix  string // the authored reason_prefix line ("" = the key is absent)
+		want    string
+		wantErr string
+	}{
+		{name: "absent key carries no configured prefix"},
+		{name: "slug prefix carried through", prefix: "reason_prefix: acme-prod", want: "acme-prod"},
+		{name: "digits and underscores carried through", prefix: "reason_prefix: acme_2_prod", want: "acme_2_prod"},
+		{name: "dotted value refused quoting the authored value", prefix: "reason_prefix: Acme.Prod", wantErr: `rules: reason_prefix: "Acme.Prod" is not a valid slug (want `},
+		{name: "uppercase value refused", prefix: "reason_prefix: Acme", wantErr: `rules: reason_prefix: "Acme" is not a valid slug (want `},
+		{name: "spaced value refused", prefix: `reason_prefix: "has space"`, wantErr: `rules: reason_prefix: "has space" is not a valid slug (want `},
+		{name: "empty value refused", prefix: `reason_prefix: ""`, wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
+		{name: "null value refused", prefix: "reason_prefix:", wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "version: 0\n"
+			if tt.prefix != "" {
+				src += tt.prefix + "\n"
+			}
+			src += "chains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]\n"
+			doc, err := ParseRules([]byte(src))
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ParseRules succeeded, want error naming the key %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q does not contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRules error: %v", err)
+			}
+			if doc.ReasonPrefix != tt.want {
+				t.Errorf("ReasonPrefix = %q, want %q", doc.ReasonPrefix, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRulesValidation(t *testing.T) {
 	tests := []struct {
 		name    string

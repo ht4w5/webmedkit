@@ -26,6 +26,9 @@ var reasonRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 type rawRules struct {
 	Version *int `yaml:"version"`
+	// ReasonPrefix is the optional report-namespace prefix; its node is
+	// validated in buildReasonPrefix.
+	ReasonPrefix yaml.Node `yaml:"reason_prefix"`
 	// Enrichment is the enrichment settings block; its keys are
 	// validated in buildEnrichment.
 	Enrichment yaml.Node  `yaml:"enrichment"`
@@ -77,11 +80,24 @@ type rawReportAction struct {
 	Rate    yaml.Node `yaml:"rate"`
 }
 
-// Rules is a validated rules document: its chains and the enrichment
-// settings block.
+// Rules is a validated rules document: its chains, the optional reason
+// prefix and the enrichment settings block.
 type Rules struct {
-	Chains     []domain.Chain
-	Enrichment Enrichment
+	Chains []domain.Chain
+	// ReasonPrefix is the configured report-namespace prefix; empty
+	// means the key is absent and the program-name fallback applies at
+	// daemon assembly and in the plan printer (ADR 0026).
+	ReasonPrefix string
+	Enrichment   Enrichment
+}
+
+// effectiveReasonPrefix is the prefix report reasons namespace under:
+// the configured reason_prefix, else the program name (ADR 0026).
+func (r Rules) effectiveReasonPrefix(progName string) string {
+	if r.ReasonPrefix != "" {
+		return r.ReasonPrefix
+	}
+	return progName
 }
 
 // Enrichment is the rules file's enrichment block: the Filter
@@ -130,6 +146,10 @@ func ParseRules(data []byte) (Rules, error) {
 	if *raw.Version != 0 {
 		return Rules{}, fmt.Errorf("rules: version: unsupported format version %d (want 0)", *raw.Version)
 	}
+	prefix, err := buildReasonPrefix(&raw.ReasonPrefix)
+	if err != nil {
+		return Rules{}, err
+	}
 	enrich, err := buildEnrichment(&raw.Enrichment)
 	if err != nil {
 		return Rules{}, err
@@ -150,7 +170,23 @@ func ParseRules(data []byte) (Rules, error) {
 	if err := validateChainGraph(chains); err != nil {
 		return Rules{}, err
 	}
-	return Rules{Chains: chains, Enrichment: enrich}, nil
+	return Rules{Chains: chains, ReasonPrefix: prefix, Enrichment: enrich}, nil
+}
+
+// buildReasonPrefix validates the optional top-level reason_prefix:
+// slug-shaped like the authored code, absent meaning no configured
+// prefix (the program-name fallback, ADR 0026).
+func buildReasonPrefix(node *yaml.Node) (string, error) {
+	if node == nil || node.Kind == 0 {
+		return "", nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return "", errors.New("rules: reason_prefix: must be a slug")
+	}
+	if !reasonRe.MatchString(node.Value) {
+		return "", fmt.Errorf("rules: reason_prefix: %q is not a valid slug (want %s)", node.Value, reasonRe.String())
+	}
+	return node.Value, nil
 }
 
 // buildEnrichment compiles the enrichment block: its filter defaults to
