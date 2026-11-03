@@ -28,7 +28,7 @@ import (
 )
 
 // sweepInterval is the shared cadence of the cache and report expiry
-// sweeps and the periodic statistics log.
+// sweeps and the periodic stats log.
 const sweepInterval = time.Minute
 
 // File-size enrichment parameters (ADR 0019): EWMA window
@@ -44,7 +44,7 @@ type EventParser interface {
 	Parse(line []byte) (domain.Event, error)
 }
 
-// counters is the drop accounting behind the statistics log and
+// counters is the drop accounting behind the stats log and
 // /api/stats (ADR 0006).
 type counters struct {
 	Received int64 // raw lines received from the wire
@@ -138,7 +138,15 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 
 	var repo reportStore = o.store
 	if repo == nil {
-		r, err := sqlite.Open(cfg.DB.SQLite.Path)
+		// Memory mode (db.sqlite.memory) runs the report store on a
+		// throwaway in-memory database: one shared database across the
+		// read and write paths, no files behind it, an empty store on
+		// every start.
+		path := cfg.DB.SQLite.Path
+		if cfg.DB.SQLite.Memory {
+			path = sqlite.MemoryPath
+		}
+		r, err := sqlite.Open(path)
 		if err != nil {
 			return nil, err
 		}
@@ -194,6 +202,11 @@ func (d *Daemon) Start(lifetime context.Context) error {
 		Str("commit", d.build.Commit()).
 		Str("build_date", d.build.BuildDate()).
 		Msg("starting")
+	if d.cfg.DB.SQLite.Memory {
+		// The deliberate bend of ADR 0002 (durable reports) is named
+		// here, at startup, where the operator can still act on it.
+		d.logger.Warn().Msg("memory mode: reports are not durable - deliberately bends ADR 0002 (durable reports) for debugging")
+	}
 	d.src = syslog.New(d.cfg.Ingest.Syslog.Network, d.cfg.Ingest.Syslog.Listen, d.lines, d.logger)
 	if err := d.src.Start(); err != nil {
 		return err
@@ -244,7 +257,7 @@ func (d *Daemon) runPipeline() {
 	}
 }
 
-// sweep periodically expires cache entries, logs the statistics line
+// sweep periodically expires cache entries, logs the stats line
 // and deletes expired reports.
 func (d *Daemon) sweep() {
 	defer d.wg.Done()
@@ -255,29 +268,35 @@ func (d *Daemon) sweep() {
 		case <-d.stopSweep:
 			return
 		case <-t.C:
-			d.cache.SweepExpired()
-			d.logStatistics()
-			n, err := d.sweepOnce(d.ctx)
-			if err != nil {
-				d.logger.Error().Err(err).Msg("sweep expired reports")
-				continue
-			}
-			if n > 0 {
-				d.logger.Info().Int("count", n).Msg("swept expired reports")
-			}
+			d.sweepTick()
 		}
 	}
 }
 
-// logStatistics emits the periodic statistics record (ADR 0006)
-// from the same Stats snapshot /api/stats serves.
-func (d *Daemon) logStatistics() {
+// sweepTick runs one sweep pass: expires cache entries, logs the
+// stats record and deletes expired reports.
+func (d *Daemon) sweepTick() {
+	d.cache.SweepExpired()
+	d.logStats()
+	n, err := d.sweepOnce(d.ctx)
+	if err != nil {
+		d.logger.Error().Err(err).Msg("sweep expired reports")
+		return
+	}
+	if n > 0 {
+		d.logger.Debug().Int("count", n).Msg("swept expired reports")
+	}
+}
+
+// logStats emits the periodic stats record (ADR 0006) from the same
+// Stats snapshot /api/stats serves.
+func (d *Daemon) logStats() {
 	s := d.Stats()
-	d.logger.Info().
+	d.logger.Debug().
 		Int64("received", s.Pipeline.Received).Int64("parsed", s.Pipeline.Parsed).Int64("dropped", s.Pipeline.Dropped).
 		Int64("cache_gets", s.TrackerCache.Gets).Int64("cache_sets", s.TrackerCache.Sets).Int64("cache_misses", s.TrackerCache.Misses).
 		Int64("cache_evictions", s.TrackerCache.Evictions).Int64("cache_size", s.TrackerCache.Size).
-		Msg("statistics")
+		Msg("stats")
 }
 
 // sweepOnce deletes expired reports at the injected wall clock and
@@ -345,7 +364,7 @@ func (d *Daemon) counters() counters {
 }
 
 // Stats assembles the /api/stats snapshot (httpapi.StatsSource): build
-// identity, pipeline counters and cache statistics since start.
+// identity, pipeline counters and tracker cache counters since start.
 func (d *Daemon) Stats() httpapi.Stats {
 	c := d.counters()
 	cs := d.cache.Statistics()

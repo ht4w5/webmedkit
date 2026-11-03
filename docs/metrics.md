@@ -13,7 +13,7 @@ reproduced byte-for-byte by a test
 (`bandage/internal/infra/httpapi/metricsdoc_test.go`), so this contract
 and the implementation cannot drift.
 
-`GET /api/stats` remains the human-facing **Statistic**: the same
+`GET /api/stats` remains the human-facing **Stats** snapshot: the same
 cumulative-since-start snapshot for operator eyes, unversioned and with
 no format contract ([ADR 0006](adr/0006-human-facing-stats-prometheus-for-metrics.md)).
 Neither surface's contract constrains the other. Each endpoint takes
@@ -76,7 +76,7 @@ its value is always `1`. `go_info` carries one label, `version`.
 Cardinality is fixed for every family: no family's series count is ever
 a function of traffic.
 
-The `bandage_` families mirror their **Statistic** counterparts field
+The `bandage_` families mirror their **Stats** counterparts field
 for field - a dropped line is the same event on both surfaces. The
 `go_` families are a curated subset of Go runtime state under the
 conventional `go_` names, so generic Go dashboards work unchanged; the

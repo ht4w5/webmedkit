@@ -34,3 +34,9 @@ configs and health probes need no churn; the root is reserved for pages
 because the no-aliases stance is a deliberate trade - short-lived
 migration pain over permanent dual surface - a future reader will be
 tempted to "helpfully" add the old paths back.
+
+Amended by ADR 0025: the page split ended the blanket 404 at the old
+root paths - `GET /stats` and `GET /reports` serve the Web Panel's
+pages (200 HTML) and `DELETE /reports` answers 405 - so "old root paths
+404" holds only for requests the pages do not answer; the documents'
+move to `/api/` is unchanged.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
+	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 	"github.com/HT4w5/webmedkit/internal/identity"
 )
 
@@ -986,9 +988,9 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	}
 }
 
-// TestE2EStatisticsLogAgreesWithStats: the periodic statistics log line's
+// TestE2EStatsLogAgreesWithStats: the periodic stats log line's
 // counters agree with /api/stats (both render the same snapshot).
-func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
+func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
@@ -999,12 +1001,15 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
 	d.send("this is not json")
 	d.waitProcessed(t, 4)
-	d.logStatistics()
+	d.logStats()
 
 	_, doc := d.getStats(t)
-	recs := d.logs.withMessage("statistics")
+	recs := d.logs.withMessage("stats")
 	if len(recs) != 1 {
-		t.Fatalf("statistics records = %d, want 1", len(recs))
+		t.Fatalf("stats records = %d, want 1", len(recs))
+	}
+	if recs[0].Level != zerolog.DebugLevel {
+		t.Errorf("stats level = %v, want debug (happy-path self-reporting)", recs[0].Level)
 	}
 	// attrInto fails on a missing field, so asserting every value also
 	// asserts that the line keeps its long-standing fields.
@@ -1024,10 +1029,10 @@ func TestE2EStatisticsLogAgreesWithStats(t *testing.T) {
 		var v int64
 		attrInto(t, recs[0], f.key, &v)
 		if v != f.abs {
-			t.Errorf("statistics log %s = %d, want %d", f.key, v, f.abs)
+			t.Errorf("stats log %s = %d, want %d", f.key, v, f.abs)
 		}
 		if want := statsNum(t, doc, f.block, f.field); float64(v) != want {
-			t.Errorf("statistics log %s = %d, /api/stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
+			t.Errorf("stats log %s = %d, /api/stats %s.%s = %v, want the same counter", f.key, v, f.block, f.field, want)
 		}
 	}
 }
@@ -1073,9 +1078,10 @@ chains:
 }
 
 // TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
-// the scrapeable machine contract (text exposition 0.0.4); GET / serves the
-// Web Panel from the daemon binary's embedded assets. Nothing else is
-// exposed beyond the report API and the /api/stats snapshot.
+// the scrapeable machine contract (text exposition 0.0.4); GET / redirects
+// to the Web Panel's Stats page and both view pages serve from the daemon
+// binary's embedded assets. Nothing else is exposed beyond the report API
+// and the /api/stats snapshot.
 func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
@@ -1107,27 +1113,48 @@ func TestE2EAPIPingAndUnknownPaths(t *testing.T) {
 		t.Errorf("GET /metrics body lacks the pipeline counter family, body:\n%s", body)
 	}
 
-	// GET / serves the Web Panel: the tab shell with its Statistic and
-	// Reports slots, embedded in the binary on the existing listener.
-	resp, err = apiClient.Get("http://" + d.apiAddr() + "/")
+	// GET / redirects to the Web Panel's Stats page; both view pages and
+	// their shared assets are embedded in the binary on the existing
+	// listener.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err = noRedirect.Get("http://" + d.apiAddr() + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / = %d, want 200 (the Web Panel)", resp.StatusCode)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("GET / = %d, want 302 (the redirect to the Stats page)", resp.StatusCode)
 	}
-	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
-		t.Errorf("GET / Content-Type = %q, want text/html", got)
+	if loc := resp.Header.Get("Location"); loc != "/stats" {
+		t.Errorf("GET / Location = %q, want /stats", loc)
 	}
-	for _, want := range []string{"Statistic", "Reports"} {
-		if !strings.Contains(string(body), want) {
-			t.Errorf("GET / body lacks the %q tab slot, body:\n%s", want, body)
+
+	for _, page := range []struct{ path, active string }{
+		{"/stats", `class="active" href="/stats"`},
+		{"/reports", `class="active" href="/reports"`},
+	} {
+		resp, err = apiClient.Get("http://" + d.apiAddr() + page.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", page.path, err)
+		}
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200 (the Web Panel)", page.path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", page.path, got)
+		}
+		for _, want := range []string{"Stats", "Reports", page.active} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("GET %s body lacks the %q header chrome, body:\n%s", page.path, want, body)
+			}
 		}
 	}
 
-	for _, path := range []string{"/debug", "/reports", "/stats", "/reports/1", "/api/reports/1"} {
+	for _, path := range []string{"/debug", "/reports/1", "/api/reports/1"} {
 		resp, err := apiClient.Get("http://" + d.apiAddr() + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -1640,6 +1667,116 @@ chains:
 	if _, n := d.del(t, url.Values{"rule": {"rule-two"}}); n != 1 {
 		t.Errorf("delete of a live row = %d, want 1 (sweeper leaves it)", n)
 	}
+}
+
+// TestE2EHappyPathSweepRecordsLoggedAtDebug: the sweep pass' happy-path
+// self-reporting - the periodic stats record and the sweep-deleted
+// record - is debug level: present with their event context at debug,
+// silent at info. Steady-state logs carry events, not the daemon's
+// self-reporting.
+func TestE2EHappyPathSweepRecordsLoggedAtDebug(t *testing.T) {
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: one-shot
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: one-shot, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	// One report row expires at the injected clock, so the sweep pass
+	// deletes exactly one row and the sweep-deleted record fires.
+	trigger := func(t *testing.T, clock *testClock, d *testDaemon) {
+		t.Helper()
+		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+		d.waitProcessed(t, 1)
+		clock.Advance(90 * time.Minute)
+		d.sweepTick()
+	}
+
+	// The record itself is a debug record carrying the deletion count.
+	t.Run("record", func(t *testing.T) {
+		clock := newTestClock(mustTime(t, wallBase))
+		d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+		trigger(t, clock, d)
+
+		recs := d.logs.withMessage("swept expired reports")
+		if len(recs) != 1 {
+			t.Fatalf("sweep-deleted logs = %v, want 1", recs)
+		}
+		rec := recs[0]
+		if rec.Level != zerolog.DebugLevel {
+			t.Errorf("sweep-deleted level = %v, want debug (sweep is steady state)", rec.Level)
+		}
+		var n int
+		attrInto(t, rec, "count", &n)
+		if n != 1 {
+			t.Errorf("sweep-deleted count = %d, want 1", n)
+		}
+	})
+
+	// A configured level shows both happy-path records at debug and
+	// silences them at info.
+	for _, tt := range []struct {
+		level domain.Level
+		want  bool
+	}{
+		{level: domain.LevelDebug, want: true},
+		{level: domain.LevelInfo, want: false},
+	} {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			buf := &syncBuffer{}
+			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, nil, WithLogger(NewLogger(buf, tt.level)))
+			trigger(t, clock, d)
+
+			for _, msg := range []string{"stats", "swept expired reports"} {
+				var line string
+				for _, l := range strings.Split(buf.String(), "\n") {
+					if strings.Contains(l, msg) {
+						line = l
+						break
+					}
+				}
+				if (line != "") != tt.want {
+					t.Errorf("%q lines at %s level: present = %v, want %v:\n%s", msg, tt.level, line != "", tt.want, buf.String())
+				}
+			}
+		})
+	}
+}
+
+// sweepFailureStore fails DeleteExpired, modeling a broken report store.
+type sweepFailureStore struct {
+	*sqlite.ReportRepository
+}
+
+func (s *sweepFailureStore) DeleteExpired(context.Context, time.Time) (int, error) {
+	return 0, errors.New("injected sweep failure")
+}
+
+// TestE2ESweepFailureLoggedAtErrorLevel: a sweep pass that cannot delete
+// expired reports keeps its voice at error level (bad news is not
+// happy-path self-reporting).
+func TestE2ESweepFailureLoggedAtErrorLevel(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	inner, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", bandwidthRules, nil,
+		withStore(&sweepFailureStore{ReportRepository: inner}))
+	d.sweepTick()
+
+	recs := d.logs.withMessage("sweep expired reports")
+	if len(recs) != 1 {
+		t.Fatalf("sweep failure logs = %v, want 1", recs)
+	}
+	if recs[0].Level != zerolog.ErrorLevel {
+		t.Errorf("sweep failure level = %v, want error (bad news keeps its voice)", recs[0].Level)
+	}
+	var msg string
+	attrInto(t, recs[0], "error", &msg)
 }
 
 // TestE2EExpiresAtRecomputedOnWrite: expires_at recomputes from each landed
@@ -2661,6 +2798,21 @@ func TestE2EUnusualContentRangeKeptAsNormalTraffic(t *testing.T) {
 	}
 }
 
+// TestE2EAPIStartedLoggedAtInfoLevel: the API-started record keeps its
+// info level - a state change, not happy-path self-reporting.
+func TestE2EAPIStartedLoggedAtInfoLevel(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
+
+	recs := d.logs.withMessage("api started")
+	if len(recs) != 1 {
+		t.Fatalf("api started records = %d, want 1", len(recs))
+	}
+	if recs[0].Level != zerolog.InfoLevel {
+		t.Errorf("api started level = %v, want info (a state change)", recs[0].Level)
+	}
+}
+
 // TestStartupLogCarriesBuildIdentity: the startup log record carries the
 // build identity fields, so the log stream identifies the running build.
 func TestStartupLogCarriesBuildIdentity(t *testing.T) {
@@ -2683,5 +2835,115 @@ func TestStartupLogCarriesBuildIdentity(t *testing.T) {
 	}
 	if attrs["build_date"] != testBuild.BuildDate() {
 		t.Errorf("build_date = %v, want %q", attrs["build_date"], testBuild.BuildDate())
+	}
+}
+
+// nonDurableWarning is the startup record memory mode must log and a
+// file-backed run must not: the deliberate bend of ADR 0002 (durable
+// reports), named at the moment the operator can still act on it.
+const nonDurableWarning = "memory mode: reports are not durable - deliberately bends ADR 0002 (durable reports) for debugging"
+
+// TestE2EMemoryModeRoundTripAndStartupWarning: the memory-mode config
+// option serves reports against the in-memory store - upserts, listing,
+// deletion and expiry sweeping all work over the one shared database -
+// and startup logs the non-durable-reports warning.
+func TestE2EMemoryModeRoundTripAndStartupWarning(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonCfg(t, clock, "unixgram", "", bandwidthRules, func(cfg *Config) {
+		cfg.DB.SQLite = SQLite{Memory: true}
+	})
+
+	// Upsert and listing over the shared in-memory database: the
+	// overflow Trigger writes the report and the API lists it back.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 2)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 || doc.Reports[0].Rule != "sustained-egress" {
+		t.Fatalf("after overflow: %+v, want the one report", doc.Reports)
+	}
+
+	// Deletion removes the row and the store keeps writing afterwards.
+	if _, n := d.del(t, url.Values{"target": {"203.0.113.7/32"}}); n != 1 {
+		t.Fatalf("delete count = %d, want 1", n)
+	}
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after delete: %+v, want none", doc.Reports)
+	}
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 3)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 {
+		t.Fatalf("after re-trigger: %+v, want 1", doc.Reports)
+	}
+
+	// The next write upserts over the expired row: expiry recomputes
+	// while created_at stays fixed (the report-store contract). The
+	// tracker entry expired with the wall clock, so overflow takes the
+	// same two events as the first write.
+	clock.Advance(25 * time.Hour)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after 25h: %+v, want none (expired reports never returned)", doc.Reports)
+	}
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 5)
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("after upsert over the expired row: %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-18T19:00:00Z" || r.ExpiresAt != "2025-10-19T19:00:00Z" {
+		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want %q/2025-10-18T19:00:00Z/2025-10-19T19:00:00Z",
+			r.CreatedAt, r.UpdatedAt, r.ExpiresAt, wallBase)
+	}
+
+	// Expiry sweeping deletes the expired row for good.
+	clock.Advance(50 * time.Hour)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("after 75h: %+v, want none", doc.Reports)
+	}
+	if _, err := d.sweepOnce(context.Background()); err != nil {
+		t.Fatalf("sweepOnce: %v", err)
+	}
+	if _, n := d.del(t, url.Values{"target": {"203.0.113.7/32"}}); n != 0 {
+		t.Errorf("delete after sweep = %d, want 0 (row swept away)", n)
+	}
+
+	// Memory mode starts empty on every run: a fresh daemon over the
+	// same config serves no leftover reports.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := d.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	cancel()
+	d2 := startTestDaemonCfg(t, clock, "unixgram", "", bandwidthRules, func(cfg *Config) {
+		cfg.DB.SQLite = SQLite{Memory: true}
+	})
+	if doc := d2.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Errorf("after restart: %+v, want an empty store", doc.Reports)
+	}
+
+	// Startup warns that reports are not durable.
+	recs := d.logs.withMessage(nonDurableWarning)
+	if len(recs) != 1 {
+		t.Fatalf("non-durable warning records = %d, want 1", len(recs))
+	}
+	if recs[0].Level != zerolog.WarnLevel {
+		t.Errorf("non-durable warning level = %v, want warn", recs[0].Level)
+	}
+}
+
+// TestE2EFileBackedRunLogsNoNonDurableWarning: a file-backed run logs no
+// non-durable-reports warning and behaves as before - the warning is
+// memory mode's alone.
+func TestE2EFileBackedRunLogsNoNonDurableWarning(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", filepath.Join(t.TempDir(), "reports.db"), bandwidthRules)
+	if recs := d.logs.withMessage(nonDurableWarning); len(recs) != 0 {
+		t.Errorf("file-backed startup logged the non-durable warning: %+v", recs)
+	}
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 6000))
+	d.waitProcessed(t, 2)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 {
+		t.Errorf("after overflow: %+v, want 1 report", doc.Reports)
 	}
 }

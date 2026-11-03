@@ -1,0 +1,65 @@
+<!-- derived from google/pprof, Copyright Google Inc., Apache License 2.0 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stats</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<header class="header">
+  <div class="title">
+    <h1><a href="/stats">bandage</a></h1>
+  </div>
+  <div id="view" class="menu-item">
+    <div class="menu-name">
+      View
+      <i class="downArrow"></i>
+    </div>
+    <div class="submenu">
+      <a class="active" href="/stats">Stats</a>
+      <a href="/reports">Reports</a>
+    </div>
+  </div>
+  <div class="menu-item">
+    <button id="refresh" class="menu-name" type="button">Refresh</button>
+  </div>
+  <div>
+    <input id="search" type="text" placeholder="Search regexp" autocomplete="off" autocapitalize="none" size="40">
+  </div>
+  <div class="legend" id="legend"></div>
+</header>
+<main id="content">
+  <p id="search-error" class="filter-error" role="alert" hidden></p>
+  <h2 class="group-title">identity</h2>
+  <table class="kv-table">
+    <thead>
+      <tr><th>Key</th><th>Value</th></tr>
+    </thead>
+    <tbody id="group-identity">
+      <tr><td class="empty" colspan="2">Loading...</td></tr>
+    </tbody>
+  </table>
+  <h2 class="group-title">pipeline</h2>
+  <table class="kv-table">
+    <thead>
+      <tr><th>Key</th><th>Value</th></tr>
+    </thead>
+    <tbody id="group-pipeline">
+      <tr><td class="empty" colspan="2">Loading...</td></tr>
+    </tbody>
+  </table>
+  <h2 class="group-title">tracker cache</h2>
+  <table class="kv-table">
+    <thead>
+      <tr><th>Key</th><th>Value</th></tr>
+    </thead>
+    <tbody id="group-tracker-cache">
+      <tr><td class="empty" colspan="2">Loading...</td></tr>
+    </tbody>
+  </table>
+</main>
+<script src="/common.js"></script>
+</body>
+</html>

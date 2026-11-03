@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,8 +85,8 @@ func TestAPIReportsPathServesReportDocument(t *testing.T) {
 	}
 }
 
-// GET /api/stats serves the unchanged Statistic snapshot.
-func TestAPIStatsPathServesStatistic(t *testing.T) {
+// GET /api/stats serves the unchanged Stats snapshot.
+func TestAPIStatsPathServesStats(t *testing.T) {
 	srv := apiTestServer(nil)
 	w := apiRequest(t, srv, http.MethodGet, "/api/stats")
 	if w.Code != http.StatusOK {
@@ -130,17 +131,28 @@ func TestAPIReportsDeleteRemovesByRuleAndTarget(t *testing.T) {
 	}
 }
 
-// The old root paths are gone: no compatibility aliases (ADR 0022).
-func TestOldRootAPIPathsReturn404(t *testing.T) {
-	srv := apiTestServer(&stubStore{})
-	for _, tc := range []struct{ method, target string }{
-		{http.MethodGet, "/reports"},
-		{http.MethodDelete, "/reports?rule=ua-trip"},
-		{http.MethodGet, "/stats"},
-	} {
-		if w := apiRequest(t, srv, tc.method, tc.target); w.Code != http.StatusNotFound {
-			t.Errorf("%s %s = %d, want 404", tc.method, tc.target, w.Code)
+// The old root API paths carry no API contract: the Web Panel's view
+// pages now live at /stats and /reports and serve HTML only, never the
+// machine documents (a page at /reports is a page, not a contract -
+// ADR 0022), and the old root DELETE path deletes nothing (no
+// compatibility aliases; the page occupies the path, so DELETE is
+// method-not-allowed).
+func TestOldRootAPIPathsServePagesNotContracts(t *testing.T) {
+	store := &stubStore{delN: 1}
+	srv := apiTestServer(store)
+	for _, path := range []string{"/stats", "/reports"} {
+		w := apiRequest(t, srv, http.MethodGet, path)
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("GET %s = %d %q, want 200 text/html (a page, not an API document)",
+				path, w.Code, w.Header().Get("Content-Type"))
 		}
+	}
+	w := apiRequest(t, srv, http.MethodDelete, "/reports?rule=ua-trip")
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("DELETE /reports = %d, want 405 (the old root delete path stays gone)", w.Code)
+	}
+	if store.deleted.Rule != "" || store.deleted.Target != "" {
+		t.Errorf("DELETE /reports reached the report store as %+v; the root path must delete nothing", store.deleted)
 	}
 }
 

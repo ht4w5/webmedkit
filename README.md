@@ -12,7 +12,7 @@ rules.
 - [docs/metrics.md](docs/metrics.md) - the metrics contract at
   `GET /metrics`: exposition format, metric families, counter
   semantics and evolution policy; plus the human-facing `GET /api/stats`
-  Statistic
+  Stats snapshot
 - [docs/reports.md](docs/reports.md) - the report document contract:
   envelope, report fields and penalty, evolution policy
 - [docs/rules.md](docs/rules.md) - writing rules, Match/Trigger
