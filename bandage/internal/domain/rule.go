@@ -62,7 +62,8 @@ func (c *TrackerConfig) VolumeDesc() string {
 }
 
 // ReportAction upserts a report for the tracker's target on match. It is
-// the only write path to the report table.
+// the only write path to the report table, and a write, not a control-flow
+// act: the event continues through the chain's remaining rules (ADR 0027).
 type ReportAction struct {
 	// Reason is the machine-readable slug feeding downstream ban rules.
 	Reason string
@@ -140,10 +141,11 @@ type Escalation struct {
 }
 
 // Terminal reports whether the rung's action list ends chain traversal after it
-// has run (report, goto or stop) - a static property of the list (ADR 0013).
+// has run (goto or stop) - a static property of the list (ADR 0027, amending
+// ADR 0013).
 func (e Escalation) Terminal() bool {
 	for _, a := range e.Actions {
-		if a.Report != nil || a.Goto != "" || a.Stop {
+		if a.Goto != "" || a.Stop {
 			return true
 		}
 	}
@@ -163,6 +165,11 @@ func (r Rule) TopRung() (Escalation, bool) {
 // and ordered actions. It matches when the filter accepts and the tracker (if any) overflows; the ID namespaces tracker state.
 type Rule struct {
 	ID string
+	// Counter marks the rule's Rule counter enabled (the rules
+	// format's counter key, default false); the evaluator counts its
+	// visits and Matches and the daemon exposes them (GLOSSARY: Rule
+	// counter).
+	Counter bool
 	// FilterSource is the effective filter expression as written
 	// ("any" when omitted), kept for the --test plan print.
 	FilterSource string

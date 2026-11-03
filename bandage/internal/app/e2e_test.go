@@ -218,8 +218,8 @@ func startTestDaemonCfg(t *testing.T, clock *testClock, network, dbPath, rulesYA
 	return startTestDaemonBuildCfg(t, clock, network, dbPath, rulesYAML, testBuild, mutate, extra...)
 }
 
-// startTestDaemonBuildCfg lets the caller pick the build identity: the
-// reason namespace follows its name (ADR 0017).
+// startTestDaemonBuildCfg lets the caller pick the build identity: absent
+// a reason_prefix, the reason namespace follows its name (ADR 0026).
 func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, rulesYAML string, build identity.Build, mutate func(*Config), extra ...Option) *testDaemon {
 	t.Helper()
 	listen := filepath.Join(t.TempDir(), "log.sock")
@@ -887,7 +887,8 @@ func TestStatsBuildMirrorsThePassedBuild(t *testing.T) {
 	}
 }
 
-// ADR 0017 pinned behaviorally: a renamed build re-namespaces every reason.
+// The program-name fallback pinned behaviorally (ADR 0026): absent a
+// reason_prefix, a renamed build re-namespaces every reason.
 func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", bandwidthRules, identity.For("bandage-canary"), nil)
@@ -903,6 +904,39 @@ func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	}
 	if r := doc.Reports[0]; r.Reason != "bandage-canary.egress-overflow" {
 		t.Errorf("reason = %q, want %q (the namespace follows the build name)", r.Reason, "bandage-canary.egress-overflow")
+	}
+}
+
+// The rules file's reason_prefix re-namespaces served report reasons
+// without touching the build identity: the configured prefix wins over
+// the program-name fallback and the authored code stays the reason's
+// second label (ADR 0026).
+func TestE2EConfiguredReasonPrefixNamespacesServedReports(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", "reason_prefix: acme-prod\n"+bandwidthRules, identity.For("bandage-canary"), nil)
+
+	// 6000 + 6000 - 1000*1s = 11000 > 10000: the second event overflows.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.waitProcessed(t, 2)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.Reason != "acme-prod.egress-overflow" {
+		t.Errorf("reason = %q, want %q (the configured prefix namespaces the reason; the authored code stays its second label)", r.Reason, "acme-prod.egress-overflow")
+	}
+	// The build identity keeps the program name - version stamps and
+	// build_info are unaffected; only reasons move.
+	_, stats := d.getStats(t)
+	for _, f := range []struct{ field, want string }{
+		{"name", "bandage-canary"},
+		{"version", identity.For("bandage-canary").Version()},
+	} {
+		if got := statsStr(t, stats, "build", f.field); got != f.want {
+			t.Errorf("build.%s = %q, want %q", f.field, got, f.want)
+		}
 	}
 }
 
@@ -2011,10 +2045,13 @@ func TestE2EJumpRunsTargetAndResumesCurrentChain(t *testing.T) {
 	assertTopicRanOnce(t, d, got["topic-match"].Tracker.Value, "jump runs the target chain once")
 }
 
-// TestE2EFirstMatchPerChainEndsTraversal: a terminal rule's first match ends
-// the chain; a non-terminal match lets traversal continue. The entry chain
-// dispatches to the continue chain first, so both halves run per event.
-func TestE2EFirstMatchPerChainEndsTraversal(t *testing.T) {
+// TestE2EReportContinuesTheChainTraversal: a report action is not terminal
+// (ADR 0027) - it writes and lets the event continue through the chain's
+// remaining rules, so reasons accrue across rules and one flag no longer
+// blinds everything written after it. Ending traversal is explicit: goto
+// (above) or stop (below). The entry chain dispatches to the continue chain
+// first, so both halves run per event.
+func TestE2EReportContinuesTheChainTraversal(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -2025,29 +2062,54 @@ chains:
         actions: [{jump: continue}]
       - id: first-match
         tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: first-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+        actions:
+          - report: {reason: first-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
+          - log: "debug,MARK:FIRST"
       - id: second-match
         tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: second-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+        actions:
+          - report: {reason: second-match, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
+          - log: "debug,MARK:SECOND"
   - name: continue
     rules:
       - id: non-terminal
-        actions: [{log: "debug,CONT:"}]
+        actions: [{log: "debug,MARK:CONT"}]
       - id: after-non-terminal
         tracker: {track: bandwidth, leak: 0, volume: 100}
-        actions: [{report: {reason: after-non-terminal, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+        actions:
+          - report: {reason: after-non-terminal, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
+          - log: "debug,MARK:CONT-AFTER"
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
 	d.waitProcessed(t, 1)
 
+	// Every rule after a report still sees the event and the reasons accrue
+	// across the chain's rules.
 	doc := d.getReports(t, nil)
-	got := make(map[string]bool, len(doc.Reports))
+	got := make(map[string]string, len(doc.Reports))
 	for _, r := range doc.Reports {
-		got[r.Rule] = true
+		got[r.Rule] = r.Reason
 	}
-	if len(doc.Reports) != 2 || !got["first-match"] || !got["after-non-terminal"] {
-		t.Fatalf("reports = %+v, want first-match and after-non-terminal (second-match skipped)", doc.Reports)
+	want := map[string]string{
+		"first-match":        "bandage.first-match",
+		"second-match":       "bandage.second-match",
+		"after-non-terminal": "bandage.after-non-terminal",
+	}
+	if len(doc.Reports) != len(want) {
+		t.Fatalf("reports = %+v, want first-match, second-match and after-non-terminal (a report continues the chain)", doc.Reports)
+	}
+	for rule, reason := range want {
+		if got[rule] != reason {
+			t.Errorf("report %s reason = %q, want %q", rule, got[rule], reason)
+		}
+	}
+
+	// Traversal order is unchanged: the dispatched chain runs first, then
+	// the entry chain resumes through every remaining rule.
+	gotMarks := marks(d)
+	if !slices.Equal(gotMarks, []string{"MARK:CONT", "MARK:CONT-AFTER", "MARK:FIRST", "MARK:SECOND"}) {
+		t.Errorf("marks = %v, want [MARK:CONT MARK:CONT-AFTER MARK:FIRST MARK:SECOND]", gotMarks)
 	}
 }
 

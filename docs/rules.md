@@ -139,6 +139,38 @@ enrichment:
 chains:
 ```
 
+## `reason_prefix`
+
+The top-level `reason_prefix` key - beside `version`, `enrichment` and
+`chains` - names the namespace every report of the file carries: a
+reason is `<prefix>.<code>`, the code being the bare slug the report
+action declares
+([ADR 0016](adr/0016-report-reasons-are-namespaced.md),
+[ADR 0026](adr/0026-reason-prefix-configured-in-rules-file.md)). One
+file, one namespace: the key is file-wide, never per rule or per
+action.
+
+The prefix is slug-shaped like the authored code -
+`^[a-z0-9][a-z0-9_-]*$` - and validated at load: a typo fails
+`bandage -t` naming the key, never renaming the namespace silently at
+runtime. An absent key and a written key are all-or-nothing: absent
+means the default below, while a written key must carry the slug - a
+written null or non-string value fails load like any other typo. When
+the key is absent the prefix is the program name exactly
+as before
+([ADR 0017](adr/0017-reason-prefix-comes-from-the-progname.md) kept as
+the default), so existing rules files keep producing byte-identical
+reasons with no edit. Only reasons move: the build identity and the
+version stamps keep the program name regardless. The `--test` plan
+prints the effective prefix as `reason prefix: <prefix>` above the
+chains and namespaces every `report reason=` line with it.
+
+```yaml
+version: 0
+reason_prefix: acme-prod
+chains:
+```
+
 ## Entry chains and dispatch
 
 Every event is evaluated by entering exactly one chain: the **entry
@@ -157,6 +189,13 @@ single front door, helper chains dispatched on demand.
   declaration order never matters: only the dispatch does.
 - `stop` in the entry chain gates everything below it: later rules and
   later dispatch never see the event.
+- A `report` action is a write, not a control-flow act
+  ([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md)): it writes
+  the report and the event continues through the chain's remaining
+  rules. Ending traversal is explicit - `stop`, or `goto`'s "target
+  chain, then this chain ends" - exactly where the rules author wrote
+  it; reasons accrue across rules and one flagged report no longer
+  blinds everything written after it.
 
 Load refuses a rules file where:
 
@@ -343,10 +382,14 @@ How it behaves:
   feeds its downstream chain continuously, not in flickers.
 - Terminality is declared per rung's action list, and applies only to
   rungs that fired: the chain ends after the rule only when a fired rung
-  carried `report`, `goto` or `stop`. A fired `jump` runs its target
-  chain and resumes; a fired `goto` runs its target chain and ends this
-  chain after the remaining fired rungs have run. An unfired rung above
-  the value ends nothing.
+  carried `goto` or `stop`
+  ([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md), amending
+  ADR 0013's terminality set). A fired `report` is a write, not a
+  control-flow act: it writes and the event continues through the
+  chain's remaining rules. A fired `jump` runs its target chain and
+  resumes; a fired `goto` runs its target chain and ends this chain
+  after the remaining fired rungs have run. An unfired rung above the
+  value ends nothing.
 - The idiomatic handoff rung is **`jump`, not `goto`**: a `goto` rung
   ends the chain on every event above its threshold, starving the rules
   after the ladder, while `jump` keeps them running beside the handoff.
@@ -405,6 +448,41 @@ rungs carry every threshold) and its `ttl` from the top rung:
     rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop
 ```
 
+## Rule counters
+
+A rule may carry the rule-level `counter: true` key (default `false`),
+enabling its **Rule counter** ([GLOSSARY.md](../GLOSSARY.md)): the
+events the rule is evaluated against and the subset that matched it,
+cumulative since daemon start and reset on restart like every other
+Stats number. As with `reason_prefix`, the key is all-or-nothing: an
+absent key means the default, while a written `counter` must carry
+`true` or `false` - a written null fails load like any other typo.
+Two quantities, counted exactly under the worker pool:
+
+- `total` counts every event the rule is evaluated against - events
+  its filter rejected and replay warm-up skips included. A chain
+  dispatched more than once for one event counts one visit per
+  dispatch.
+- `matched` counts exactly the rule's Matches - one per matching
+  Event, a ladder counting once however many rungs fired.
+
+The counts surface on the operator's Stats surfaces: the `/api/stats`
+snapshot's `rules` block lists every counter-enabled rule as `id`,
+`total` and `matched` in rules-file order, and the Web Panel's Stats
+page shows the same as its rule counters table. Rules without
+`counter` count nothing and stay out of both.
+
+```yaml
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: iso-download-flood
+        counter: true
+        tracker: {track: rate, leak: 10, volume: 100}
+        actions: [{report: {reason: iso-download-flood, ttl: 24h, penalty: limit-req-rate, rate: 200}}]
+```
+
 ## Pattern: the tracker-less tripwire
 
 The tripwire flags every request carrying a known-bad signal (classically
@@ -454,9 +532,12 @@ How it behaves:
   shared freely between rules; the rule id is internal provenance.
   bandage produces reports and never ban rules. Codes are authored bare
   and carried namespaced: the report carries the code namespaced as
-  `<program name>.<code>` (ADR 0016, ADR 0017) while the rules file
-  declares it bare - the plan prints the namespaced reason the report
-  will carry.
+  `<prefix>.<code>` (ADR 0016) under the file's
+  [`reason_prefix`](#reason_prefix) - the program name when the key is
+  absent
+  ([ADR 0026](adr/0026-reason-prefix-configured-in-rules-file.md)) -
+  while the rules file declares it bare - the plan prints the
+  namespaced reason the report will carry.
 - The filter above is a case-sensitive substring match on the Event's
   user agent (`agent "…"` matches the agent exactly). Values match
   case-sensitively without normalization (a `regex` pattern is

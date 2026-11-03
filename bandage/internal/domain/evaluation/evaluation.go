@@ -23,38 +23,85 @@ type ReportSink interface {
 	Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error
 }
 
+// Counters is the rule-counter port: per-rule visit and match
+// accounting at the evaluator's counting points (GLOSSARY: Rule
+// counter). The daemon owns the registry behind it and exposes the
+// counts - the registry is an internal seam between evaluator and
+// daemon, not a public contract. Implementations must be exact under
+// the worker pool.
+type Counters interface {
+	// Visit counts one rule visit: every event the rule is evaluated
+	// against, filter rejects and replay warm-up skips included; a
+	// chain dispatched more than once for one event counts one visit
+	// per dispatch.
+	Visit(ruleID string)
+	// Match counts one Match of the rule: once per matching Event
+	// however many ladder rungs fired.
+	Match(ruleID string)
+}
+
+// NopCounters discards every count: the Counters implementation for
+// callers that observe nothing, passed explicitly - nothing silently
+// substitutes for a missing dependency.
+type NopCounters struct{}
+
+func (NopCounters) Visit(string) {}
+func (NopCounters) Match(string) {}
+
 // Logger is the log action's logging port (ADR 0005); it carries only the domain's four levels, so a rule can never exit the process.
 type Logger interface {
 	Log(level domain.Level, msg string, fields map[string]any)
 }
 
-// nopLogger discards every record (the Service default).
-type nopLogger struct{}
+// NopLogger discards every record: the Logger implementation for
+// callers that observe nothing, passed explicitly - nothing silently
+// substitutes for a missing dependency.
+type NopLogger struct{}
 
-func (nopLogger) Log(domain.Level, string, map[string]any) {}
+func (NopLogger) Log(domain.Level, string, map[string]any) {}
 
 // Service evaluates events against the loaded chains.
 type Service struct {
-	progName string
-	chains   []domain.Chain
-	byName   map[string]int
-	cache    TrackerCache
-	reports  ReportSink
-	now      func() time.Time
-	logger   Logger
+	reasonPrefix string
+	chains       []domain.Chain
+	byName       map[string]int
+	cache        TrackerCache
+	reports      ReportSink
+	counters     Counters
+	now          func() time.Time
+	logger       Logger
 }
 
-// NewService assembles the evaluator. progName namespaces report reasons;
-// renaming the program re-namespaces all of them (ADR 0016, ADR 0017).
-func NewService(progName string, chains []domain.Chain, cache TrackerCache, reports ReportSink, now func() time.Time, logger Logger) *Service {
-	if logger == nil {
-		logger = nopLogger{}
-	}
-	byName := make(map[string]int, len(chains))
-	for i, chain := range chains {
+// Deps are the Service's dependencies and settings, assembled once at
+// daemon assembly or a test fixture: one named struct rather than a
+// positional argument list, so the prefix and the ports can never
+// swap places. Counters and Logger are required - pass NopCounters
+// and NopLogger to discard their output.
+type Deps struct {
+	// ReasonPrefix namespaces report reasons at creation (ADR 0016):
+	// the rules file's reason_prefix, else the program name (ADR 0026).
+	ReasonPrefix string
+	// Chains are the loaded chains; the entry chain is domain.EntryChain.
+	Chains []domain.Chain
+	// Cache is the tracker-state port and Reports the report write port.
+	Cache   TrackerCache
+	Reports ReportSink
+	// Counters receives the rule-counter counts (GLOSSARY: Rule
+	// counter); the daemon owns the registry behind it.
+	Counters Counters
+	// Now is the clock report timestamps read at Trigger time.
+	Now func() time.Time
+	// Logger is the log action's logging port (ADR 0005).
+	Logger Logger
+}
+
+// NewService assembles the evaluator from its dependencies.
+func NewService(d Deps) *Service {
+	byName := make(map[string]int, len(d.Chains))
+	for i, chain := range d.Chains {
 		byName[chain.Name] = i
 	}
-	return &Service{progName: progName, chains: chains, byName: byName, cache: cache, reports: reports, now: now, logger: logger}
+	return &Service{reasonPrefix: d.ReasonPrefix, chains: d.Chains, byName: byName, cache: d.Cache, reports: d.Reports, counters: d.Counters, now: d.Now, logger: d.Logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs
@@ -82,10 +129,14 @@ func (m matchContext) target() string {
 }
 
 // runChain traverses one chain's rules in order; also entered by name from goto/jump actions.
+// A Rule counter counts one visit per rule per traversal (a chain
+// dispatched more than once for one event counts one visit per
+// dispatch) and one Match per matching Event (GLOSSARY: Rule counter).
 func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) error {
 	chain := &s.chains[ci]
 	for ri := range chain.Rules {
 		rule := &chain.Rules[ri]
+		s.counters.Visit(rule.ID) // total: filter rejects and replay warm-up skips are visits too
 		if !rule.Filter.Match(event) {
 			continue
 		}
@@ -100,6 +151,7 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 		if len(rungs) == 0 {
 			continue
 		}
+		s.counters.Match(rule.ID) // matched: once per Match, a ladder's fired rungs count once
 		if err := s.runRungs(ctx, matchContext{chain: chain, rule: rule, reading: reading, event: event}, rungs); err != nil {
 			return err
 		}
@@ -126,7 +178,9 @@ func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.E
 }
 
 // terminal reports whether a fired rung ends chain traversal after the rule's rungs
-// have run; a fired jump never ends the chain, a fired goto only after the remaining rungs.
+// have run; a fired report or jump never ends the chain (a report writes and the
+// event continues through the chain's remaining rules, ADR 0027), a fired goto
+// only after the remaining rungs.
 func terminal(rungs []domain.Escalation) bool {
 	for _, rung := range rungs {
 		if rung.Terminal() {
@@ -240,7 +294,7 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
-		Reason:    domain.NamespacedReason(s.progName, action.Reason), // namespaced at creation only (ADR 0016)
+		Reason:    domain.NamespacedReason(s.reasonPrefix, action.Reason), // namespaced at creation only (ADR 0016)
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,

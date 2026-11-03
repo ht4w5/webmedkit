@@ -101,9 +101,12 @@ type Daemon struct {
 	reports *report.Service
 	cache   *memory.Store
 	eval    *evaluation.Service
-	src     *syslog.Source
-	apiSrv  *http.Server
-	apiLn   net.Listener
+	// ruleCounters is the Rule counter registry the evaluator counts
+	// into and Stats exposes (GLOSSARY: Rule counter).
+	ruleCounters *ruleCounters
+	src          *syslog.Source
+	apiSrv       *http.Server
+	apiLn        net.Listener
 
 	// ctx/cancel is the daemon-lifetime context threaded through the
 	// pipeline and sweeper; cancel is the bounded-shutdown backstop.
@@ -124,7 +127,9 @@ type Daemon struct {
 }
 
 // New assembles the daemon from validated config and rules; Pipeline.Workers
-// must be at least 1. The build's name namespaces report reasons (ADR 0017).
+// must be at least 1. The effective reason prefix - the rules file's
+// reason_prefix, else the build's name - namespaces report reasons
+// (ADR 0026).
 func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon, error) {
 	if cfg.Pipeline.Workers < 1 {
 		return nil, fmt.Errorf("app: pipeline.workers must be at least 1 (got %d)", cfg.Pipeline.Workers)
@@ -154,6 +159,7 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 	}
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
 	reports := report.NewService(repo)
+	ruleCounters := newRuleCounters(rules.Chains)
 	filesize, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod, filesizeMinSamples)
 	if err != nil {
 		return nil, err
@@ -166,21 +172,30 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 	}
 
 	d := &Daemon{
-		cfg:       cfg,
-		chains:    rules.Chains,
-		build:     build,
-		now:       o.now,
-		logger:    o.logger,
-		parser:    nginxparser.New(),
-		enrich:    enricher,
-		workers:   cfg.Pipeline.Workers,
-		repo:      repo,
-		reports:   reports,
-		cache:     cache,
-		eval:      evaluation.NewService(build.Name(), rules.Chains, cache, reports, o.now, domainLogger{o.logger}),
-		lines:     make(chan string),
-		processed: newProgress(),
-		stopSweep: make(chan struct{}),
+		cfg:     cfg,
+		chains:  rules.Chains,
+		build:   build,
+		now:     o.now,
+		logger:  o.logger,
+		parser:  nginxparser.New(),
+		enrich:  enricher,
+		workers: cfg.Pipeline.Workers,
+		repo:    repo,
+		reports: reports,
+		cache:   cache,
+		eval: evaluation.NewService(evaluation.Deps{
+			ReasonPrefix: rules.effectiveReasonPrefix(build.Name()),
+			Chains:       rules.Chains,
+			Cache:        cache,
+			Reports:      reports,
+			Counters:     ruleCounters,
+			Now:          o.now,
+			Logger:       domainLogger{o.logger},
+		}),
+		ruleCounters: ruleCounters,
+		lines:        make(chan string),
+		processed:    newProgress(),
+		stopSweep:    make(chan struct{}),
 	}
 	d.apiSrv = &http.Server{Handler: httpapi.New(reports, d, goRuntime{}, o.now)}
 	return d, nil
@@ -364,7 +379,8 @@ func (d *Daemon) counters() counters {
 }
 
 // Stats assembles the /api/stats snapshot (httpapi.StatsSource): build
-// identity, pipeline counters and tracker cache counters since start.
+// identity, pipeline counters, tracker cache counters and the rule
+// counters since start.
 func (d *Daemon) Stats() httpapi.Stats {
 	c := d.counters()
 	cs := d.cache.Statistics()
@@ -393,6 +409,7 @@ func (d *Daemon) Stats() httpapi.Stats {
 			Size:      cs.Size,
 			EntryCap:  cs.EntryCap,
 		},
+		Rules: d.ruleCounters.snapshot(),
 	}
 }
 

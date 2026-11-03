@@ -49,20 +49,34 @@ function fetchJSON(method, url) {
 
 // The Stats view renders the snapshot as grouped key/value tables -
 // identity, pipeline, tracker cache - one row per key the daemon
-// reports. Rows are generated per reported key, never a fixed field
-// list, so keys added to the snapshot later (ADR 0006: fields may be
-// added) appear as generic extra rows and nothing the daemon reports
-// is dropped by the panel.
+// reports, and a rule counters table for the rules block. Rows are
+// generated per reported key, never a fixed field list, so keys added
+// to the snapshot later (ADR 0006: fields may be added) appear as
+// generic extra rows and nothing the daemon reports is dropped by the
+// panel.
+
+// RULE_COUNTERS_KEY is the snapshot block feeding the rule counters
+// table; its entries are counter rows, never key/value rows.
+const RULE_COUNTERS_KEY = "rules";
+
+// RULE_COUNTERS_SLOT is the rule counters table's row slot.
+const RULE_COUNTERS_SLOT = "group-rule-counters";
 
 // STATS_GROUPS maps the snapshot's known top-level blocks onto their
 // group tables' row slots. The one map serves both the group dispatch
 // and the row keys: a block the map names renders plain field keys -
 // its group names the block - while any other block's generic extra
-// rows keep the block-key prefix.
+// rows keep the block-key prefix. The rules entry is the map's one
+// documented shape exception: its entries are Rule counter rows
+// (rule, total, matched; GLOSSARY: Rule counter), which key/value
+// rows cannot render (an array block has no field keys), so the
+// single dispatch below routes its value to the counters table's own
+// row builder - still through this map, never a hard-coded key check.
 const STATS_GROUPS = new Map([
 	["build", "group-identity"],
 	["pipeline", "group-pipeline"],
 	["tracker_cache", "group-tracker-cache"],
+	[RULE_COUNTERS_KEY, RULE_COUNTERS_SLOT],
 ]);
 
 // GENERIC_GROUP_PREFIX marks a dynamically created group's row slot;
@@ -78,18 +92,29 @@ function valueText(value) {
 	return typeof value === "object" && value !== null ? JSON.stringify(value) : String(value);
 }
 
-// statsGroups maps the snapshot document onto the groups: the pipeline
-// and tracker_cache blocks feed their own tables field by field; the
-// build block's fields and every other top-level scalar - generated_at,
-// uptime, and any key added later - become identity rows. An unknown
-// top-level block renders within its own generic group - a generic
-// extra group table named for the block - never flattened into the
-// identity table or hidden.
-function statsGroups(snapshot) {
+// statsTables maps the snapshot document onto the groups - the one
+// dispatch site: every top-level block routes through STATS_GROUPS.
+// The pipeline and tracker_cache blocks feed their own tables field by
+// field; the build block's fields and every other top-level scalar -
+// generated_at, uptime, and any key added later - become identity rows.
+// An unknown top-level block renders within its own generic group - a
+// generic extra group table named for the block - never flattened into
+// the identity table or hidden. The rules block (the map's documented
+// shape exception) routes its entries to the rule counters table's own
+// row builder instead of key/value rows.
+function statsTables(snapshot) {
 	const groups = { "group-identity": [], "group-pipeline": [], "group-tracker-cache": [] };
+	let ruleCounters = [];
 	for (const [key, value] of Object.entries(snapshot)) {
+		const slot = STATS_GROUPS.get(key);
+		if (slot === RULE_COUNTERS_SLOT) {
+			// The map's documented shape exception: Rule counter rows,
+			// never generic key/value rows.
+			if (Array.isArray(value)) ruleCounters = value;
+			continue;
+		}
 		const block = typeof value === "object" && value !== null && !Array.isArray(value);
-		const slot = STATS_GROUPS.get(key) ??
+		const target = slot ??
 			(block ? GENERIC_GROUP_PREFIX + key : "group-identity");
 		const noKeyPrefix = STATS_GROUPS.has(key);
 		const rows = block
@@ -98,9 +123,9 @@ function statsGroups(snapshot) {
 				value: valueText(v),
 			}))
 			: [{ key: key, value: valueText(value) }];
-		(groups[slot] = groups[slot] || []).push(...rows);
+		(groups[target] = groups[target] || []).push(...rows);
 	}
-	return groups;
+	return { groups: groups, ruleCounters: ruleCounters };
 }
 
 // kvRow builds one key/value row.
@@ -187,9 +212,63 @@ function groupBody(slot) {
 	return tbody;
 }
 
+// The rule counters table: one row per counter-enabled rule from the
+// snapshot's rules block (GLOSSARY: Rule counter) - rule, total,
+// matched.
+
+// ruleCountersColumns takes the rule counters table's column count
+// from its own header row - the served markup is the table's one shape
+// source - so the full-width message rows and the page's columns
+// cannot drift.
+function ruleCountersColumns() {
+	return document.getElementById(RULE_COUNTERS_SLOT).closest("table").querySelectorAll("thead th").length;
+}
+
+// ruleCounterRow builds one rule counter row: rule, total, matched.
+function ruleCounterRow(counter) {
+	const tr = document.createElement("tr");
+	tr.className = "rule-counter-row";
+	for (const text of [counter.id, String(counter.total), String(counter.matched)]) {
+		const td = document.createElement("td");
+		td.textContent = text;
+		tr.appendChild(td);
+	}
+	return tr;
+}
+
+// renderRuleCounters renders the rule counters table - the full
+// fetched set or the search's narrowed view - with the explicit empty
+// state when no rule enables a counter, so silence is never mistaken
+// for a broken panel.
+function renderRuleCounters(counters, match) {
+	const tbody = document.getElementById(RULE_COUNTERS_SLOT);
+	if (tbody === null) return;
+	tbody.textContent = "";
+	const all = counters === null ? [] : counters;
+	const shown = match === null ? all : all.filter((counter) =>
+		match.test(counter.id + "\n" + counter.total + "\n" + counter.matched));
+	if (shown.length === 0) {
+		let copy;
+		if (counters === null) copy = "Loading...";
+		else if (match !== null) copy = "No keys match the filter.";
+		else copy = "No rule counters configured.";
+		tbody.appendChild(messageRow(copy, ruleCountersColumns()));
+		return;
+	}
+	for (const counter of shown) {
+		tbody.appendChild(ruleCounterRow(counter));
+	}
+}
+
 // fetchedStatsGroups holds the three groups' rows from the last fetch;
 // anything narrowing the view only ever re-renders a filtered view.
 let fetchedStatsGroups = {};
+
+// fetchedRuleCounters holds the rules block from the last fetch - the
+// rule counters table's rows; null before the first fetch (the loading
+// row), an empty list after one reporting no counters (the explicit
+// empty state).
+let fetchedRuleCounters = null;
 
 // fillLegend puts the running binary's identity and uptime in the
 // header's right-aligned legend - build identity and uptime at a
@@ -210,14 +289,17 @@ function loadStats() {
 	if (document.getElementById("group-identity") === null) return;
 	fetchJSON("GET", "/api/stats")
 		.then((snapshot) => {
-			fetchedStatsGroups = statsGroups(snapshot);
+			const tables = statsTables(snapshot);
+			fetchedStatsGroups = tables.groups;
+			fetchedRuleCounters = tables.ruleCounters;
 			fillLegend(snapshot);
 			applyStatsFilter();
 		})
 		.catch((err) => {
 			for (const tbody of document.querySelectorAll("#content tbody")) {
 				tbody.textContent = "";
-				tbody.appendChild(messageRow("error: " + err.message, KV_COLUMNS));
+				const columns = tbody.closest("table").querySelectorAll("thead th").length;
+				tbody.appendChild(messageRow("error: " + err.message, columns));
 			}
 		});
 }
@@ -452,14 +534,17 @@ function applyReportFilter() {
 	renderReports(narrowed);
 }
 
-// applyStatsFilter narrows the visible key/value rows to the search
-// box's matches - over key and value, unanchored and
-// case-insensitive - so the search box behaves the same whichever
-// view is on screen. An invalid pattern leaves the full rows visible.
+// applyStatsFilter narrows the visible rows to the search box's
+// matches - over key and value, unanchored and case-insensitive, and
+// over the rule counter rows the same way - so the search box behaves
+// the same whichever view is on screen. An invalid pattern leaves the
+// full rows visible.
 function applyStatsFilter() {
 	if (document.getElementById("group-identity") === null) return;
 	const { match, invalid } = searchMatcher();
-	renderStatsGroups(fetchedStatsGroups, invalid ? null : match);
+	const filter = invalid ? null : match;
+	renderStatsGroups(fetchedStatsGroups, filter);
+	renderRuleCounters(fetchedRuleCounters, filter);
 }
 
 // applySearch runs the search box against whichever view's rows are on

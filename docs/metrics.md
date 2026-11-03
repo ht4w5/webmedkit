@@ -60,6 +60,8 @@ gauges are bare.
 | `bandage_tracker_cache_evictions_total` | counter | Tracker cache evictions since daemon start. |
 | `bandage_tracker_cache_entries` | gauge | Tracker cache entries currently held. |
 | `bandage_tracker_cache_entry_cap` | gauge | Configured tracker cache entry capacity. |
+| `bandage_rule_events_total` | counter | Events evaluated against the rule since daemon start. |
+| `bandage_rule_events_matched_total` | counter | Events that matched the rule since daemon start. |
 | `go_info` | gauge | Information about the Go environment. |
 | `go_goroutines` | gauge | Number of goroutines that currently exist. |
 | `go_threads` | gauge | Number of OS threads created. |
@@ -68,16 +70,25 @@ gauges are bare.
 | `go_memstats_sys_bytes` | gauge | Number of bytes obtained from system. |
 | `go_memstats_gc_cpu_fraction` | gauge | The fraction of this program's available CPU time used by the GC since the program started. |
 
-Two families carry labels. `bandage_build_info` carries the build
+Three families carry labels. `bandage_build_info` carries the build
 identity as labels - `name`, `version`, `commit`, `build_date`,
 `dirty`, `go_version`, `platform` - so panels can join version, commit
 and platform into every series and incidents can be bisected by build;
-its value is always `1`. `go_info` carries one label, `version`.
-Cardinality is fixed for every family: no family's series count is ever
-a function of traffic.
+its value is always `1`. `go_info` carries one label, `version`. The
+two rule counter families each carry one label, `rule`, holding the
+rule ID: `bandage_rule_events_total` counts the events evaluated
+against the rule since daemon start, `bandage_rule_events_matched_total`
+the subset that matched it. Cardinality is fixed per configuration: no
+family's series count is ever a function of traffic - the rule families'
+series count is the number of counters enabled in the rules file, and
+every enabled rule emits its series from daemon start with zeros, so
+`rate()` and `increase()` work before the first match.
 
 The `bandage_` families mirror their **Stats** counterparts field
-for field - a dropped line is the same event on both surfaces. The
+for field - a dropped line is the same event on both surfaces. For the
+rule families the mirror is fields and values, not ordering: their
+series render in rule-ID order while the **Stats** rules block lists
+rules-file order. The
 `go_` families are a curated subset of Go runtime state under the
 conventional `go_` names, so generic Go dashboards work unchanged; the
 full memstats surface is deliberately not exposed.
@@ -210,6 +221,14 @@ bandage_tracker_cache_entries 350
 # HELP bandage_tracker_cache_entry_cap Configured tracker cache entry capacity.
 # TYPE bandage_tracker_cache_entry_cap gauge
 bandage_tracker_cache_entry_cap 1024
+# HELP bandage_rule_events_total Events evaluated against the rule since daemon start.
+# TYPE bandage_rule_events_total counter
+bandage_rule_events_total{rule="alpha"} 0
+bandage_rule_events_total{rule="zeta"} 12
+# HELP bandage_rule_events_matched_total Events that matched the rule since daemon start.
+# TYPE bandage_rule_events_matched_total counter
+bandage_rule_events_matched_total{rule="alpha"} 0
+bandage_rule_events_matched_total{rule="zeta"} 3
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1

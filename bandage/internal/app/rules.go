@@ -26,6 +26,9 @@ var reasonRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 type rawRules struct {
 	Version *int `yaml:"version"`
+	// ReasonPrefix is the optional report-namespace prefix; its node is
+	// validated in buildReasonPrefix.
+	ReasonPrefix yaml.Node `yaml:"reason_prefix"`
 	// Enrichment is the enrichment settings block; its keys are
 	// validated in buildEnrichment.
 	Enrichment yaml.Node  `yaml:"enrichment"`
@@ -37,9 +40,12 @@ type rawChain struct {
 	Rules []rawRule `yaml:"rules"`
 }
 
+// rawRule carries the rule's keys; counter is a yaml.Node so presence
+// is validated (default false).
 type rawRule struct {
 	ID      string      `yaml:"id"`
 	Filter  string      `yaml:"filter"`
+	Counter yaml.Node   `yaml:"counter"`
 	Tracker *rawTracker `yaml:"tracker"`
 	// Actions is the rule's action list (nil key absent, empty list a
 	// declared empty list).
@@ -77,11 +83,24 @@ type rawReportAction struct {
 	Rate    yaml.Node `yaml:"rate"`
 }
 
-// Rules is a validated rules document: its chains and the enrichment
-// settings block.
+// Rules is a validated rules document: its chains, the optional reason
+// prefix and the enrichment settings block.
 type Rules struct {
-	Chains     []domain.Chain
-	Enrichment Enrichment
+	Chains []domain.Chain
+	// ReasonPrefix is the configured report-namespace prefix; empty
+	// means the key is absent and the program-name fallback applies at
+	// daemon assembly and in the plan printer (ADR 0026).
+	ReasonPrefix string
+	Enrichment   Enrichment
+}
+
+// effectiveReasonPrefix is the prefix report reasons namespace under:
+// the configured reason_prefix, else the program name (ADR 0026).
+func (r Rules) effectiveReasonPrefix(progName string) string {
+	if r.ReasonPrefix != "" {
+		return r.ReasonPrefix
+	}
+	return progName
 }
 
 // Enrichment is the rules file's enrichment block: the Filter
@@ -130,6 +149,10 @@ func ParseRules(data []byte) (Rules, error) {
 	if *raw.Version != 0 {
 		return Rules{}, fmt.Errorf("rules: version: unsupported format version %d (want 0)", *raw.Version)
 	}
+	prefix, err := buildReasonPrefix(&raw.ReasonPrefix)
+	if err != nil {
+		return Rules{}, err
+	}
 	enrich, err := buildEnrichment(&raw.Enrichment)
 	if err != nil {
 		return Rules{}, err
@@ -150,7 +173,34 @@ func ParseRules(data []byte) (Rules, error) {
 	if err := validateChainGraph(chains); err != nil {
 		return Rules{}, err
 	}
-	return Rules{Chains: chains, Enrichment: enrich}, nil
+	return Rules{Chains: chains, ReasonPrefix: prefix, Enrichment: enrich}, nil
+}
+
+// keyWritten reports whether the key was written at all. One shared
+// rule for the optional keys (top-level reason_prefix, rule-level
+// counter): an absent key means the default, while a written key - a
+// written null included - must carry a valid value and fails load
+// otherwise (a written null is a typo, not an absent key).
+func keyWritten(node *yaml.Node) bool {
+	return node != nil && node.Kind != 0
+}
+
+// buildReasonPrefix validates the optional top-level reason_prefix:
+// a written key must carry a valid string slug (a written null or
+// non-string scalar is a typo and fails load naming the key), an
+// absent key means no configured prefix (the program-name fallback,
+// ADR 0026).
+func buildReasonPrefix(node *yaml.Node) (string, error) {
+	if !keyWritten(node) {
+		return "", nil
+	}
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return "", errors.New("rules: reason_prefix: must be a slug")
+	}
+	if !reasonRe.MatchString(node.Value) {
+		return "", fmt.Errorf("rules: reason_prefix: %q is not a valid slug (want %s)", node.Value, reasonRe.String())
+	}
+	return node.Value, nil
 }
 
 // buildEnrichment compiles the enrichment block: its filter defaults to
@@ -210,6 +260,12 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	seen[id] = true
 
 	rule := domain.Rule{ID: id}
+
+	counter, err := parseCounter(id, &raw.Counter)
+	if err != nil {
+		return domain.Rule{}, err
+	}
+	rule.Counter = counter
 
 	if raw.Escalations != nil && raw.Actions != nil {
 		return domain.Rule{}, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside actions", id)
@@ -272,6 +328,22 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		rule.Actions = append(rule.Actions, action)
 	}
 	return rule, nil
+}
+
+// parseCounter parses the rule's optional counter flag: true enables
+// the rule's Rule counter (GLOSSARY: Rule counter). The shared
+// written-key rule applies: an absent key means the default false, a
+// written key must carry a boolean - a written null is a typo and
+// fails load like any other invalid value, naming the key.
+func parseCounter(id string, node *yaml.Node) (bool, error) {
+	if !keyWritten(node) {
+		return false, nil
+	}
+	var on bool
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" || node.Decode(&on) != nil {
+		return false, fmt.Errorf("rules: rule %q: counter: must be true or false", id)
+	}
+	return on, nil
 }
 
 // parseTracker builds the single-volume rule's tracker config: rate and bandwidth

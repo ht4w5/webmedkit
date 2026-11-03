@@ -111,7 +111,15 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 		}},
 	}}
 	return &harness{
-		svc:  NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
+		svc: NewService(Deps{
+			ReasonPrefix: "bandage",
+			Chains:       chains,
+			Cache:        cache,
+			Reports:      sink,
+			Counters:     NopCounters{},
+			Now:          func() time.Time { return time.Unix(1000, 0) },
+			Logger:       NopLogger{},
+		}),
 		sink: sink,
 		cch:  cache,
 	}
@@ -152,7 +160,15 @@ func newRuleHarness(t *testing.T, cfg *domain.TrackerConfig, actions ...domain.A
 		}},
 	}}
 	return &harness{
-		svc:  NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil),
+		svc: NewService(Deps{
+			ReasonPrefix: "bandage",
+			Chains:       chains,
+			Cache:        cache,
+			Reports:      sink,
+			Counters:     NopCounters{},
+			Now:          func() time.Time { return time.Unix(1000, 0) },
+			Logger:       NopLogger{},
+		}),
 		sink: sink,
 		cch:  cache,
 	}
@@ -476,7 +492,15 @@ func TestActionsSeeTriggerTimeReading(t *testing.T) {
 			{Log: &domain.LogAction{Level: domain.LevelInfo, Message: "OVERFLOW:"}},
 		},
 	}}}}
-	svc := NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, log)
+	svc := NewService(Deps{
+		ReasonPrefix: "bandage",
+		Chains:       chains,
+		Cache:        cache,
+		Reports:      sink,
+		Counters:     NopCounters{},
+		Now:          func() time.Time { return time.Unix(1000, 0) },
+		Logger:       log,
+	})
 
 	for i := 0; i < 3; i++ {
 		if err := svc.Evaluate(context.Background(), event(int64(100+i), "/a", 100, 0)); err != nil {
@@ -501,7 +525,15 @@ func TestEvaluateWithoutTheEntryChainErrors(t *testing.T) {
 		ID: "helper-match", Filter: matchAll{},
 		Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "helper", TTL: time.Hour}}},
 	}}}}
-	svc := NewService("bandage", chains, cache, sink, func() time.Time { return time.Unix(1000, 0) }, nil)
+	svc := NewService(Deps{
+		ReasonPrefix: "bandage",
+		Chains:       chains,
+		Cache:        cache,
+		Reports:      sink,
+		Counters:     NopCounters{},
+		Now:          func() time.Time { return time.Unix(1000, 0) },
+		Logger:       NopLogger{},
+	})
 
 	err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0))
 	if err == nil {

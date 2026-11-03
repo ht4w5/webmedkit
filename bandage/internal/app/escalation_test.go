@@ -190,7 +190,11 @@ chains:
 	}
 }
 
-func TestE2EEscalationReportRungEndsTheChain(t *testing.T) {
+// TestE2EEscalationReportRungContinuesTheChain: a report rung is not terminal
+// (ADR 0027) - it writes and the event reaches the chain's remaining rules -
+// while the ladder's firing is unchanged: every fired rung runs, lowest first,
+// and the report's write cancels no rung.
+func TestE2EEscalationReportRungContinuesTheChain(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -201,20 +205,39 @@ chains:
         tracker: {track: bandwidth, leak: 0}
         escalations:
           - at: 50
-            actions: [{report: {reason: first, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
-          - at: 1000
-            actions: [{log: "debug,MARK:TOP"}]
+            actions: [{log: "debug,MARK:LOW"}]
+          - at: 100
+            actions:
+              - report: {reason: first, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}
+              - log: "debug,MARK:REPORT"
+          - at: 200
+            actions: [{log: "debug,MARK:HIGH"}]
       - id: after
         tracker: {track: bandwidth, leak: 0, volume: 100}
         actions: [{report: {reason: after, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 150))
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 250))
 	d.waitProcessed(t, 1)
 
+	// All three rungs fired (the value exceeds each threshold), decided once
+	// before any action ran: lowest first, the report mid-ladder notwithstanding.
+	want := []string{"MARK:LOW", "MARK:REPORT", "MARK:HIGH"}
+	if got := marks(d); !slices.Equal(got, want) {
+		t.Errorf("marks = %v, want %v (every fired rung runs, lowest first, none cancelled)", got, want)
+	}
+
+	// The report rung wrote and the event reached the rules after the ladder.
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 || doc.Reports[0].Rule != "ladder" || doc.Reports[0].Reason != "bandage.first" {
-		t.Fatalf("reports = %+v, want only the ladder rule's first report (a report rung ends the chain)", doc.Reports)
+	if len(doc.Reports) != 2 {
+		t.Fatalf("reports = %+v, want the ladder rule's first report and the after rule's (a report rung continues the chain)", doc.Reports)
+	}
+	got := make(map[string]string, len(doc.Reports))
+	for _, r := range doc.Reports {
+		got[r.Rule] = r.Reason
+	}
+	if got["ladder"] != "bandage.first" || got["after"] != "bandage.after" {
+		t.Errorf("reports = %+v, want ladder/bandage.first and after/bandage.after", doc.Reports)
 	}
 }
 
