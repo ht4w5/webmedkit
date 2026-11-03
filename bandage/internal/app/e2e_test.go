@@ -906,6 +906,39 @@ func TestE2EReportReasonNamespaceFollowsThePassedBuildName(t *testing.T) {
 	}
 }
 
+// The rules file's reason_prefix re-namespaces served report reasons
+// without touching the build identity: the configured prefix wins over
+// the program-name fallback and the authored code stays the reason's
+// second label (ADR 0026).
+func TestE2EConfiguredReasonPrefixNamespacesServedReports(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemonBuildCfg(t, clock, "unixgram", ":memory:", "reason_prefix: acme-prod\n"+bandwidthRules, identity.For("bandage-canary"), nil)
+
+	// 6000 + 6000 - 1000*1s = 11000 > 10000: the second event overflows.
+	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/releases/24.04.iso", 200, 6000))
+	d.waitProcessed(t, 2)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports = %+v, want 1", doc.Reports)
+	}
+	if r := doc.Reports[0]; r.Reason != "acme-prod.egress-overflow" {
+		t.Errorf("reason = %q, want %q (the configured prefix namespaces the reason; the authored code stays its second label)", r.Reason, "acme-prod.egress-overflow")
+	}
+	// The build identity keeps the program name - version stamps and
+	// build_info are unaffected; only reasons move.
+	_, stats := d.getStats(t)
+	for _, f := range []struct{ field, want string }{
+		{"name", "bandage-canary"},
+		{"version", identity.For("bandage-canary").Version()},
+	} {
+		if got := statsStr(t, stats, "build", f.field); got != f.want {
+			t.Errorf("build.%s = %q, want %q", f.field, got, f.want)
+		}
+	}
+}
+
 // TestE2EStatsBuildAndCumulativeCounters: /api/stats answers with the build
 // identity and cumulative counters, as human-facing indented JSON.
 func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
