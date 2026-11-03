@@ -21,7 +21,7 @@ which stand on staged responses alone and are unaffected.
 
 Consequences: rules files that relied on a report ending the chain
 must add `stop` to the report's rung to keep their old behaviour - the
-shipped example configs are audited and the change is called out in
-the release notes; docs/rules.md's terminality statements follow the
+shipped example configs are audited and annotated where a chain's
+later rules now run; docs/rules.md's terminality statements follow the
 new set; evaluation tests pin report-then-continue beside the existing
 goto/stop terminality cases.

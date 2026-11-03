@@ -8,6 +8,13 @@
 # bandage.yml -r rules.yml.
 version: 0
 
+# Every report's reason reads <reason_prefix>.<code>. The prefix is
+# one per file (one namespace per file); the key is optional, must be
+# a slug (lowercase letters, digits, _ and -, starting with a letter
+# or digit), and an absent key means the program name. Uncomment to
+# name the deployment instead of the binary.
+# reason_prefix: my-deployment
+
 # Enrichment settings live in the rules file, not bandage.yml.
 enrichment:
   filter: any                  # rule-filter expression gating enrichment wholly (default any)
@@ -61,9 +68,15 @@ chains:
               penalty: limit-req-rate
               rate: 100
 
+  # Rule counters are opt-in per rule (default false): counter: true
+  # counts the events the rule is evaluated against (total) and the
+  # subset that matched it (matched) since daemon start, shown on
+  # /api/stats, the Web Panel's Stats page and /metrics. Uncomment the
+  # key on a rule to watch it.
   - name: api
     rules:
       - id: bursty-api
+        # counter: true
         tracker:
           track: rate
           leak: 10/s

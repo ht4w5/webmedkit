@@ -48,3 +48,10 @@ pass (`0c52ba5`, merged `a9da2ad`).
 Context: spec `../spec.md`, ADR `docs/adr/0027` (amending ADR 0013).
 
 ## Comments
+
+- 2026-11-03: The release-notes callout from the review fix pass
+  (`0c52ba5`) was removed again at maintainer request - the project
+  has never released, so `RELEASE-NOTES.md`, its pin test and the
+  README link are gone. The behavior-change callout lives in the
+  shipped example's `iso-download-flood` annotation and ADR 0027's
+  consequences.
