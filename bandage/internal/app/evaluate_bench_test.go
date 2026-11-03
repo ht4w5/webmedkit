@@ -311,7 +311,15 @@ func newBenchEpisodeRun(tb testing.TB, rules string, repo reportStore) *benchEpi
 	ledger := &writeLedger{reportStore: repo}
 	reports := report.NewService(ledger)
 	sink := &countingSink{reports: reports}
-	svc := evaluation.NewService("bandage", chains, memory.New(65536, clock.Now, zerolog.Nop()), sink, nil, clock.Now, nil)
+	svc := evaluation.NewService(evaluation.Deps{
+		ReasonPrefix: "bandage",
+		Chains:       chains,
+		Cache:        memory.New(65536, clock.Now, zerolog.Nop()),
+		Reports:      sink,
+		Counters:     evaluation.NopCounters{},
+		Now:          clock.Now,
+		Logger:       evaluation.NopLogger{},
+	})
 	return &benchEpisodeRun{svc: svc, sink: sink, reports: reports, ledger: ledger, clock: clock, rules: chains}
 }
 
