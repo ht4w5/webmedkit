@@ -257,10 +257,10 @@ chains:
 	}
 	want = append(want,
 		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
-		"MARK:WATCH", "MARK:HANDOFF",
+		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
 	)
 	if got := marks(d); !slices.Equal(got, want) {
-		t.Errorf("marks = %v, want %v (terminality follows the fired rungs)", got, want)
+		t.Errorf("marks = %v, want %v (fired rungs run lowest first and the report rung continues the chain, as on rate and bandwidth ladders)", got, want)
 	}
 
 	doc := d.getReports(t, nil)

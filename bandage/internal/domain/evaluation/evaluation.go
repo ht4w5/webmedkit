@@ -127,7 +127,9 @@ func (s *Service) runRungs(ctx context.Context, m matchContext, rungs []domain.E
 }
 
 // terminal reports whether a fired rung ends chain traversal after the rule's rungs
-// have run; a fired jump never ends the chain, a fired goto only after the remaining rungs.
+// have run; a fired report or jump never ends the chain (a report writes and the
+// event continues through the chain's remaining rules, ADR 0027), a fired goto
+// only after the remaining rungs.
 func terminal(rungs []domain.Escalation) bool {
 	for _, rung := range rungs {
 		if rung.Terminal() {

@@ -62,7 +62,8 @@ func (c *TrackerConfig) VolumeDesc() string {
 }
 
 // ReportAction upserts a report for the tracker's target on match. It is
-// the only write path to the report table.
+// the only write path to the report table, and a write, not a control-flow
+// act: the event continues through the chain's remaining rules (ADR 0027).
 type ReportAction struct {
 	// Reason is the machine-readable slug feeding downstream ban rules.
 	Reason string
@@ -140,10 +141,11 @@ type Escalation struct {
 }
 
 // Terminal reports whether the rung's action list ends chain traversal after it
-// has run (report, goto or stop) - a static property of the list (ADR 0013).
+// has run (goto or stop) - a static property of the list (ADR 0027, amending
+// ADR 0013).
 func (e Escalation) Terminal() bool {
 	for _, a := range e.Actions {
-		if a.Report != nil || a.Goto != "" || a.Stop {
+		if a.Goto != "" || a.Stop {
 			return true
 		}
 	}

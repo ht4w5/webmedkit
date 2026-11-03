@@ -186,6 +186,13 @@ single front door, helper chains dispatched on demand.
   declaration order never matters: only the dispatch does.
 - `stop` in the entry chain gates everything below it: later rules and
   later dispatch never see the event.
+- A `report` action is a write, not a control-flow act
+  ([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md)): it writes
+  the report and the event continues through the chain's remaining
+  rules. Ending traversal is explicit - `stop`, or `goto`'s "target
+  chain, then this chain ends" - exactly where the rules author wrote
+  it; reasons accrue across rules and one flagged report no longer
+  blinds everything written after it.
 
 Load refuses a rules file where:
 
@@ -372,10 +379,14 @@ How it behaves:
   feeds its downstream chain continuously, not in flickers.
 - Terminality is declared per rung's action list, and applies only to
   rungs that fired: the chain ends after the rule only when a fired rung
-  carried `report`, `goto` or `stop`. A fired `jump` runs its target
-  chain and resumes; a fired `goto` runs its target chain and ends this
-  chain after the remaining fired rungs have run. An unfired rung above
-  the value ends nothing.
+  carried `goto` or `stop`
+  ([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md), amending
+  ADR 0013's terminality set). A fired `report` is a write, not a
+  control-flow act: it writes and the event continues through the
+  chain's remaining rules. A fired `jump` runs its target chain and
+  resumes; a fired `goto` runs its target chain and ends this chain
+  after the remaining fired rungs have run. An unfired rung above the
+  value ends nothing.
 - The idiomatic handoff rung is **`jump`, not `goto`**: a `goto` rung
   ends the chain on every event above its threshold, starving the rules
   after the ladder, while `jump` keeps them running beside the handoff.
