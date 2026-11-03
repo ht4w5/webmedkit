@@ -176,14 +176,25 @@ func ParseRules(data []byte) (Rules, error) {
 	return Rules{Chains: chains, ReasonPrefix: prefix, Enrichment: enrich}, nil
 }
 
+// keyWritten reports whether the key was written at all. One shared
+// rule for the optional keys (top-level reason_prefix, rule-level
+// counter): an absent key means the default, while a written key - a
+// written null included - must carry a valid value and fails load
+// otherwise (a written null is a typo, not an absent key).
+func keyWritten(node *yaml.Node) bool {
+	return node != nil && node.Kind != 0
+}
+
 // buildReasonPrefix validates the optional top-level reason_prefix:
-// slug-shaped like the authored code, absent meaning no configured
-// prefix (the program-name fallback, ADR 0026).
+// a written key must carry a valid string slug (a written null or
+// non-string scalar is a typo and fails load naming the key), an
+// absent key means no configured prefix (the program-name fallback,
+// ADR 0026).
 func buildReasonPrefix(node *yaml.Node) (string, error) {
-	if node == nil || node.Kind == 0 {
+	if !keyWritten(node) {
 		return "", nil
 	}
-	if node.Kind != yaml.ScalarNode {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
 		return "", errors.New("rules: reason_prefix: must be a slug")
 	}
 	if !reasonRe.MatchString(node.Value) {
@@ -319,15 +330,17 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	return rule, nil
 }
 
-// parseCounter parses the rule's optional counter flag (default false):
-// true enables the rule's Rule counter (GLOSSARY: Rule counter); the
-// value must be a boolean, anything else names the key.
+// parseCounter parses the rule's optional counter flag: true enables
+// the rule's Rule counter (GLOSSARY: Rule counter). The shared
+// written-key rule applies: an absent key means the default false, a
+// written key must carry a boolean - a written null is a typo and
+// fails load like any other invalid value, naming the key.
 func parseCounter(id string, node *yaml.Node) (bool, error) {
-	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
+	if !keyWritten(node) {
 		return false, nil
 	}
 	var on bool
-	if node.Kind != yaml.ScalarNode || node.Decode(&on) != nil {
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" || node.Decode(&on) != nil {
 		return false, fmt.Errorf("rules: rule %q: counter: must be true or false", id)
 	}
 	return on, nil

@@ -135,8 +135,10 @@ func TestParseRulesTargetPrefixDefaults(t *testing.T) {
 // TestParseRulesReasonPrefix: the optional top-level reason_prefix is
 // carried through slug-validated; an absent key carries no configured
 // prefix (the program-name fallback is chosen where the program name
-// is known - daemon assembly and the plan printer, ADR 0026). Load
-// errors name the key and quote the authored value.
+// is known - daemon assembly and the plan printer, ADR 0026). A
+// written key must carry a valid string slug: a written null or
+// non-string scalar is a typo and fails load naming the key, and
+// string errors quote the authored value.
 func TestParseRulesReasonPrefix(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -151,7 +153,16 @@ func TestParseRulesReasonPrefix(t *testing.T) {
 		{name: "uppercase value refused", prefix: "reason_prefix: Acme", wantErr: `rules: reason_prefix: "Acme" is not a valid slug (want `},
 		{name: "spaced value refused", prefix: `reason_prefix: "has space"`, wantErr: `rules: reason_prefix: "has space" is not a valid slug (want `},
 		{name: "empty value refused", prefix: `reason_prefix: ""`, wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
-		{name: "null value refused", prefix: "reason_prefix:", wantErr: `rules: reason_prefix: "" is not a valid slug (want `},
+		// A written key must carry a valid string slug: a written null or
+		// non-string scalar is a typo and fails load with the key-naming
+		// error - only an absent key means the default.
+		{name: "null value refused", prefix: "reason_prefix:", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "explicit null value refused", prefix: "reason_prefix: null", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "tilde null value refused", prefix: "reason_prefix: ~", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "numeric value refused as a non-string", prefix: "reason_prefix: 123", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "boolean value refused as a non-string", prefix: "reason_prefix: true", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "sequence value refused", prefix: "reason_prefix: [a]", wantErr: `rules: reason_prefix: must be a slug`},
+		{name: "quoted digits are a string slug", prefix: `reason_prefix: "123"`, want: "123"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,6 +413,11 @@ chains:
 		{name: "string counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: sometimes\n", wantErr: `counter: must be true or false`},
 		{name: "numeric counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: 1\n", wantErr: `counter: must be true or false`},
 		{name: "sequence counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: [true]\n", wantErr: `counter: must be true or false`},
+		{name: "quoted true counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: \"true\"\n", wantErr: `counter: must be true or false`},
+		// A written null is a typo, not an absent key: the shared rule
+		// with reason_prefix rejects it naming the key.
+		{name: "null counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: null\n", wantErr: `counter: must be true or false`},
+		{name: "empty counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter:\n", wantErr: `counter: must be true or false`},
 
 		// Enrichment block.
 		{name: "enrichment filter accepted", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
