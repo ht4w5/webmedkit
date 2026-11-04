@@ -62,6 +62,9 @@ gauges are bare.
 | `bandage_tracker_cache_entry_cap` | gauge | Configured tracker cache entry capacity. |
 | `bandage_rule_events_total` | counter | Events evaluated against the rule since daemon start. |
 | `bandage_rule_events_matched_total` | counter | Events that matched the rule since daemon start. |
+| `bandage_enrichment_runs_total` | counter | Enrichment runs for the rule and enrichment since daemon start. |
+| `bandage_enrichment_runs_observed_total` | counter | Enrichment runs that fed the enrichment's learned state since daemon start. |
+| `bandage_enrichment_runs_enriched_total` | counter | Enrichment runs that produced a non-default derived value since daemon start. |
 | `go_info` | gauge | Information about the Go environment. |
 | `go_goroutines` | gauge | Number of goroutines that currently exist. |
 | `go_threads` | gauge | Number of OS threads created. |
@@ -70,7 +73,7 @@ gauges are bare.
 | `go_memstats_sys_bytes` | gauge | Number of bytes obtained from system. |
 | `go_memstats_gc_cpu_fraction` | gauge | The fraction of this program's available CPU time used by the GC since the program started. |
 
-Three families carry labels. `bandage_build_info` carries the build
+Seven families carry labels. `bandage_build_info` carries the build
 identity as labels - `name`, `version`, `commit`, `build_date`,
 `dirty`, `go_version`, `platform` - so panels can join version, commit
 and platform into every series and incidents can be bisected by build;
@@ -78,17 +81,40 @@ its value is always `1`. `go_info` carries one label, `version`. The
 two rule counter families each carry one label, `rule`, holding the
 rule ID: `bandage_rule_events_total` counts the events evaluated
 against the rule since daemon start, `bandage_rule_events_matched_total`
-the subset that matched it. Cardinality is fixed per configuration: no
+the subset that matched it. The three enrichment counter families
+each carry two labels, `rule` and `enrichment`, holding the (rule,
+enrichment) pair: `bandage_enrichment_runs_total` counts the pair's
+enrichment runs since daemon start,
+`bandage_enrichment_runs_observed_total` the subset that fed the
+enrichment's learned state,
+`bandage_enrichment_runs_enriched_total` the subset that produced a
+non-default derived value. Cardinality is fixed per configuration: no
 family's series count is ever a function of traffic - the rule families'
-series count is the number of counters enabled in the rules file, and
-every enabled rule emits its series from daemon start with zeros, so
-`rate()` and `increase()` work before the first match.
+series count is the number of counters enabled in the rules file, the
+enrichment families' the number of counter-enabled (rule, enrichment)
+pairs, and every enabled rule and pair emits its series from daemon
+start with zeros, so `rate()` and `increase()` work before the first
+match.
+
+The enrichment families carry the **Enrichment counter**
+([GLOSSARY.md](../GLOSSARY.md)) per (rule, enrichment) pair; its three
+quantities are fixed for every kind, meanings defined per kind. The
+Filesize enrichment's `observed` counts the runs that fed the estimate
+- its Sampling-rule-eligible responses ([GLOSSARY.md](../GLOSSARY.md))
+- and its `enriched` the runs that produced a non-default derived
+value. A kind without learned state reports `observed` equal to
+`total`, never an omitted quantity.
 
 The `bandage_` families mirror their **Stats** counterparts field
 for field - a dropped line is the same event on both surfaces. For the
 rule families the mirror is fields and values, not ordering: their
 series render in rule-ID order while the **Stats** rules block lists
-rules-file order. The
+rules-file order. For the enrichment families the mirror is fields,
+values and ordering: their series render in rules-file order of pairs,
+exactly as the **Stats** enrichment block lists them. The asymmetry
+between the two counter family groups is deliberate and pinned - rule
+series in rule-ID order, enrichment series in rules-file order of
+pairs - so both orderings are contract a scraper may rely on. The
 `go_` families are a curated subset of Go runtime state under the
 conventional `go_` names, so generic Go dashboards work unchanged; the
 full memstats surface is deliberately not exposed.
@@ -229,6 +255,18 @@ bandage_rule_events_total{rule="zeta"} 12
 # TYPE bandage_rule_events_matched_total counter
 bandage_rule_events_matched_total{rule="alpha"} 0
 bandage_rule_events_matched_total{rule="zeta"} 3
+# HELP bandage_enrichment_runs_total Enrichment runs for the rule and enrichment since daemon start.
+# TYPE bandage_enrichment_runs_total counter
+bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
+bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
+# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the enrichment's learned state since daemon start.
+# TYPE bandage_enrichment_runs_observed_total counter
+bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
+bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0
+# HELP bandage_enrichment_runs_enriched_total Enrichment runs that produced a non-default derived value since daemon start.
+# TYPE bandage_enrichment_runs_enriched_total counter
+bandage_enrichment_runs_enriched_total{rule="zeta",enrichment="filesize"} 2
+bandage_enrichment_runs_enriched_total{rule="alpha",enrichment="filesize"} 0
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1
