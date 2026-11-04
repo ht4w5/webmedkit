@@ -351,6 +351,34 @@ func TestStatsSearchNarrowsRuleCountersRows(t *testing.T) {
 	}
 }
 
+// The rule counters table renders through one shared counter-table
+// mechanism - a single renderer plus one config per table - instead of
+// a rule-specific one: the config supplies the table's row builder,
+// its search fields and its explicit empty-state copy, the message-row
+// span derives from the served header row through the config, and the
+// counter blocks dispatch through the counter-table registry beside
+// the group map. This is the machinery a second counter table adopts
+// instead of duplicating it (its companion pins forbid hard-coded key
+// and slot checks at the dispatch).
+func TestRuleCountersTableRendersThroughTheSharedCounterTableMechanism(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`renderCounterTable(RULE_COUNTERS_TABLE`, // the rule counters table adopts the one renderer
+		`COUNTER_TABLES`,                         // counter blocks dispatch through the counter-table registry
+		`table.columns()`,                        // the message-row span derives through the table's shape
+		`table.empty`,                            // the explicit empty state comes from the table's config
+		`table.narrow(`,                          // search narrowing goes through the table's own fields
+		`table.row(`,                             // rows build through the table's own row builder
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the shared counter-table mechanism's %s; the rule counters table must render through one mechanism a second counter table can adopt, body:\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, "slot === RULE_COUNTERS_SLOT") {
+		t.Errorf("common.js hard-codes the counter dispatch on the rule counters slot; counter blocks must dispatch through the counter-table registry, body:\n%s", js)
+	}
+}
+
 // The right-aligned header legend on the Stats view shows the build
 // identity and uptime, so the running binary's identity is on screen
 // at a glance (the identity table carries the full snapshot).
