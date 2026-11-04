@@ -49,6 +49,11 @@ chains:
               rate: 200
 `
 
+// wantEnrichmentMigrationErr is the pinned migration-error substring: any
+// presence of the old top-level enrichment block fails load naming the
+// enrich actions that replaced it.
+const wantEnrichmentMigrationErr = "rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)"
+
 func TestParseRulesValid(t *testing.T) {
 	doc, err := ParseRules([]byte(validRules))
 	if err != nil {
@@ -419,11 +424,13 @@ chains:
 		{name: "null counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: null\n", wantErr: `counter: must be true or false`},
 		{name: "empty counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter:\n", wantErr: `counter: must be true or false`},
 
-		// Enrichment block.
-		{name: "enrichment filter accepted", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
-		{name: "empty enrichment block defaults to any", yaml: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
-		{name: "invalid enrichment filter", yaml: "version: 0\nenrichment:\n  filter: bogus\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: "enrichment.filter"},
-		{name: "unknown key in enrichment block", yaml: "version: 0\nenrichment:\n  filter: any\n  observe: sent\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: `enrichment: unknown key "observe"`},
+		// The old top-level enrichment block is gone: any presence - even
+		// empty or null - fails load with the migration error naming the
+		// enrich actions that replaced it (ADR 0028).
+		{name: "enrichment block fails load naming the migration", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "empty enrichment block fails load naming the migration", yaml: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "null enrichment block fails load naming the migration", yaml: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "empty enrichment key fails load naming the migration", yaml: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
 
 		// Filter.
 		{name: "omitted filter defaults to any", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
@@ -499,6 +506,19 @@ chains:
 		{name: "log non-string rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: [debug, x]}]\n", wantErr: "level,message"},
 		{name: "log wrong arg count rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: debug}]\n", wantErr: "level,message"},
 		{name: "log bad level rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"verbose,x\"}]\n", wantErr: "level"},
+
+		// The enrich action: one enrichment kind by type, no per-action
+		// configuration (ADR 0028).
+		{name: "enrich accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize}}]\n"},
+		{name: "enrich accepted in rung actions", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1}\n        escalations:\n          - at: 5\n            actions: [{enrich: {type: filesize}}]\n          - at: 10\n            actions: [{enrich: {type: filesize}}, stop]\n"},
+		{name: "enrich without options rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [enrich]\n", wantErr: "enrich"},
+		{name: "enrich without type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {}}]\n", wantErr: `action enrich: type: required`},
+		{name: "enrich null type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: null}}]\n", wantErr: `action enrich: type: required`},
+		{name: "enrich unknown type names the type", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
+		{name: "enrich unknown key names the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, enabled: true}}]\n", wantErr: `action enrich: unknown key "enabled"`},
+		// The counter key is not part of the format yet - the Enrichment
+		// counters add it later; today it is an unknown key like any other.
+		{name: "enrich counter key is still unknown", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n", wantErr: `action enrich: unknown key "counter"`},
 
 		// The goto/jump chain graph: a chain named main (the entry
 		// chain), no dispatch targeting main, unique chain names,
@@ -1787,39 +1807,6 @@ chains:
 	}
 }
 
-// TestParseRulesEnrichmentDefaults: the enrichment block is optional and
-// its filter defaults to any - observable as a gate that matches everything.
-func TestParseRulesEnrichmentDefaults(t *testing.T) {
-	doc, err := ParseRules([]byte(validRules))
-	if err != nil {
-		t.Fatalf("ParseRules error: %v", err)
-	}
-	if !doc.Enrichment.Filter.Match(&domain.Event{Path: "/x", Method: "GET", Status: 200}) {
-		t.Error("default enrichment.filter rejects an event, want any to match everything")
-	}
-}
-
-// TestParseRulesEnrichmentFilterScopes: enrichment.filter compiles with
-// the rule filter language and scopes events exactly like a rule filter.
-func TestParseRulesEnrichmentFilterScopes(t *testing.T) {
-	doc, err := ParseRules([]byte(`version: 0
-enrichment:
-  filter: path prefix "/files/"
-chains:
-  - name: main
-    rules:
-      - id: r
-`))
-	if err != nil {
-		t.Fatalf("ParseRules error: %v", err)
-	}
-	for path, want := range map[string]bool{"/files/a.iso": true, "/other": false} {
-		if got := doc.Enrichment.Filter.Match(&domain.Event{Path: path, Method: "GET", Status: 200}); got != want {
-			t.Errorf("enrichment.filter.Match(%q) = %v, want %v", path, got, want)
-		}
-	}
-}
-
 // TestPrintsFilterSource: the --test plan prints each rule's effective
 // filter source expression ("any" where the rule omits it).
 func TestPrintsFilterSource(t *testing.T) {
@@ -1856,38 +1843,49 @@ chains:
 	}
 }
 
-// TestPrintsEnrichmentFilterSource: the plan prints the enrichment
-// block's effective filter source ("any" where the block omits it).
-func TestPrintsEnrichmentFilterSource(t *testing.T) {
-	tests := []struct {
-		name   string
-		enrich string
-		want   string
-	}{
-		{"default any", "", "enrichment.filter: any"},
-		{"the block's expression", "enrichment:\n  filter: 'path prefix \"/files/\"'\n", `enrichment.filter: path prefix "/files/"`},
+// TestShowsEnrichActionInPlan: the plan shows each enrich action in its
+// rule's action list - type always, counter=true when the counter is
+// enabled - and prints no enrichment filter line (the gate is gone with
+// the pre-evaluation enrichment path, ADR 0028).
+func TestShowsEnrichActionInPlan(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bandage.yml")
+	rulesPath := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			cfgPath := filepath.Join(dir, "bandage.yml")
-			rulesPath := filepath.Join(dir, "rules.yml")
-			if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			yaml := "version: 0\n" + tt.enrich + "chains:\n  - name: main\n    rules:\n      - id: r\n"
-			if err := os.WriteFile(rulesPath, []byte(yaml), 0o600); err != nil {
-				t.Fatal(err)
-			}
+	if err := os.WriteFile(rulesPath, []byte(`version: 0
+chains:
+  - name: main
+    rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
+      - id: iso-ladder
+        tracker: {track: bandwidth, leak: 1MB}
+        escalations:
+          - at: 50MB
+            actions: [{enrich: {type: filesize}}]
+          - at: 5GB
+            actions: [stop]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-			plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
-			if err != nil {
-				t.Fatalf("Test error: %v", err)
-			}
-			if !strings.Contains(plan, tt.want) {
-				t.Errorf("plan does not contain %q:\n%s", tt.want, plan)
-			}
-		})
+	plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
+	if err != nil {
+		t.Fatalf("Test error: %v", err)
+	}
+	for _, want := range []string{
+		"rule enrich-size",
+		"action enrich type=filesize",
+		"rung at=50000000 enrich type=filesize",
+	} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan does not contain %q:\n%s", want, plan)
+		}
+	}
+	if strings.Contains(plan, "enrichment.filter") {
+		t.Errorf("plan still prints an enrichment filter line:\n%s", plan)
 	}
 }
 

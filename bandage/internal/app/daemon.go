@@ -16,7 +16,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/enrichment"
 	"github.com/HT4w5/webmedkit/bandage/internal/domain/evaluation"
 	"github.com/HT4w5/webmedkit/bandage/internal/domain/report"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/cache/memory"
@@ -83,8 +82,8 @@ func withStore(s reportStore) Option {
 	return func(o *options) { o.store = s }
 }
 
-// Daemon is the assembled analyzer: syslog ingest -> parse -> enrich ->
-// evaluate -> report -> sqlite, served over HTTP.
+// Daemon is the assembled analyzer: syslog ingest -> parse -> evaluate
+// -> report -> sqlite, served over HTTP.
 type Daemon struct {
 	cfg     Config
 	chains  []domain.Chain
@@ -92,7 +91,6 @@ type Daemon struct {
 	now     func() time.Time
 	logger  zerolog.Logger
 	parser  EventParser
-	enrich  *enrichment.Enricher
 	workers int
 
 	// repo is the raw report store, kept for Close; report mutations go
@@ -160,13 +158,10 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
 	reports := report.NewService(repo)
 	ruleCounters := newRuleCounters(rules.Chains)
-	filesize, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod, filesizeMinSamples)
-	if err != nil {
-		return nil, err
-	}
-	// The enrichment path owns the Filter gate and the single
-	// derived-field reset (ADR 0019, GLOSSARY: Filter).
-	enricher, err := enrichment.NewEnricher(rules.Enrichment.Filter, filesize)
+	// The enrichment kinds are global and static - one instance per
+	// kind, shared by every enrich action naming it (ADR 0028); the
+	// evaluator invokes them by kind name through the seam.
+	enrichments, err := newEnrichments(cache)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +173,6 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 		now:     o.now,
 		logger:  o.logger,
 		parser:  nginxparser.New(),
-		enrich:  enricher,
 		workers: cfg.Pipeline.Workers,
 		repo:    repo,
 		reports: reports,
@@ -189,8 +183,12 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 			Cache:        cache,
 			Reports:      reports,
 			Counters:     ruleCounters,
-			Now:          o.now,
-			Logger:       domainLogger{o.logger},
+			Enrichments:  enrichments,
+			// The Enrichment-counter registry lands with the counters;
+			// the evaluator's counting points already run per enrichment.
+			EnrichmentCounters: evaluation.NopEnrichmentCounters{},
+			Now:                o.now,
+			Logger:             domainLogger{o.logger},
 		}),
 		ruleCounters: ruleCounters,
 		lines:        make(chan string),
@@ -248,8 +246,8 @@ func (d *Daemon) Start(lifetime context.Context) error {
 	return nil
 }
 
-// runPipeline parses, enriches and evaluates raw lines; bad lines are
-// dropped and counted.
+// runPipeline parses and evaluates raw lines; bad lines are dropped
+// and counted.
 func (d *Daemon) runPipeline() {
 	defer d.wg.Done()
 	for line := range d.lines {
@@ -262,9 +260,6 @@ func (d *Daemon) runPipeline() {
 			continue
 		}
 		d.parsed.Add(1)
-		if err := d.enrich.Enrich(d.ctx, &ev); err != nil {
-			d.logger.Error().Err(err).Msg("enrich event")
-		}
 		if err := d.eval.Evaluate(d.ctx, &ev); err != nil {
 			d.logger.Error().Err(err).Msg("evaluate event")
 		}

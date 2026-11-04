@@ -558,6 +558,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: sustained-egress
         tracker:
           track: bandwidth
@@ -1004,7 +1006,8 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	}
 
 	// The tracker cache block: each parsed event updated the shared store
-	// twice (file-size record + tracker bucket), and both records stay live.
+	// twice (the enrich action's file-size record + the tracker bucket),
+	// and both records stay live.
 	for _, f := range []struct {
 		field string
 		want  float64
@@ -1029,7 +1032,8 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
-	// Nothing resets tracker state, so the filesize record and the tracker bucket both keep cache_size at 2.
+	// Nothing resets tracker state, so the enrich action's file-size record
+	// and the tracker bucket both keep cache_size at 2.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
@@ -1080,12 +1084,14 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
-	// max_entries 1: the file-size record and the tracker bucket share
-	// one slot, so inserting the bucket evicts the record.
+	// max_entries 1: the enrich action's file-size record and the tracker
+	// bucket share one slot, so inserting the bucket evicts the record.
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
@@ -1330,6 +1336,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:BURSTY"}]
@@ -1409,6 +1417,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
@@ -2548,6 +2558,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2592,6 +2604,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker:
           track: replay
@@ -2633,6 +2647,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2703,6 +2719,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2745,6 +2763,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker:
           track: replay

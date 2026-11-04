@@ -129,7 +129,7 @@ func TestBenchChainsMatchTheirNames(t *testing.T) {
 			sink := &benchSink{}
 			svc := NewService(Deps{
 				ReasonPrefix: "bandage", Chains: benchChains(tt.triggerEvery), Cache: newBenchCache(),
-				Reports: sink, Counters: NopCounters{}, Now: benchNow, Logger: NopLogger{},
+				Reports: sink, Counters: NopCounters{}, Enrichments: NopEnrichments{}, EnrichmentCounters: NopEnrichmentCounters{}, Now: benchNow, Logger: NopLogger{},
 			})
 			for i := 0; i < passes*len(events); i++ {
 				ev := benchEvent(events, i)
@@ -153,7 +153,7 @@ func BenchmarkEvaluate(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			svc := NewService(Deps{
 				ReasonPrefix: "bandage", Chains: benchChains(tc.triggerEvery), Cache: newBenchCache(),
-				Reports: &benchSink{}, Counters: NopCounters{}, Now: benchNow, Logger: NopLogger{},
+				Reports: &benchSink{}, Counters: NopCounters{}, Enrichments: NopEnrichments{}, EnrichmentCounters: NopEnrichmentCounters{}, Now: benchNow, Logger: NopLogger{},
 			})
 			events := benchEvents(1024)
 			ctx := context.Background()

@@ -29,8 +29,9 @@ type rawRules struct {
 	// ReasonPrefix is the optional report-namespace prefix; its node is
 	// validated in buildReasonPrefix.
 	ReasonPrefix yaml.Node `yaml:"reason_prefix"`
-	// Enrichment is the enrichment settings block; its keys are
-	// validated in buildEnrichment.
+	// Enrichment is the removed top-level enrichment block: its mere
+	// presence is a load error naming the migration to enrich actions
+	// (ADR 0028); the node is kept only to detect that presence.
 	Enrichment yaml.Node  `yaml:"enrichment"`
 	Chains     []rawChain `yaml:"chains"`
 }
@@ -83,15 +84,14 @@ type rawReportAction struct {
 	Rate    yaml.Node `yaml:"rate"`
 }
 
-// Rules is a validated rules document: its chains, the optional reason
-// prefix and the enrichment settings block.
+// Rules is a validated rules document: its chains and the optional
+// reason prefix.
 type Rules struct {
 	Chains []domain.Chain
 	// ReasonPrefix is the configured report-namespace prefix; empty
 	// means the key is absent and the program-name fallback applies at
 	// daemon assembly and in the plan printer (ADR 0026).
 	ReasonPrefix string
-	Enrichment   Enrichment
 }
 
 // effectiveReasonPrefix is the prefix report reasons namespace under:
@@ -101,13 +101,6 @@ func (r Rules) effectiveReasonPrefix(progName string) string {
 		return r.ReasonPrefix
 	}
 	return progName
-}
-
-// Enrichment is the rules file's enrichment block: the Filter
-// (enrichment.filter) gating the enrichment path wholly (GLOSSARY: Filter).
-type Enrichment struct {
-	Filter       domain.Matcher
-	FilterSource string
 }
 
 // LoadRules reads and validates the rules file at path.
@@ -124,8 +117,8 @@ func LoadRules(path string) (Rules, error) {
 }
 
 // ParseRules strictly decodes and validates a format-version-0 rules
-// document: its chains and the enrichment block. Errors name the rule
-// or key they belong to.
+// document: its chains and their actions. Errors name the rule or key
+// they belong to.
 func ParseRules(data []byte) (Rules, error) {
 	var raw rawRules
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -153,8 +146,7 @@ func ParseRules(data []byte) (Rules, error) {
 	if err != nil {
 		return Rules{}, err
 	}
-	enrich, err := buildEnrichment(&raw.Enrichment)
-	if err != nil {
+	if err := rejectRemovedEnrichmentBlock(&raw.Enrichment); err != nil {
 		return Rules{}, err
 	}
 	if len(raw.Chains) == 0 {
@@ -173,7 +165,7 @@ func ParseRules(data []byte) (Rules, error) {
 	if err := validateChainGraph(chains); err != nil {
 		return Rules{}, err
 	}
-	return Rules{Chains: chains, ReasonPrefix: prefix, Enrichment: enrich}, nil
+	return Rules{Chains: chains, ReasonPrefix: prefix}, nil
 }
 
 // keyWritten reports whether the key was written at all. One shared
@@ -203,32 +195,16 @@ func buildReasonPrefix(node *yaml.Node) (string, error) {
 	return node.Value, nil
 }
 
-// buildEnrichment compiles the enrichment block: its filter defaults to
-// any like rules; the block is the future home for enrichment settings.
-func buildEnrichment(node *yaml.Node) (Enrichment, error) {
-	src := "any"
-	if node != nil && node.Kind != 0 && node.Tag != "!!null" {
-		if node.Kind != yaml.MappingNode {
-			return Enrichment{}, errors.New("rules: enrichment: must be a block")
-		}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key, val := node.Content[i], node.Content[i+1]
-			if key.Value != "filter" {
-				return Enrichment{}, fmt.Errorf("rules: enrichment: unknown key %q", key.Value)
-			}
-			if val.Kind != yaml.ScalarNode {
-				return Enrichment{}, errors.New("rules: enrichment.filter: must be an expression")
-			}
-			if val.Value != "" {
-				src = val.Value
-			}
-		}
+// rejectRemovedEnrichmentBlock fails load on any presence of the old
+// top-level enrichment block - an empty or null block included - with
+// the pointed error naming the migration to enrich actions (ADR 0028):
+// the block and its filter are gone wholly, with no replacement
+// predicate.
+func rejectRemovedEnrichmentBlock(node *yaml.Node) error {
+	if !keyWritten(node) {
+		return nil
 	}
-	matcher, err := filter.Parse(src)
-	if err != nil {
-		return Enrichment{}, fmt.Errorf("rules: enrichment.filter: %w", err)
-	}
-	return Enrichment{Filter: matcher, FilterSource: src}, nil
+	return errors.New("rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)")
 }
 
 func buildChain(raw *rawChain, seen map[string]bool) (domain.Chain, error) {
@@ -660,6 +636,7 @@ func volumeSize(id, key string, node *yaml.Node) (float64, error) {
 var actionForms = map[string]func(id, name string, val *yaml.Node) (domain.Action, error){
 	"report": parseReportAction,
 	"log":    parseLogAction,
+	"enrich": parseEnrichAction,
 	"goto":   parseChainAction,
 	"jump":   parseChainAction,
 	"stop":   parseStopAction,
@@ -701,6 +678,41 @@ func parseStopAction(id, name string, val *yaml.Node) (domain.Action, error) {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action stop takes no options", id)
 	}
 	return domain.Action{Stop: true}, nil
+}
+
+// rawEnrichAction is the enrich action's block; type is the only key
+// (no per-action enrichment configuration, ADR 0028).
+type rawEnrichAction struct {
+	Type string `yaml:"type"`
+}
+
+// parseEnrichAction parses `- enrich: {type}`: one enrichment kind by
+// name, run where the rule matches (ADR 0028). The strict key set is
+// deliberately tiny: unknown keys fail load naming them, and the
+// Enrichment counter's counter key joins this validation when the
+// counters land (today it is an unknown key like any other).
+func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
+	if val == nil {
+		return domain.Action{}, wantsOptions(id, name)
+	}
+	for i := 0; i < len(val.Content); i += 2 {
+		switch key := val.Content[i].Value; key {
+		case "type":
+		default:
+			return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: unknown key %q", id, key)
+		}
+	}
+	var raw rawEnrichAction
+	if err := val.Decode(&raw); err != nil {
+		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: %w", id, err)
+	}
+	if raw.Type == "" {
+		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: type: required %s", id, enrichmentTypeWant)
+	}
+	if !knownEnrichmentType(raw.Type) {
+		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: type: unknown enrichment type %q %s", id, raw.Type, enrichmentTypeWant)
+	}
+	return domain.Action{Enrich: &domain.EnrichAction{Type: raw.Type}}, nil
 }
 
 // parseReportAction parses `- report: {reason, ttl, penalty, rate}`.

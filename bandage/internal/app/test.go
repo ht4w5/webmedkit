@@ -34,7 +34,6 @@ func planText(cfg Config, rules Rules, build identity.Build) string {
 	fmt.Fprintf(&b, "config: api %s\n", cfg.API.Listen)
 	fmt.Fprintf(&b, "config: cache max_entries %d\n", cfg.Cache.MaxEntries)
 	fmt.Fprintf(&b, "reason prefix: %s\n", prefix)
-	fmt.Fprintf(&b, "enrichment.filter: %s\n", rules.Enrichment.FilterSource)
 	for _, chain := range rules.Chains {
 		fmt.Fprintf(&b, "chain %s\n", chain.Name)
 		for _, rule := range chain.Rules {
@@ -98,6 +97,16 @@ func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
 
 func (d actionDescriber) VisitLog(a *domain.LogAction) error {
 	fmt.Fprintf(d.b, "log level=%s message=%q", a.Level, a.Message)
+	return nil
+}
+
+func (d actionDescriber) VisitEnrich(a *domain.EnrichAction) error {
+	fmt.Fprintf(d.b, "enrich type=%s", a.Type)
+	if a.Counter {
+		// The plan shows counter=true when the (rule, enrichment) pair's
+		// Enrichment counter is enabled (GLOSSARY: Enrichment counter).
+		fmt.Fprint(d.b, " counter=true")
+	}
 	return nil
 }
 
