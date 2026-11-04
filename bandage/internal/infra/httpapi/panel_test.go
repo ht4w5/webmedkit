@@ -379,6 +379,106 @@ func TestRuleCountersTableRendersThroughTheSharedCounterTableMechanism(t *testin
 	}
 }
 
+// The Stats page gains an enrichment counters section after the rule
+// counters table: a five-column rule/enrichment/total/observed/enriched
+// table in the established table styling, fed by the /api/stats
+// enrichment block (GLOSSARY: Enrichment counter).
+func TestStatsPageShowsEnrichmentCountersTableAfterRuleCounters(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	for _, want := range []string{
+		`<h2 class="group-title">enrichment counters</h2>`,
+		`id="group-enrichment-counters"`,
+		`<th>rule</th>`, `<th>enrichment</th>`, `<th>total</th>`, `<th>observed</th>`, `<th>enriched</th>`,
+		`class="kv-table"`, // the enrichment counters table carries the stats table's skin
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /stats body lacks the enrichment counters table slot %s, body:\n%s", want, page)
+		}
+	}
+	if strings.Index(page, `id="group-rule-counters"`) > strings.Index(page, `id="group-enrichment-counters"`) {
+		t.Errorf("GET /stats body places the enrichment counters table before the rule counters table, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`group-enrichment-counters`,              // the enrichment block's own row slot
+		`ENRICHMENT_COUNTERS_KEY = "enrichment"`, // fed by the /api/stats enrichment block
+		`enrichment-counter-row`,                 // its own row builder
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not render the enrichment block into the enrichment counters table via %s, body:\n%s", want, js)
+		}
+	}
+}
+
+// The enrichment block dispatches through STATS_GROUPS and the
+// counter-table registry like every other block - its map entry names
+// the counters table's slot and drives the dispatch, never a hard-coded
+// key check - and the table renders through the one shared counter-table
+// mechanism a counter table adopts instead of duplicating the machinery.
+func TestStatsEnrichmentBlockDispatchesThroughTheSharedCounterTableMechanism(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`ENRICHMENT_COUNTERS_KEY = "enrichment"`,              // the snapshot block the map names
+		`[ENRICHMENT_COUNTERS_KEY, ENRICHMENT_COUNTERS_SLOT]`, // its map entry drives the dispatch
+		`shape exception`, // the exception is documented at the map
+		`renderCounterTable(ENRICHMENT_COUNTERS_TABLE`, // the enrichment counters table adopts the one renderer
+		`table.columns()`, // the message-row span derives through the table's shape
+		`table.empty`,     // the explicit empty state comes from the table's config
+		`table.narrow(`,   // search narrowing goes through the table's own fields
+		`table.row(`,      // rows build through the table's own row builder
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js lacks the enrichment counters' shared-mechanism route %q; the block must dispatch through STATS_GROUPS and render through the counter-table registry, body:\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, "key === ENRICHMENT_COUNTERS_KEY") {
+		t.Errorf("common.js bypasses the STATS_GROUPS dispatch with a hard-coded enrichment key check, body:\n%s", js)
+	}
+}
+
+// The enrichment counters table's shape has one source: the served
+// header row. The JS derives its full-width message rows' span from
+// that header and the page carries no hard-coded span of its own, so
+// the markup and the JS cannot drift.
+func TestEnrichmentCountersTableShapeIsSingleSourced(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/stats").Body.String()
+	if strings.Contains(page, `colspan="5"`) {
+		t.Errorf("GET /stats body hard-codes the enrichment counters span beside its five header cells; the header must be the table's one shape source, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	const derive = `document.getElementById(ENRICHMENT_COUNTERS_SLOT).closest("table").querySelectorAll("thead th").length`
+	if !strings.Contains(js, derive) {
+		t.Errorf("common.js does not derive the enrichment counters message-row span from the table's header row via %s, body:\n%s", derive, js)
+	}
+}
+
+// When no pair enables a counter the enrichment counters table shows
+// the explicit empty state - "No enrichment counters configured." -
+// so silence is never mistaken for a broken panel.
+func TestStatsEnrichmentCountersShowExplicitEmptyState(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	if !strings.Contains(js, "No enrichment counters configured.") {
+		t.Errorf("common.js lacks the enrichment counters' explicit empty state copy; a table with nothing configured must say so, body:\n%s", js)
+	}
+}
+
+// The shared search box narrows the enrichment counter rows like every
+// other row: the same unanchored, case-insensitive regex, over rule,
+// enrichment, total, observed and enriched.
+func TestStatsSearchNarrowsEnrichmentCountersRows(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		`renderEnrichmentCounters(fetchedEnrichmentCounters`, // the search re-renders the enrichment counters table
+		`match.test(counter.rule + "\n" + counter.enrichment + "\n" + counter.total + "\n" + counter.observed + "\n" + counter.enriched)`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not narrow the enrichment counter rows by the shared search box via %s, body:\n%s", want, js)
+		}
+	}
+}
+
 // The right-aligned header legend on the Stats view shows the build
 // identity and uptime, so the running binary's identity is on screen
 // at a glance (the identity table carries the full snapshot).

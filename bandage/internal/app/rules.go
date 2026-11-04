@@ -680,24 +680,25 @@ func parseStopAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	return domain.Action{Stop: true}, nil
 }
 
-// rawEnrichAction is the enrich action's block; type is the only key
-// (no per-action enrichment configuration, ADR 0028).
+// rawEnrichAction is the enrich action's block; type is the only
+// required key (no per-action enrichment configuration, ADR 0028),
+// counter the optional Enrichment counter opt-in.
 type rawEnrichAction struct {
-	Type string `yaml:"type"`
+	Type    string    `yaml:"type"`
+	Counter yaml.Node `yaml:"counter"`
 }
 
-// parseEnrichAction parses `- enrich: {type}`: one enrichment kind by
-// name, run where the rule matches (ADR 0028). The strict key set is
-// deliberately tiny: unknown keys fail load naming them, and the
-// Enrichment counter's counter key joins this validation when the
-// counters land (today it is an unknown key like any other).
+// parseEnrichAction parses `- enrich: {type, counter}`: one enrichment
+// kind by name, run where the rule matches (ADR 0028), and the pair's
+// Enrichment counter opt-in (GLOSSARY: Enrichment counter). The strict
+// key set is deliberately tiny: unknown keys fail load naming them.
 func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)
 	}
 	for i := 0; i < len(val.Content); i += 2 {
 		switch key := val.Content[i].Value; key {
-		case "type":
+		case "type", "counter":
 		default:
 			return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: unknown key %q", id, key)
 		}
@@ -712,7 +713,28 @@ func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if !knownEnrichmentType(raw.Type) {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: type: unknown enrichment type %q %s", id, raw.Type, enrichmentTypeWant)
 	}
-	return domain.Action{Enrich: &domain.EnrichAction{Type: raw.Type}}, nil
+	counter, err := parseEnrichCounter(id, &raw.Counter)
+	if err != nil {
+		return domain.Action{}, err
+	}
+	return domain.Action{Enrich: &domain.EnrichAction{Type: raw.Type, Counter: counter}}, nil
+}
+
+// parseEnrichCounter parses the enrich action's optional counter flag:
+// true enables the (rule, enrichment) pair's Enrichment counter
+// (GLOSSARY: Enrichment counter). The shared written-key rule applies:
+// an absent key means the default false, a written key must carry a
+// boolean - a written null is a typo and fails load like any other
+// invalid value, naming the key.
+func parseEnrichCounter(id string, node *yaml.Node) (bool, error) {
+	if !keyWritten(node) {
+		return false, nil
+	}
+	var on bool
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" || node.Decode(&on) != nil {
+		return false, fmt.Errorf("rules: rule %q: action enrich: counter: must be true or false", id)
+	}
+	return on, nil
 }
 
 // parseReportAction parses `- report: {reason, ttl, penalty, rate}`.

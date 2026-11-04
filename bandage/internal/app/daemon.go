@@ -102,9 +102,13 @@ type Daemon struct {
 	// ruleCounters is the Rule counter registry the evaluator counts
 	// into and Stats exposes (GLOSSARY: Rule counter).
 	ruleCounters *ruleCounters
-	src          *syslog.Source
-	apiSrv       *http.Server
-	apiLn        net.Listener
+	// enrichmentCounters is the Enrichment counter registry the
+	// evaluator counts into and Stats exposes (GLOSSARY: Enrichment
+	// counter).
+	enrichmentCounters *enrichmentCounters
+	src                *syslog.Source
+	apiSrv             *http.Server
+	apiLn              net.Listener
 
 	// ctx/cancel is the daemon-lifetime context threaded through the
 	// pipeline and sweeper; cancel is the bounded-shutdown backstop.
@@ -158,6 +162,10 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
 	reports := report.NewService(repo)
 	ruleCounters := newRuleCounters(rules.Chains)
+	// The Enrichment counter registry counts the counter-enabled
+	// (rule, enrichment) pairs the evaluator's counting points run
+	// (GLOSSARY: Enrichment counter).
+	enrichmentCounters := newEnrichmentCounters(rules.Chains)
 	// The enrichment kinds are global and static - one instance per
 	// kind, shared by every enrich action naming it (ADR 0028); the
 	// evaluator invokes them by kind name through the seam.
@@ -184,16 +192,16 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 			Reports:      reports,
 			Counters:     ruleCounters,
 			Enrichments:  enrichments,
-			// The Enrichment-counter registry lands with the counters;
-			// the evaluator's counting points already run per enrichment.
-			EnrichmentCounters: evaluation.NopEnrichmentCounters{},
+			// The Enrichment-counter registry the evaluator counts into.
+			EnrichmentCounters: enrichmentCounters,
 			Now:                o.now,
 			Logger:             domainLogger{o.logger},
 		}),
-		ruleCounters: ruleCounters,
-		lines:        make(chan string),
-		processed:    newProgress(),
-		stopSweep:    make(chan struct{}),
+		ruleCounters:       ruleCounters,
+		enrichmentCounters: enrichmentCounters,
+		lines:              make(chan string),
+		processed:          newProgress(),
+		stopSweep:          make(chan struct{}),
 	}
 	d.apiSrv = &http.Server{Handler: httpapi.New(reports, d, goRuntime{}, o.now)}
 	return d, nil
@@ -374,8 +382,8 @@ func (d *Daemon) counters() counters {
 }
 
 // Stats assembles the /api/stats snapshot (httpapi.StatsSource): build
-// identity, pipeline counters, tracker cache counters and the rule
-// counters since start.
+// identity, pipeline counters, tracker cache counters and the rule and
+// enrichment counters since start.
 func (d *Daemon) Stats() httpapi.Stats {
 	c := d.counters()
 	cs := d.cache.Statistics()
@@ -404,7 +412,8 @@ func (d *Daemon) Stats() httpapi.Stats {
 			Size:      cs.Size,
 			EntryCap:  cs.EntryCap,
 		},
-		Rules: d.ruleCounters.snapshot(),
+		Rules:      d.ruleCounters.snapshot(),
+		Enrichment: d.enrichmentCounters.snapshot(),
 	}
 }
 

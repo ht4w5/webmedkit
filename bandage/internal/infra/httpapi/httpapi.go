@@ -33,6 +33,10 @@ type Stats struct {
 	// Rules is the rules block: the counter-enabled rules' Rule
 	// counters in rules-file order (GLOSSARY: Rule counter).
 	Rules []RuleCounter
+	// Enrichment is the enrichment block: the counter-enabled (rule,
+	// enrichment) pairs' Enrichment counters in rules-file order of
+	// pairs (GLOSSARY: Enrichment counter).
+	Enrichment []EnrichmentCounter
 }
 
 // Build is the /api/stats build block: the identity of the running binary.
@@ -70,6 +74,17 @@ type RuleCounter struct {
 	ID      string `json:"id"`
 	Total   int64  `json:"total"`
 	Matched int64  `json:"matched"`
+}
+
+// EnrichmentCounter is one (rule, enrichment) pair's entry in the
+// /api/stats enrichment block: the pair and its cumulative run counts
+// (GLOSSARY: Enrichment counter).
+type EnrichmentCounter struct {
+	Rule       string `json:"rule"`
+	Enrichment string `json:"enrichment"`
+	Total      int64  `json:"total"`
+	Observed   int64  `json:"observed"`
+	Enriched   int64  `json:"enriched"`
 }
 
 // StatsSource is the narrow stats port beside its consumer: one snapshot in.
@@ -187,12 +202,13 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 // statsDocument is the rendered /api/stats document (ADR 0006): the snapshot plus
 // generation timestamp and uptime; no format version (human-facing, unversioned).
 type statsDocument struct {
-	GeneratedAt  string        `json:"generated_at"`
-	Uptime       string        `json:"uptime"`
-	Build        Build         `json:"build"`
-	Pipeline     Pipeline      `json:"pipeline"`
-	TrackerCache TrackerCache  `json:"tracker_cache"`
-	Rules        []RuleCounter `json:"rules"`
+	GeneratedAt  string              `json:"generated_at"`
+	Uptime       string              `json:"uptime"`
+	Build        Build               `json:"build"`
+	Pipeline     Pipeline            `json:"pipeline"`
+	TrackerCache TrackerCache        `json:"tracker_cache"`
+	Rules        []RuleCounter       `json:"rules"`
+	Enrichment   []EnrichmentCounter `json:"enrichment"`
 }
 
 // handleStats serves the human-facing ops snapshot as indented JSON (ADR 0006):
@@ -202,6 +218,9 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	now := s.now()
 	if st.Rules == nil {
 		st.Rules = []RuleCounter{}
+	}
+	if st.Enrichment == nil {
+		st.Enrichment = []EnrichmentCounter{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
@@ -213,5 +232,6 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 		Pipeline:     st.Pipeline,
 		TrackerCache: st.TrackerCache,
 		Rules:        st.Rules,
+		Enrichment:   st.Enrichment,
 	})
 }
