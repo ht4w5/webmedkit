@@ -28,9 +28,11 @@ indistinguishable from not-yet-known.
 _Avoid_: size index, file length
 
 **Sampling rule**:
-The fixed, non-configurable rule deciding which events contribute an
-observation to the Filesize estimate - GET/HEAD 200 with a non-empty
-Content-Length, GET 206 with a non-empty Content-Range total. Not a
+The fixed, non-configurable rule deciding which observations are eligible
+for the Filesize estimate - GET/HEAD 200 with a non-empty Content-Length,
+GET 206 with a non-empty Content-Range total. Eligibility alone never
+observes: an observation happens when an enrichment runs for the event, and
+one event may contribute several. Not a
 Filter.
 _Avoid_: ewma filter, eligibility filter
 
@@ -174,6 +176,14 @@ The per-rule accounting of events: the events a rule is evaluated against and
 the subset that matched it, cumulative since daemon start. Unlike a Tracker,
 which accumulates a quantity per Target, a Rule counter counts events per rule.
 _Avoid_: tally, rule stats, hit counter
+
+**Enrichment counter**:
+The accounting of one enrichment's runs at one rule: the runs (its
+`total`), the subset that fed the enrichment's learned state (its
+`observed`), and the subset that produced its derived value (its
+`enriched`), cumulative since daemon start. Where the Rule counter counts
+events per rule, an Enrichment counter counts an enrichment's runs per rule.
+_Avoid_: stat counter, enrichment stats, enricher tally
 
 ### Enforcement
 
