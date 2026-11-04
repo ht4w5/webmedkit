@@ -7,10 +7,10 @@ of rules. Per event, evaluation enters exactly one chain - the
 run only when a `goto` or `jump` action names it
 ([Entry chains and dispatch](#entry-chains-and-dispatch) below). A
 **Rule** is an id, a filter, at most one tracker, and an ordered list
-of actions (report, log, goto, jump, stop) - or an [escalation
+of actions (report, log, enrich, goto, jump, stop) - or an [escalation
 ladder](#escalation-ladders) of action lists instead of one. The
 filter expression language and the full DSL are specified below in
-[Filter expressions and enrichment.filter](#filter-expressions-and-enrichmentfilter);
+[Filter expressions](#filter-expressions);
 the DSL's design is recorded in
 [ADR 0001](adr/0001-dsl-flux-chains-webjail-filters.md).
 
@@ -57,9 +57,9 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
 Validate config and rules before deploying: `bandage -t -c bandage.yml
 -r rules.yml` prints the validated plan and exits without ingesting.
 
-## Filter expressions and `enrichment.filter`
+## Filter expressions
 
-Rule filters and the enrichment gate share one expression language over
+Rule filters use one expression language over
 Event fields - predicates `any`, `none`, `src 10.0.0.0/8`, `method GET`,
 `status 200`, `status class 2`, `path "/exact"`,
 `path prefix|suffix|keyword|regex "text"` (`agent` takes the exact,
@@ -114,35 +114,86 @@ decide over Events during rule evaluation; the web panel's report
 filter is a separate client-side search over stored Reports, and the
 two are deliberately independent.
 
-`enrichment.filter` - the rules file's top-level `enrichment` block,
-between `version` and `chains` - gates the enrichment path (the
-Filesize estimate) with the same language, defaulting to `any` like
-rules. Enrichment settings live in the rules file, not `bandage.yml`;
-an invalid expression or an unknown key in the block aborts loading,
-naming the key. The gate is wholly in or wholly out: an unmatched event
-flows through evaluation with default derived fields and touches no
-enrichment state - no observation, no cache update. A widened filter
-cannot poison the estimate: what feeds it is the **Sampling rule**
-([GLOSSARY.md](../GLOSSARY.md)), fixed in code and stricter than any
-Filter ([ADR 0019](adr/0019-filesize-from-response-sizes.md)).
+## The `enrich` action
 
-Beware `size` in `enrichment.filter`: the gate runs after the derived
-fields are reset and before the Filesize estimate is looked up, so every
-event reaches it with an unknown size - `size unknown` there is a no-op
-gate like `any`, while a `size` comparison never matches and silently
-disables enrichment. Deliberately accepted, not rejected at load.
+An `enrich` action in a rule's action list - `enrich: {type: filesize}`
+- runs the named enrichment for the event where that rule matches, and
+nowhere else: demand-driven enrichment
+([ADR 0028](adr/0028-enrichment-as-rule-actions.md)). The enrich
+action's rule filter is the enrichment's **demand domain** - which
+events get enriched is decided in the same file as everything else the
+rules decide, and cannot drift from the rules it serves. An eligible
+response contributes an observation only when its event reaches an
+enrich action (the **Sampling rule**, [GLOSSARY.md](../GLOSSARY.md));
+traffic no rule asks about touches no enrichment state - no
+observation, no cache entry.
+
+The enrichments are global and static: one instance per kind, shared
+by every enrich action naming it, with no per-action instance or
+configuration - one enrichment kind means one thing across the file.
+`filesize` is the only kind today: the Filesize estimate from response
+sizes ([ADR 0019](adr/0019-filesize-from-response-sizes.md)). The
+action joins every action list - rule actions and ladder rungs alike
+(a rung's actions run only when the rung fires) - and is non-terminal:
+the event continues through the chain's remaining rules
+([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md)).
+
+**Ordering: derived fields feed the subsequent rules only.** The
+action runs where every action runs - on Match, after its own rule's
+tracker update - so a rule's tracker never consumes the derived fields
+the rule's own enrich action produced. A terminal action upstream of
+the enrich rule (`stop`, or `goto`'s "this chain ends") starves the
+estimate on that path: the event never reaches the enrich action and
+never observes (accepted and recorded in ADR 0028; the familiar
+warm-up blindness holds until enough observations arrive).
+
+The documented composition for feeding a replay tracker is therefore a
+**tracker-less enrich rule ahead of the consuming rule** - it turns
+blind replay warm-up into live volume tracking:
 
 ```yaml
 version: 0
-enrichment:
-  filter: path prefix "/downloads/"
 chains:
+  - name: main
+    rules:
+      - id: enrich-iso-size
+        filter: 'path suffix ".iso"'
+        actions: [{enrich: {type: filesize}}]
+      - id: iso-replay
+        tracker: {track: replay, leak: 0.1, volume: 3}
+        actions:
+          - report:
+              reason: iso-replay-overflow
+              ttl: 24h
+              penalty: limit-bandwidth
+              rate: 1MB
 ```
+
+Nothing memoizes enrichment per event: when the rules enrich one event
+twice - two enrich actions traversed, or a chain dispatched twice for
+one event - the enrichment runs twice and observes twice. The counts
+count runs, not events, and preventing double enrichment is the rules
+author's responsibility (GLOSSARY: Enrichment counter).
+
+`bandage -t` shows each enrich action inline in its rule's action
+list, like every other action:
+
+```
+    action enrich type=filesize
+```
+
+Load refuses a rules file where an enrich action names an unknown
+`type` or carries an unknown key - each error naming what it rejected -
+and where the old top-level `enrichment` block appears at all: the
+block and `enrichment.filter` are gone with the pre-evaluation
+enrichment path, and the load error names the migration to enrich
+actions. Disabling an enrichment means removing its enrich actions:
+the file always describes exactly what runs.
 
 ## `reason_prefix`
 
-The top-level `reason_prefix` key - beside `version`, `enrichment` and
-`chains` - names the namespace every report of the file carries: a
+The top-level `reason_prefix` key - beside `version` and `chains` -
+names the namespace every report of the file carries: a
 reason is `<prefix>.<code>`, the code being the bare slug the report
 action declares
 ([ADR 0016](adr/0016-report-reasons-are-namespaced.md),

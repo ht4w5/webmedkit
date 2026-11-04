@@ -38,3 +38,9 @@ increments stay wire-consistent and the increment cap at 1 absorbs the
 residual skew; `206` transfers now yield exact totals and count as their
 true fraction of a download; rollout must deploy the log format
 (`clen`, `crange`) before upgrading bandage.
+
+Amended by ADR 0028: the two gates are gone - there is no
+`enrichment.filter` and no pre-evaluation enrichment path. Enrichment
+runs as an `enrich` action where a rule matches (demand-driven), so an
+eligible response observes only where the rules ask for it, and the
+Sampling rule alone still decides what it contributes.

@@ -49,7 +49,10 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*Fi
 
 // Enrich sets event.SizeBytes from the path's estimate (from sample
 // minSamples on, else FilesizeUnknown); only the Sampling rule observes.
-func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) error {
+// observed reports whether the run fed the estimate (an eligible
+// observation under the Sampling rule), enriched whether the run left
+// a non-default derived value (GLOSSARY: Enrichment counter).
+func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) (observed, enriched bool, err error) {
 	obs, ok := sizeObservation(event)
 	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
 		if !ok {
@@ -65,15 +68,15 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) err
 		r.Samples++
 	})
 	if err != nil {
-		return fmt.Errorf("enrichment: update filesize record: %w", err)
+		return false, false, fmt.Errorf("enrichment: update filesize record: %w", err)
 	}
 
 	if rec.Samples >= fe.minSamples {
 		event.SizeBytes = rec.SizeEWMA
-	} else {
-		event.SizeBytes = domain.FilesizeUnknown
+		return ok, true, nil
 	}
-	return nil
+	event.SizeBytes = domain.FilesizeUnknown
+	return ok, false, nil
 }
 
 // sizeObservation reports the event's response size under the Sampling rule

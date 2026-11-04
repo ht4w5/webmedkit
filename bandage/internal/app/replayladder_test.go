@@ -19,6 +19,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -122,6 +124,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -178,6 +182,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 1}
         escalations:
@@ -228,6 +234,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -294,6 +302,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:

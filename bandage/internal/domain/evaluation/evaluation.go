@@ -48,6 +48,51 @@ type NopCounters struct{}
 func (NopCounters) Visit(string) {}
 func (NopCounters) Match(string) {}
 
+// Enrichments is the enrichment seam: the global, static enrichment
+// instances - one per kind, shared by every enrich action naming it -
+// invoked by kind name where an enrich action runs (ADR 0028). The
+// daemon owns the instances behind it; the evaluator owns the
+// invocation point. Implementations report the run's outcomes for the
+// Enrichment counter (GLOSSARY): observed is true when the run fed the
+// kind's learned state, enriched true when it produced a non-default
+// derived value.
+type Enrichments interface {
+	// Enrich runs the named enrichment for the event, setting its
+	// derived fields. Nothing memoizes per event: one event may run one
+	// kind several times, observing each time (ADR 0028).
+	Enrich(ctx context.Context, kind string, event *domain.Event) (observed, enriched bool, err error)
+}
+
+// NopEnrichments runs no enrichment and observes nothing: the
+// Enrichments implementation for callers without enrich actions,
+// passed explicitly - nothing silently substitutes for a missing
+// dependency.
+type NopEnrichments struct{}
+
+func (NopEnrichments) Enrich(context.Context, string, *domain.Event) (bool, bool, error) {
+	return false, false, nil
+}
+
+// EnrichmentCounters is the Enrichment-counter port: per (rule,
+// enrichment) run accounting at the evaluator's counting points
+// (GLOSSARY: Enrichment counter). The daemon owns the registry behind
+// it and exposes the counts - the registry is an internal seam between
+// evaluator and daemon, not a public contract. Implementations must be
+// exact under the worker pool.
+type EnrichmentCounters interface {
+	// Run counts one enrichment run of kind at ruleID - one per
+	// invocation, a failed run included (the run happened however it
+	// ended) - with the run's outcomes.
+	Run(ruleID, kind string, observed, enriched bool)
+}
+
+// NopEnrichmentCounters discards every count: the EnrichmentCounters
+// implementation for callers that observe nothing, passed explicitly -
+// nothing silently substitutes for a missing dependency.
+type NopEnrichmentCounters struct{}
+
+func (NopEnrichmentCounters) Run(string, string, bool, bool) {}
+
 // Logger is the log action's logging port (ADR 0005); it carries only the domain's four levels, so a rule can never exit the process.
 type Logger interface {
 	Log(level domain.Level, msg string, fields map[string]any)
@@ -68,6 +113,8 @@ type Service struct {
 	cache        TrackerCache
 	reports      ReportSink
 	counters     Counters
+	enrichments  Enrichments
+	enrichCount  EnrichmentCounters
 	now          func() time.Time
 	logger       Logger
 }
@@ -75,8 +122,9 @@ type Service struct {
 // Deps are the Service's dependencies and settings, assembled once at
 // daemon assembly or a test fixture: one named struct rather than a
 // positional argument list, so the prefix and the ports can never
-// swap places. Counters and Logger are required - pass NopCounters
-// and NopLogger to discard their output.
+// swap places. Counters, Enrichments, EnrichmentCounters and Logger
+// are required - pass their Nop implementations to discard their
+// output.
 type Deps struct {
 	// ReasonPrefix namespaces report reasons at creation (ADR 0016):
 	// the rules file's reason_prefix, else the program name (ADR 0026).
@@ -89,6 +137,13 @@ type Deps struct {
 	// Counters receives the rule-counter counts (GLOSSARY: Rule
 	// counter); the daemon owns the registry behind it.
 	Counters Counters
+	// Enrichments runs the named enrichments at enrich actions (ADR
+	// 0028); the daemon owns the global kind instances behind it.
+	Enrichments Enrichments
+	// EnrichmentCounters receives the Enrichment-counter counts
+	// (GLOSSARY: Enrichment counter); the daemon owns the registry
+	// behind it.
+	EnrichmentCounters EnrichmentCounters
 	// Now is the clock report timestamps read at Trigger time.
 	Now func() time.Time
 	// Logger is the log action's logging port (ADR 0005).
@@ -101,17 +156,27 @@ func NewService(d Deps) *Service {
 	for i, chain := range d.Chains {
 		byName[chain.Name] = i
 	}
-	return &Service{reasonPrefix: d.ReasonPrefix, chains: d.Chains, byName: byName, cache: d.Cache, reports: d.Reports, counters: d.Counters, now: d.Now, logger: d.Logger}
+	return &Service{reasonPrefix: d.ReasonPrefix, chains: d.Chains, byName: byName, cache: d.Cache, reports: d.Reports, counters: d.Counters, enrichments: d.Enrichments, enrichCount: d.EnrichmentCounters, now: d.Now, logger: d.Logger}
 }
 
 // Evaluate enters the entry chain for the event; every other chain runs
 // only when a goto/jump action dispatches to it.
 func (s *Service) Evaluate(ctx context.Context, event *domain.Event) error {
+	// The single derived-field reset (ADR 0019): once per event at
+	// evaluation entry, before any rule runs - not per chain dispatch.
+	resetDerived(event)
 	ci, ok := s.byName[domain.EntryChain]
 	if !ok {
 		return fmt.Errorf("evaluate: entry chain %q not found", domain.EntryChain)
 	}
 	return s.runChain(ctx, ci, event)
+}
+
+// resetDerived resets every derived Event field to its default - the
+// single reset reserved for future enrichments, so none can leak stale
+// state (ADR 0019).
+func resetDerived(event *domain.Event) {
+	event.SizeBytes = domain.FilesizeUnknown
 }
 
 // matchContext is one fired rung in progress: rule, chain, event and the
@@ -210,6 +275,15 @@ func (d *actionDispatch) VisitLog(a *domain.LogAction) error {
 		"tracker": d.m.reading,
 	})
 	return nil
+}
+
+func (d *actionDispatch) VisitEnrich(a *domain.EnrichAction) error {
+	observed, enriched, err := d.svc.enrichments.Enrich(d.ctx, a.Type, d.m.event)
+	// The counting point: one run per invocation with the run's
+	// outcomes - no memoization, so one event may run one kind twice
+	// (GLOSSARY: Enrichment counter, ADR 0028).
+	d.svc.enrichCount.Run(d.m.rule.ID, a.Type, observed, enriched)
+	return err
 }
 
 func (d *actionDispatch) VisitGoto(target string) error {

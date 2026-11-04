@@ -14,8 +14,8 @@ evaluation.
 _Avoid_: request, log entry, record
 
 **Filter**:
-A predicate over an Event deciding whether a rule or the enrichment path
-considers the event. The regex matchers (`path regex`, `agent regex`)
+A predicate over an Event deciding whether a rule considers the event.
+The regex matchers (`path regex`, `agent regex`)
 search unanchored, case-sensitive unless the pattern carries `(?i)`.
 Distinct from the Web Panel's client-side report filter.
 _Avoid_: where clause, condition
