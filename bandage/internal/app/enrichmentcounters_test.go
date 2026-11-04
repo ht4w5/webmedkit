@@ -3,14 +3,17 @@ package app
 import (
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
 // Enrichment counters at the daemon seam (the spec's Testing Decisions):
-// rules YAML and raw log lines in, the /api/stats enrichment block out.
-// The block is the primary window on an Enrichment counter (GLOSSARY:
-// Enrichment counter), so every counting semantic pins through it -
-// no test reaches into the counter registry.
+// rules YAML and raw log lines in, the /api/stats enrichment block and
+// the /metrics enrichment families out. The block is the primary window
+// on an Enrichment counter (GLOSSARY: Enrichment counter), so every
+// counting semantic pins through it - no test reaches into the counter
+// registry.
 
 // enrichCounterDoc mirrors one /api/stats enrichment block entry.
 type enrichCounterDoc struct {
@@ -283,5 +286,132 @@ chains:
 	_, doc := d.getStats(t)
 	if got := statsEnrichment(t, doc); !slices.Equal(got, want) {
 		t.Errorf("enrichment block = %+v, want %+v (exact under 4 workers)", got, want)
+	}
+}
+
+// orderedCounterEnrichRules is the enrichment metric-order fixture: two
+// counter-enabled (rule, enrichment) pairs whose rules-file order (zeta,
+// alpha) is not rule-ID order.
+const orderedCounterEnrichRules = `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: zeta
+        actions: [{enrich: {type: filesize, counter: true}}]
+      - id: alpha
+        filter: 'method GET'
+        actions: [{enrich: {type: filesize, counter: true}}]
+`
+
+// enrichMetricSample is one enrichment metric series: its pair labels
+// and value.
+type enrichMetricSample struct {
+	Rule       string
+	Enrichment string
+	Value      float64
+}
+
+// metricsEnrichmentSeries reads one enrichment metric family's sample
+// lines ("name{rule=\"<id>\",enrichment=\"<kind>\"} <value>") in
+// exposition order.
+func metricsEnrichmentSeries(t *testing.T, body, family string) []enrichMetricSample {
+	t.Helper()
+	var out []enrichMetricSample
+	for _, line := range strings.Split(body, "\n") {
+		rest, ok := strings.CutPrefix(line, family+`{rule="`)
+		if !ok {
+			continue
+		}
+		rule, rest, ok := strings.Cut(rest, `",enrichment="`)
+		if !ok {
+			t.Fatalf("GET /metrics %s sample line %q: want name{rule=\"<id>\",enrichment=\"<kind>\"} <value>", family, line)
+		}
+		kind, rest, ok := strings.Cut(rest, `"}`)
+		if !ok {
+			t.Fatalf("GET /metrics %s sample line %q: want name{rule=\"<id>\",enrichment=\"<kind>\"} <value>", family, line)
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(rest), 64)
+		if err != nil {
+			t.Fatalf("GET /metrics %s sample line %q: %v", family, line, err)
+		}
+		out = append(out, enrichMetricSample{Rule: rule, Enrichment: kind, Value: v})
+	}
+	return out
+}
+
+// TestE2EMetricsEnrichmentSeriesStartAtZeroInRulesFileOrder: the
+// enrichment metric families emit one series per counter-enabled
+// (rule, enrichment) pair from daemon start - zeros before any traffic
+// - in rules-file order of pairs, deliberately unsorted unlike the rule
+// families' rule-ID order, and rendered after the rule counter families.
+func TestE2EMetricsEnrichmentSeriesStartAtZeroInRulesFileOrder(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", orderedCounterEnrichRules)
+
+	body := getMetrics(t, d)
+	want := []enrichMetricSample{
+		{Rule: "zeta", Enrichment: "filesize"},
+		{Rule: "alpha", Enrichment: "filesize"},
+	}
+	for _, family := range []string{"bandage_enrichment_runs_total", "bandage_enrichment_runs_observed_total", "bandage_enrichment_runs_enriched_total"} {
+		if got := metricsEnrichmentSeries(t, body, family); !slices.Equal(got, want) {
+			t.Errorf("%s series = %+v, want %+v (rules-file order of pairs, zeros from daemon start)", family, got, want)
+		}
+	}
+	ruleFamilies := strings.Index(body, "# HELP bandage_rule_events_matched_total ")
+	enrichFamilies := strings.Index(body, "# HELP bandage_enrichment_runs_total ")
+	if ruleFamilies < 0 || enrichFamilies < 0 || enrichFamilies < ruleFamilies {
+		t.Errorf("enrichment families do not render after the rule counter families:\n%s", body)
+	}
+
+	_, doc := d.getStats(t)
+	block := statsEnrichment(t, doc)
+	if len(block) != 2 || block[0].Rule != "zeta" || block[1].Rule != "alpha" {
+		t.Errorf("enrichment block = %+v, want [zeta alpha] rules-file order of pairs beside the unsorted series", block)
+	}
+}
+
+// TestE2EMetricsEnrichmentSeriesMirrorTheStatsEnrichmentBlock: after
+// traffic the enrichment metric families and the /api/stats enrichment
+// block carry the same counts field for field, in the same rules-file
+// order of pairs - the two surfaces' mirror relationship, ordering
+// included.
+func TestE2EMetricsEnrichmentSeriesMirrorTheStatsEnrichmentBlock(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", orderedCounterEnrichRules)
+
+	// Three eligible GETs: every event runs the enrichment at zeta and
+	// at alpha (method GET) on one path - two runs per event, the warm-up
+	// runs observing without enriching - so both quantities move.
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/a", 200, 10, "10"))
+	d.send(nginxLineClen(eventTime2, "203.0.113.7", "GET", "/a", 200, 10, "10"))
+	d.send(nginxLineClen("1734345937.123", "203.0.113.7", "GET", "/a", 200, 10, "10"))
+	d.waitProcessed(t, 3)
+
+	_, doc := d.getStats(t)
+	block := statsEnrichment(t, doc)
+	body := getMetrics(t, d)
+	for _, f := range []struct {
+		family string
+		field  func(ec enrichCounterDoc) float64
+	}{
+		{"bandage_enrichment_runs_total", func(ec enrichCounterDoc) float64 { return ec.Total }},
+		{"bandage_enrichment_runs_observed_total", func(ec enrichCounterDoc) float64 { return ec.Observed }},
+		{"bandage_enrichment_runs_enriched_total", func(ec enrichCounterDoc) float64 { return ec.Enriched }},
+	} {
+		got := metricsEnrichmentSeries(t, body, f.family)
+		if len(got) != len(block) {
+			t.Fatalf("%s series = %+v, want one per counter-enabled pair (as many as the enrichment block)", f.family, got)
+		}
+		for i, s := range got {
+			ec := block[i]
+			if s.Rule != ec.Rule || s.Enrichment != ec.Enrichment {
+				t.Errorf("%s series %d = %s/%s, want %s/%s (same order the enrichment block lists)", f.family, i, s.Rule, s.Enrichment, ec.Rule, ec.Enrichment)
+			}
+			if s.Value != f.field(ec) {
+				t.Errorf("%s{%s/%s} = %v, want %v (same count the enrichment block carries)", f.family, s.Rule, s.Enrichment, s.Value, f.field(ec))
+			}
+		}
 	}
 }
