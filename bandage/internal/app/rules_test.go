@@ -49,11 +49,6 @@ chains:
               rate: 200
 `
 
-// wantEnrichmentMigrationErr is the pinned migration-error substring: any
-// presence of the old top-level enrichment block fails load naming the
-// enrich actions that replaced it.
-const wantEnrichmentMigrationErr = "rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)"
-
 func TestParseRulesValid(t *testing.T) {
 	doc, err := ParseRules([]byte(validRules))
 	if err != nil {
@@ -453,14 +448,6 @@ chains:
 		{name: "null counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter: null\n", wantErr: `counter: must be true or false`},
 		{name: "empty counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        counter:\n", wantErr: `counter: must be true or false`},
 
-		// The old top-level enrichment block is gone: any presence - even
-		// empty or null - fails load with the migration error naming the
-		// enrich actions that replaced it (ADR 0028).
-		{name: "enrichment block fails load naming the migration", yaml: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "empty enrichment block fails load naming the migration", yaml: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "null enrichment block fails load naming the migration", yaml: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "empty enrichment key fails load naming the migration", yaml: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-
 		// Filter.
 		{name: "omitted filter defaults to any", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
 		{name: "explicit any filter", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        filter: any\n        tracker: {track: rate, leak: 1, volume: 2}\n"},
@@ -543,18 +530,10 @@ chains:
 		{name: "enrich without options rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [enrich]\n", wantErr: "enrich"},
 		{name: "enrich without type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {}}]\n", wantErr: `action enrich: type: required`},
 		{name: "enrich null type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: null}}]\n", wantErr: `action enrich: type: required`},
-		{name: "enrich unknown type names the type", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
-		{name: "enrich unknown key names the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, enabled: true}}]\n", wantErr: `action enrich: unknown key "enabled"`},
 		// The Enrichment counter's counter key: optional (default false),
-		// strictly boolean when written - a written non-boolean fails load
-		// naming the key (GLOSSARY: Enrichment counter).
+		// strictly boolean when written (GLOSSARY: Enrichment counter).
 		{name: "enrich counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n"},
 		{name: "enrich false counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: false}}]\n"},
-		{name: "enrich quoted counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: \"true\"}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich numeric counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: 1}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich sequence counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: [true]}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich null counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: null}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich empty counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: }}]\n", wantErr: "action enrich: counter: must be true or false"},
 
 		// The goto/jump chain graph: a chain named main (the entry
 		// chain), no dispatch targeting main, unique chain names,

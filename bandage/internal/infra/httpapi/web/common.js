@@ -49,8 +49,8 @@ function fetchJSON(method, url) {
 
 // The Stats view renders the snapshot as grouped key/value tables -
 // identity, pipeline, tracker cache - one row per key the daemon
-// reports, plus one counter table per counter block (the rule
-// counters table now; a later counter table adopts the same
+// reports, plus one counter table per counter block (the rule and
+// enrichment counters tables; a later counter table adopts the same
 // mechanism). Rows are generated per reported key, never a fixed
 // field list, so keys added to the snapshot later (ADR 0006: fields
 // may be added) appear as generic extra rows and nothing the daemon
@@ -227,14 +227,16 @@ function groupBody(slot) {
 	return tbody;
 }
 
-// The Stats page's counter tables - the rule counters table now, and
-// any later counter table - render through one counter-table
-// mechanism: one renderer plus one config per table. The config names
-// the table's row slot, its row builder, its search fields, its
-// explicit empty-state copy and its shape - whose one source is the
-// served header row the config derives its column count from - so a
-// second counter table adopts the mechanism instead of duplicating
-// the machinery.
+// The Stats page's counter tables - the rule and enrichment counters
+// tables, and any later counter table - render through one
+// counter-table mechanism: one renderer plus one config per table. The
+// config names the table's row slot, its row builder, its search
+// fields, its explicit empty-state copy, its shape - whose one source
+// is the served header row the config derives its column count from -
+// and its two wiring points: where the fetched rows land and the
+// render entry point the search filter re-renders through. loadStats
+// and applyStatsFilter iterate COUNTER_TABLES like the block dispatch
+// does, so a later counter table is one config entry.
 
 // ruleCountersColumns takes the rule counters table's column count
 // from its own header row - the served markup is the table's one shape
@@ -259,14 +261,17 @@ function ruleCounterRow(counter) {
 // RULE_COUNTERS_TABLE is the rule counters table's counter-table
 // config: its row slot, its row builder (rule, total, matched;
 // GLOSSARY: Rule counter), its search fields - rule, total and
-// matched - its explicit empty-state copy and its header-derived
-// shape.
+// matched - its explicit empty-state copy, its header-derived shape,
+// and its store/apply wiring - the fetched rows' home and the render
+// entry point the filter re-renders through.
 const RULE_COUNTERS_TABLE = {
 	slot: RULE_COUNTERS_SLOT,
 	row: ruleCounterRow,
 	narrow: (counter, match) => match.test(counter.id + "\n" + counter.total + "\n" + counter.matched),
 	empty: "No rule counters configured.",
 	columns: ruleCountersColumns,
+	store: (rows) => { fetchedRuleCounters = rows; },
+	apply: (filter) => renderRuleCounters(fetchedRuleCounters, filter),
 };
 
 // COUNTER_TABLES registers every counter table's config by its row
@@ -332,14 +337,17 @@ function enrichmentCounterRow(counter) {
 // counter-table config: its row slot, its row builder (rule,
 // enrichment, total, observed, enriched; GLOSSARY: Enrichment
 // counter), its search fields - rule, enrichment, total, observed and
-// enriched - its explicit empty-state copy and its header-derived
-// shape.
+// enriched - its explicit empty-state copy, its header-derived shape,
+// and its store/apply wiring - the fetched rows' home and the render
+// entry point the filter re-renders through.
 const ENRICHMENT_COUNTERS_TABLE = {
 	slot: ENRICHMENT_COUNTERS_SLOT,
 	row: enrichmentCounterRow,
 	narrow: (counter, match) => match.test(counter.rule + "\n" + counter.enrichment + "\n" + counter.total + "\n" + counter.observed + "\n" + counter.enriched),
 	empty: "No enrichment counters configured.",
 	columns: enrichmentCountersColumns,
+	store: (rows) => { fetchedEnrichmentCounters = rows; },
+	apply: (filter) => renderEnrichmentCounters(fetchedEnrichmentCounters, filter),
 };
 
 // renderEnrichmentCounters renders the enrichment counters table
@@ -385,8 +393,7 @@ function loadStats() {
 		.then((snapshot) => {
 			const tables = statsTables(snapshot);
 			fetchedStatsGroups = tables.groups;
-			fetchedRuleCounters = tables.counterRows.get(RULE_COUNTERS_SLOT);
-			fetchedEnrichmentCounters = tables.counterRows.get(ENRICHMENT_COUNTERS_SLOT);
+			for (const table of COUNTER_TABLES.values()) table.store(tables.counterRows.get(table.slot));
 			fillLegend(snapshot);
 			applyStatsFilter();
 		})
@@ -639,8 +646,7 @@ function applyStatsFilter() {
 	const { match, invalid } = searchMatcher();
 	const filter = invalid ? null : match;
 	renderStatsGroups(fetchedStatsGroups, filter);
-	renderRuleCounters(fetchedRuleCounters, filter);
-	renderEnrichmentCounters(fetchedEnrichmentCounters, filter);
+	for (const table of COUNTER_TABLES.values()) table.apply(filter);
 }
 
 // applySearch runs the search box against whichever view's rows are on

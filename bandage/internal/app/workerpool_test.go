@@ -140,7 +140,8 @@ chains:
 	})
 
 	// Arrival order t1 < t2 < t3 accumulates 1000 -> 2000-100 = 1900,
-	// which overflows 1500 and empties the bucket; t3 stays quiet.
+	// which overflows 1500 and reports; t3 stays quiet (its write is
+	// suppressed by the live report).
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 1000))
 	d.send(nginxLine("1734346034.123", "203.0.113.7", "GET", "/big", 200, 1000))
 	d.send(nginxLine("1734346134.123", "203.0.113.7", "GET", "/big", 200, 1000))

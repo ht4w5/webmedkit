@@ -143,9 +143,10 @@ action runs where every action runs - on Match, after its own rule's
 tracker update - so a rule's tracker never consumes the derived fields
 the rule's own enrich action produced. A terminal action upstream of
 the enrich rule (`stop`, or `goto`'s "this chain ends") starves the
-estimate on that path: the event never reaches the enrich action and
-never observes (accepted and recorded in ADR 0028; the familiar
-warm-up blindness holds until enough observations arrive).
+estimate on that path (the stop-skew): the event never reaches the
+enrich action and never observes (accepted and recorded in ADR 0028;
+the familiar warm-up blindness holds until enough observations
+arrive).
 
 The documented composition for feeding a replay tracker is therefore a
 **tracker-less enrich rule ahead of the consuming rule** - it turns
