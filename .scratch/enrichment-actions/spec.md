@@ -91,8 +91,8 @@ the estimate (`observed`) and the subset it successfully enriched
     actions in the action list like every other action, so that I can
     audit demand-driven enrichment before shipping the file.
 17. As a rules author, I want enrichment to remain non-terminal like
-    every action other than `stop`, so that my chain continues after
-    enriching.
+    every action other than `goto` and `stop`, so that my chain
+    continues after enriching.
 18. As a rules author, I want two enrich actions of the same type in
     one rule to sum into one counter row, so that the counts match "my
     rule's enrichment of this kind", not plumbing.
