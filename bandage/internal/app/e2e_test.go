@@ -206,6 +206,15 @@ func (c *logCapture) messages() []string {
 	return out
 }
 
+// loadTestRules runs the daemon start path's rules-loading step over
+// rules YAML text - the same step every started test daemon's rules
+// pass through before assembly - and returns the load error instead of
+// failing the test: the load-failure outcome at the assembled-daemon
+// seam.
+func loadTestRules(rulesYAML string) (Rules, error) {
+	return ParseRules([]byte(rulesYAML))
+}
+
 func startTestDaemon(t *testing.T, clock *testClock, network, dbPath, rulesYAML string) *testDaemon {
 	t.Helper()
 	return startTestDaemonCfg(t, clock, network, dbPath, rulesYAML, nil)
@@ -248,9 +257,9 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	rules, err := ParseRules([]byte(rulesYAML))
+	rules, err := loadTestRules(rulesYAML)
 	if err != nil {
-		t.Fatalf("ParseRules error: %v", err)
+		t.Fatalf("rules load error: %v", err)
 	}
 	logs := &logCapture{}
 	opts := append([]Option{WithClock(clock.Now), WithLogger(zerolog.New(logs))}, extra...)

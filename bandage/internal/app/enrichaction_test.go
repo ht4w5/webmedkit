@@ -2,14 +2,15 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
 // Primary seam: demand-driven enrichment at the assembled daemon -
-// rules YAML and raw nginx lines in, reports and /api/stats counters
-// out. The enrich action runs its named enrichment where every action
-// runs and nowhere else (ADR 0028): what observes is what the rules
-// ask for.
+// rules YAML and raw nginx lines in, reports, /api/stats counters and
+// pointed load errors out. The enrich action runs its named enrichment
+// where every action runs and nowhere else (ADR 0028): what observes
+// is what the rules ask for.
 
 // TestE2EEnrichActionFeedsSubsequentRulesOnly: a derived field feeds
 // the rules after the enrich action, never its own rule's tracker
@@ -224,5 +225,62 @@ chains:
 	}
 	if v := doc.Reports[0].Tracker.Value; v != 3 {
 		t.Errorf("tracker value = %v, want 3 (events 5-7 fed one download each)", v)
+	}
+}
+
+// wantEnrichmentMigrationErr is the pinned migration-error substring: any
+// presence of the old top-level enrichment block fails load naming the
+// enrich actions that replaced it.
+const wantEnrichmentMigrationErr = "rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)"
+
+// TestE2EPointedLoadFailuresNameWhatTheyReject: every pointed load
+// failure lands at the assembled-daemon seam (spec: Testing Decisions) -
+// rules YAML as the input surface, the pointed load error out of the
+// daemon's rules-loading path (loadTestRules - the step every started
+// test daemon's rules take before assembly). A refused rules file never
+// starts a daemon; its pointed error is the operator's whole outcome,
+// and every error names what it rejected - a typo is a load error,
+// never a silent default.
+func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
+	tests := []struct {
+		name    string
+		rules   string
+		wantErr string
+	}{
+		// The old top-level enrichment block is gone: any presence - even
+		// empty or null - fails load with the migration error naming the
+		// enrich actions that replaced it (story 14, ADR 0028).
+		{name: "enrichment block fails load naming the migration", rules: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "empty enrichment block fails load naming the migration", rules: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "null enrichment block fails load naming the migration", rules: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+		{name: "empty enrichment key fails load naming the migration", rules: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
+
+		// An unknown enrichment type names the type - a typo can never
+		// silently enrich nothing (story 12).
+		{name: "enrich unknown type names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
+
+		// Unknown keys in the enrich block fail load naming the key
+		// (story 13).
+		{name: "enrich unknown key names the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, enabled: true}}]\n", wantErr: `action enrich: unknown key "enabled"`},
+
+		// The counter key is strictly boolean when written - every
+		// written non-boolean fails load naming the key (story 11,
+		// GLOSSARY: Enrichment counter).
+		{name: "enrich quoted counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: \"true\"}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich numeric counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: 1}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich sequence counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: [true]}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich null counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: null}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich empty counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: }}]\n", wantErr: "action enrich: counter: must be true or false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadTestRules(tt.rules)
+			if err == nil {
+				t.Fatalf("loadTestRules succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tt.wantErr)
+			}
+		})
 	}
 }
