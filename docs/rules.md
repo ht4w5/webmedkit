@@ -175,11 +175,23 @@ one event - the enrichment runs twice and observes twice. The counts
 count runs, not events, and preventing double enrichment is the rules
 author's responsibility (GLOSSARY: Enrichment counter).
 
+An enrich action may carry its own `counter` key (optional, default
+`false`), enabling that (rule, enrichment) pair's **Enrichment
+counter** ([GLOSSARY.md](../GLOSSARY.md)) - the pair's runs, the subset
+that fed the enrichment's learned state and the subset that produced a
+non-default derived value, cumulative since daemon start. As with the
+rule-level `counter`, the key is all-or-nothing: an absent key means
+the default, while a written `counter` must carry `true` or `false` -
+a written null fails load like any other typo. Pairs without `counter`
+count nothing and stay out of the operator surfaces.
+
 `bandage -t` shows each enrich action inline in its rule's action
-list, like every other action:
+list, like every other action - `counter=true` appended when the
+pair's counter is enabled:
 
 ```
     action enrich type=filesize
+    action enrich type=filesize counter=true
 ```
 
 Load refuses a rules file where an enrich action names an unknown
