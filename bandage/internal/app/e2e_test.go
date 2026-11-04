@@ -1006,7 +1006,7 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	}
 
 	// The tracker cache block: each parsed event updated the shared store
-	// twice (the enrich action's file-size record + the tracker bucket),
+	// twice (the enrich action's file-size record + the tracker record),
 	// and both records stay live.
 	for _, f := range []struct {
 		field string
@@ -1033,7 +1033,7 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
 	// Nothing resets tracker state, so the enrich action's file-size record
-	// and the tracker bucket both keep cache_size at 2.
+	// and the tracker record both keep cache_size at 2.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
@@ -1091,7 +1091,8 @@ chains:
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
 	// max_entries 1: the enrich action's file-size record and the tracker
-	// bucket share one slot, so inserting the bucket evicts the record.
+	// record share one slot, so inserting the tracker record evicts the
+	// file-size record.
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
@@ -1293,7 +1294,7 @@ func TestE2ERestartPersistsReportsNotTrackers(t *testing.T) {
 	}
 
 	// Tracker state restarts cold: one event of 100 bytes cannot overflow
-	// the fresh bucket and must not touch the persisted report.
+	// the fresh tracker and must not touch the persisted report.
 	d2.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 100))
 	d2.waitProcessed(t, 1)
 	after := d2.getReports(t, nil)
@@ -1327,9 +1328,9 @@ chains:
 	}
 }
 
-// TestE2EEvictedBucketAccumulatesFresh: an evicted bucket accumulates fresh
+// TestE2EEvictedTrackerAccumulatesFresh: an evicted tracker accumulates fresh
 // state from zero on the next event and matches again past volume.
-func TestE2EEvictedBucketAccumulatesFresh(t *testing.T) {
+func TestE2EEvictedTrackerAccumulatesFresh(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -1348,7 +1349,8 @@ chains:
 		c.Cache.MaxEntries = 2
 	})
 
-	// The write leaves the bucket in place: the entry the next insert evicts.
+	// The write leaves the tracker record in place: the entry the next
+	// insert evicts.
 	for i := 0; i < 3; i++ {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
 	}
@@ -1358,8 +1360,8 @@ chains:
 		t.Fatalf("first trigger: %+v", doc.Reports)
 	}
 
-	// The new target caps the cache and evicts 203.0.113.7's bucket, so
-	// that bucket's next event must not Match (no stale Match).
+	// The new target caps the cache and evicts 203.0.113.7's tracker
+	// record, so that target's next event must not Match (no stale Match).
 	// The two events are serialized so the eviction is deterministic.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
@@ -1425,8 +1427,9 @@ chains:
 `
 	// max_entries 2 with a per-shard budget of one: the fixed keys place
 	// both tracker targets in one shard and the filesize record in the
-	// other, so the second target's insert evicts the first one's bucket
-	// (same key placement as TestE2EEvictedBucketAccumulatesFresh).
+	// other, so the second target's insert evicts the first target's
+	// tracker record (same key placement as
+	// TestE2EEvictedTrackerAccumulatesFresh).
 	trigger := func(t *testing.T, d *testDaemon) {
 		t.Helper()
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
@@ -2475,8 +2478,9 @@ chains:
 				t.Errorf("tracker value = %v, want 3 (three sources accumulated)", r.Tracker.Value)
 			}
 
-			// Another source in the same prefix lands in the emptied
-			// bucket and stays quiet: still exactly one report.
+			// Another source in the same prefix lands in the shared
+			// tracker and stays quiet: still exactly one report (its write
+			// is suppressed by the live report).
 			d.send(nginxLine(eventTime2, tt.fourth, "GET", "/api", 200, 0))
 			d.waitProcessed(t, int64(len(tt.clients))+1)
 			doc = d.getReports(t, nil)
@@ -2510,7 +2514,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Two sources per prefix give two buckets at value 2 each; nothing
+	// Two sources per prefix give two trackers at value 2 each; nothing
 	// overflows (value == volume does not overflow).
 	for _, client := range []string{"203.0.113.7", "203.0.113.8", "203.0.114.7", "203.0.114.8"} {
 		d.send(nginxLine(eventTime1, client, "GET", "/api", 200, 0))

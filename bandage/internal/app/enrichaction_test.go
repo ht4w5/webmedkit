@@ -115,7 +115,7 @@ chains:
 	}
 	// The unreached source touched nothing at all: its events neither
 	// observed nor fed the tracker (warm-up skips), so the store holds
-	// the file-size record and .7's replay bucket from 6 updates.
+	// the file-size record and .7's replay tracker record from 6 updates.
 	_, stats := d.getStats(t)
 	for field, want := range map[string]float64{"gets": 6, "sets": 6, "misses": 2, "size": 2} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
@@ -123,7 +123,7 @@ chains:
 		}
 	}
 
-	// The seventh .7 response pushes .7's bucket to 3 > 2 and reports;
+	// The seventh .7 response pushes .7's tracker to 3 > 2 and reports;
 	// the interleaved .8 response observes nothing and its warm-size
 	// blindness keeps it out of the report set entirely.
 	for i, line := range []string{

@@ -532,7 +532,7 @@ func TestTrackerlessRuleTouchesNoTracker(t *testing.T) {
 }
 
 // Actions see the Trigger-time tracker reading (pre-reset), never the
-// emptied bucket.
+// emptied tracker.
 func TestActionsSeeTriggerTimeReading(t *testing.T) {
 	log := &captureLogger{}
 	sink, cache := &stubSink{}, &stubCache{}
