@@ -223,6 +223,35 @@ func TestParseRulesCounterFlag(t *testing.T) {
 	}
 }
 
+// TestParseRulesEnrichActionCounterFlag: the enrich action's counter
+// key enables the (rule, enrichment) pair's Enrichment counter
+// (GLOSSARY: Enrichment counter); it defaults to false, so upgrading
+// adds no noise until asked for.
+func TestParseRulesEnrichActionCounterFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		want  bool
+	}{
+		{"omitted defaults to false", "", false},
+		{"true enables the Enrichment counter", ", counter: true", true},
+		{"false keeps the Enrichment counter off", ", counter: false", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize" + tt.extra + "}}]\n"
+			doc, err := ParseRules([]byte(yaml))
+			if err != nil {
+				t.Fatalf("ParseRules error: %v", err)
+			}
+			got := doc.Chains[0].Rules[0].Actions[0].Enrich.Counter
+			if got != tt.want {
+				t.Errorf("enrich counter = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRulesValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -516,9 +545,16 @@ chains:
 		{name: "enrich null type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: null}}]\n", wantErr: `action enrich: type: required`},
 		{name: "enrich unknown type names the type", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
 		{name: "enrich unknown key names the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, enabled: true}}]\n", wantErr: `action enrich: unknown key "enabled"`},
-		// The counter key is not part of the format yet - the Enrichment
-		// counters add it later; today it is an unknown key like any other.
-		{name: "enrich counter key is still unknown", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n", wantErr: `action enrich: unknown key "counter"`},
+		// The Enrichment counter's counter key: optional (default false),
+		// strictly boolean when written - a written non-boolean fails load
+		// naming the key (GLOSSARY: Enrichment counter).
+		{name: "enrich counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n"},
+		{name: "enrich false counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: false}}]\n"},
+		{name: "enrich quoted counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: \"true\"}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich numeric counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: 1}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich sequence counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: [true]}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich null counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: null}}]\n", wantErr: "action enrich: counter: must be true or false"},
+		{name: "enrich empty counter value rejected naming the key", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: }}]\n", wantErr: "action enrich: counter: must be true or false"},
 
 		// The goto/jump chain graph: a chain named main (the entry
 		// chain), no dispatch targeting main, unique chain names,
@@ -1859,7 +1895,7 @@ chains:
   - name: main
     rules:
       - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
+        actions: [{enrich: {type: filesize, counter: true}}]
       - id: iso-ladder
         tracker: {track: bandwidth, leak: 1MB}
         escalations:
@@ -1877,7 +1913,7 @@ chains:
 	}
 	for _, want := range []string{
 		"rule enrich-size",
-		"action enrich type=filesize",
+		"action enrich type=filesize counter=true",
 		"rung at=50000000 enrich type=filesize",
 	} {
 		if !strings.Contains(plan, want) {
