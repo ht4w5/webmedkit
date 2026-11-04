@@ -60,7 +60,8 @@ ordered action list - or an escalation ladder of them.
 _Avoid_: detector, query
 
 **Action**:
-A step executed when a rule matches: report, log, goto, jump, or stop.
+A step executed when a rule matches: report, log, enrich, goto, jump,
+or stop.
 _Avoid_: statement, command
 
 **Match**:
@@ -180,9 +181,10 @@ _Avoid_: tally, rule stats, hit counter
 **Enrichment counter**:
 The accounting of one enrichment's runs at one rule: the runs (its
 `total`), the subset that fed the enrichment's learned state (its
-`observed`), and the subset that produced its derived value (its
-`enriched`), cumulative since daemon start. Where the Rule counter counts
-events per rule, an Enrichment counter counts an enrichment's runs per rule.
+`observed`), and the subset that produced its non-default derived value
+(its `enriched`), cumulative since daemon start. Where the Rule counter
+counts events per rule, an Enrichment counter counts an enrichment's
+runs per rule.
 _Avoid_: stat counter, enrichment stats, enricher tally
 
 ### Enforcement
