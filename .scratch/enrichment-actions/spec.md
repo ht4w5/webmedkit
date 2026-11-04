@@ -1,6 +1,6 @@
 # Enrichment actions: demand-driven enrichment and Enrichment counters - spec
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
