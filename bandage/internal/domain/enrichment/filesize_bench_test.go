@@ -38,7 +38,7 @@ func benchEvents(n int) []domain.Event {
 }
 
 func BenchmarkEnrich(b *testing.B) {
-	fe, err := NewFilesizeEnricher(newBenchCache(), 5, 5)
+	fe, err := NewFilesizeEnricher(newBenchCache(), 5)
 	if err != nil {
 		b.Fatalf("NewFilesizeEnricher: %v", err)
 	}
