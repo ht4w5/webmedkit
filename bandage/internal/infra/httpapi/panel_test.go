@@ -379,6 +379,41 @@ func TestRuleCountersTableRendersThroughTheSharedCounterTableMechanism(t *testin
 	}
 }
 
+// The counter-table registry's initializer names every config at script
+// load, so each config must be declared before the registry entry that
+// names it: const initializers run at load and a below-declared const is
+// in its temporal dead zone there - the script dies before its first
+// line of behavior. The pin reads the served bytes' order: every
+// slot/config pair the registry initializer lists names a const
+// declared above the registry, so a third counter table adopts the
+// mechanism without re-breaking the panel.
+func TestCounterTableConfigsAreDeclaredBeforeTheRegistry(t *testing.T) {
+	js := apiRequest(t, apiTestServer(nil), http.MethodGet, "/common.js").Body.String()
+	registry := strings.Index(js, "const COUNTER_TABLES =")
+	if registry < 0 {
+		t.Fatalf("common.js lacks the counter-table registry declaration, body:\n%s", js)
+	}
+	end := strings.Index(js[registry:], "]);")
+	if end < 0 {
+		t.Fatalf("common.js lacks the counter-table registry initializer's end, body:\n%s", js)
+	}
+	pairs := regexp.MustCompile(`\[[A-Z_]+_SLOT, ([A-Z_]+)\]`).FindAllStringSubmatch(js[registry:registry+end], -1)
+	if len(pairs) == 0 {
+		t.Fatalf("common.js's counter-table registry initializer lists no slot/config pair, body:\n%s", js)
+	}
+	for _, pair := range pairs {
+		name := pair[1]
+		decl := strings.Index(js, "const "+name+" =")
+		if decl < 0 {
+			t.Errorf("common.js names %s in the counter-table registry but never declares it, body:\n%s", name, js)
+			continue
+		}
+		if decl > registry {
+			t.Errorf("common.js declares %s after the counter-table registry initializer that names it; a const initializer cannot reference a const declared below (temporal dead zone at load - the panel script dies on startup), body:\n%s", name, js)
+		}
+	}
+}
+
 // The Stats page gains an enrichment counters section after the rule
 // counters table: a five-column rule/enrichment/total/observed/enriched
 // table in the established table styling, fed by the /api/stats
