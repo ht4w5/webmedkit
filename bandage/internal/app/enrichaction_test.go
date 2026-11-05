@@ -39,19 +39,13 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	send := func(d *testDaemon) {
-		for i := 0; i < 7; i++ {
-			d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
-		}
-		d.waitProcessed(t, 7)
-	}
-
 	// The enrich action beside a replay tracker never runs: the rule's
 	// own tracker update is blind first, so the rule never Matches and
 	// nothing observes - the estimate cannot bootstrap itself.
 	clock := newTestClock(mustTime(t, wallBase))
 	blind := startTestDaemon(t, clock, "unixgram", ":memory:", blindRules)
-	send(blind)
+	sendFullDownloads(blind, 1734345934, "203.0.113.7", "/releases/24.04.iso", 1000, 7)
+	blind.waitProcessed(t, 7)
 	if doc := blind.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("reports with the self-feeding rule = %+v, want none (its own tracker update runs before its enrich action)", doc.Reports)
 	}
@@ -69,7 +63,8 @@ chains:
 	// volume 2) - the same report the tracker could not write before.
 	clock = newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", composedRules)
-	send(d)
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/releases/24.04.iso", 1000, 7)
+	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports with the composed enrich rule = %+v, want 1 (reports appear where the tracker was blind before)", doc.Reports)
@@ -186,12 +181,6 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	send := func(d *testDaemon, sizes ...int64) {
-		for i, size := range sizes {
-			d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, size, fmt.Sprintf("%d", size)))
-		}
-		d.waitProcessed(t, int64(len(sizes)))
-	}
 
 	// Two enrich actions per event: observations 2 and 3 land on event
 	// 2 (1000 -> 1200 -> 1360), observations 4 and 5 on event 3 (1488 ->
@@ -199,7 +188,9 @@ chains:
 	// the report sample carries the double-stepped estimate 1590.
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", doubleRules)
-	send(d, 1000, 2000, 2000)
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/f", 1000, 1)
+	sendFullDownloads(d, 1734345935, "203.0.113.7", "/f", 2000, 2)
+	d.waitProcessed(t, 3)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports after 3 double-traversed events = %+v, want 1 (value 3 overflows on the third)", doc.Reports)
@@ -222,7 +213,9 @@ chains:
 	// 1360) - the report sample exposes the difference.
 	clock = newTestClock(mustTime(t, wallBase))
 	single := startTestDaemon(t, clock, "unixgram", ":memory:", singleRules)
-	send(single, 1000, 2000, 2000)
+	sendFullDownloads(single, 1734345934, "203.0.113.7", "/f", 1000, 1)
+	sendFullDownloads(single, 1734345935, "203.0.113.7", "/f", 2000, 2)
+	single.waitProcessed(t, 3)
 	doc = single.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports after 3 single-traversed events = %+v, want 1", doc.Reports)

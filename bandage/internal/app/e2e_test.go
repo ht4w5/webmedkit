@@ -350,6 +350,14 @@ func (d *testDaemon) waitProcessed(t *testing.T, n int64) {
 	}
 }
 
+// sendFullDownloads sends n full downloads of path from client at sent bytes
+// each: one 200 line with matching Content-Length per epoch, from epoch on.
+func sendFullDownloads(d *testDaemon, epoch int, client, path string, sent int64, n int) {
+	for i := range n {
+		d.send(nginxLineClen(fmt.Sprintf("%d", epoch+i), client, "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
+	}
+}
+
 // apiClient makes one-shot HTTP calls (keep-alive disabled) so no pooled
 // connection can outlive a test and race the cleanup deadline.
 var apiClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}

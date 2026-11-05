@@ -12,7 +12,7 @@ type stubCache struct {
 	records map[string]FilesizeRecord
 }
 
-func (c *stubCache) Lookup(_ context.Context, path string) (FilesizeRecord, error) {
+func (c *stubCache) Get(_ context.Context, path string) (FilesizeRecord, error) {
 	return c.records[path], nil
 }
 

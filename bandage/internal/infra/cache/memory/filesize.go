@@ -19,9 +19,9 @@ func NewFilesize(store *Store) Filesize {
 	return Filesize{store: store}
 }
 
-// Lookup returns the file-size record for path (zero-valued if none
+// Get returns the file-size record for path (zero-valued if none
 // exists) without creating or changing any record.
-func (f Filesize) Lookup(ctx context.Context, path string) (enrichment.FilesizeRecord, error) {
+func (f Filesize) Get(ctx context.Context, path string) (enrichment.FilesizeRecord, error) {
 	return decodeFilesize(f.store.Get(ctx, domain.FilesizeNamespace, path)), nil
 }
 
