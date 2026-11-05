@@ -19,6 +19,12 @@ func NewFilesize(store *Store) Filesize {
 	return Filesize{store: store}
 }
 
+// Lookup returns the file-size record for path (zero-valued if none
+// exists) without creating or changing any record.
+func (f Filesize) Lookup(ctx context.Context, path string) (enrichment.FilesizeRecord, error) {
+	return decodeFilesize(f.store.Get(ctx, domain.FilesizeNamespace, path)), nil
+}
+
 // Update atomically applies fn to the file-size record for path; fn runs
 // under the store's per-key lock, so it must not perform I/O or use ctx.
 func (f Filesize) Update(ctx context.Context, path string, fn func(*enrichment.FilesizeRecord)) (enrichment.FilesizeRecord, error) {

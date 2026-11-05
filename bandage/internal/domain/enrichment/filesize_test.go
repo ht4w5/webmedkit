@@ -12,6 +12,10 @@ type stubCache struct {
 	records map[string]FilesizeRecord
 }
 
+func (c *stubCache) Lookup(_ context.Context, path string) (FilesizeRecord, error) {
+	return c.records[path], nil
+}
+
 func (c *stubCache) Update(_ context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error) {
 	if c.records == nil {
 		c.records = make(map[string]FilesizeRecord)
@@ -203,7 +207,8 @@ func TestEnrichStateIsPerPath(t *testing.T) {
 // Content-Length and GET 206 responses carrying a Content-Range total;
 // every other event observes nothing and never moves the estimate.
 func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
+	cache := &stubCache{}
+	fe, err := NewFilesizeEnricher(cache, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,6 +229,20 @@ func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
 		if got := enrichEvent(t, fe, ev); got != 1000 {
 			t.Errorf("ineligible %d (%s %d): size = %d, want the current estimate 1000", i, ev.Method, ev.Status, got)
 		}
+	}
+	// The same ineligible events against an unobserved path leave the
+	// size unknown and create no record: a record exists exactly for
+	// paths with at least one observation (scanner noise leaves no
+	// empty records behind to exert eviction pressure on real estimates).
+	for i, tmpl := range ineligible {
+		ev := *tmpl
+		ev.Path = "/b"
+		if got := enrichEvent(t, fe, &ev); got != domain.FilesizeUnknown {
+			t.Errorf("unobserved ineligible %d (%s %d): size = %d, want unknown", i, ev.Method, ev.Status, got)
+		}
+	}
+	if _, ok := cache.records["/b"]; ok {
+		t.Error("no record created for an unobserved path")
 	}
 	// One more observation moves the estimate exactly one step: nothing
 	// between the last observation and this one observed.

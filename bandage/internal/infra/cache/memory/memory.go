@@ -129,6 +129,25 @@ func (s *Store) updateLocked(sh *shard, fullKey, ns, key string, ttl time.Durati
 	return e.rec, s.evictLocked(sh)
 }
 
+// Get returns the record for (ns, key) without touching any state - not
+// even the entry's LRU order or expiry (Update is the only writer).
+// Absent and expired entries read as the zero record.
+func (s *Store) Get(ctx context.Context, ns, key string) track.Record {
+	s.gets.Add(1)
+	fullKey := ns + "\x00" + key
+	sh := s.shardFor(fullKey)
+
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if el, ok := sh.m[fullKey]; ok {
+		if e := el.Value.(*entry); e.expires.IsZero() || s.now().Before(e.expires) {
+			return e.rec
+		}
+	}
+	s.misses.Add(1)
+	return track.Record{}
+}
+
 // SweepExpired removes every expired entry across all shards (no-TTL entries
 // never expire). TTL removals are not evictions: nothing is logged or counted.
 func (s *Store) SweepExpired() {
