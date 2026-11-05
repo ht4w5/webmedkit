@@ -18,7 +18,7 @@ func newBenchCache() *benchCache {
 	return &benchCache{records: make(map[string]FilesizeRecord)}
 }
 
-func (c *benchCache) Lookup(_ context.Context, path string) (FilesizeRecord, error) {
+func (c *benchCache) Get(_ context.Context, path string) (FilesizeRecord, error) {
 	return c.records[path], nil
 }
 

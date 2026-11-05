@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -103,20 +102,13 @@ chains:
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 
-// sendFullDownloads sends n full downloads of path at sent bytes each.
-func sendFullDownloads(d *testDaemon, epoch int, path string, sent int64, n int) {
-	for i := range n {
-		d.send(nginxLineClen(fmt.Sprintf("%d", epoch+i), "203.0.113.7", "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
-	}
-}
-
 // US 26 "behave exactly as before": even a later event with a larger derived volume never moves the live report - only a ladder rung may override (ADR 0013).
 func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", singleVolumeMethodRules)
 
 	// Two full downloads overflow volume 1 on the second (value 2 > 1).
-	sendFullDownloads(d, 1734345934, "/small.iso", 100, 2)
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
 	d.waitProcessed(t, 2)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -129,7 +121,7 @@ func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 	clock.Advance(10 * time.Minute) // 18:10
 	// Three big full downloads overflow the bigger derived volume 2 (3 > 2)
 	// - and still never move the live report.
-	sendFullDownloads(d, 1734345944, "/big.iso", 10000, 3)
+	sendFullDownloads(d, 1734345944, "203.0.113.7", "/big.iso", 10000, 3)
 	d.waitProcessed(t, 5)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -153,7 +145,7 @@ func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "reports.db")
 
 	d1 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
-	sendFullDownloads(d1, 1734345934, "/small.iso", 100, 2)
+	sendFullDownloads(d1, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
 	d1.waitProcessed(t, 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := d1.Shutdown(ctx); err != nil {
@@ -163,7 +155,7 @@ func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 
 	clock.Advance(10 * time.Minute) // 18:10
 	d2 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
-	sendFullDownloads(d2, 1734345944, "/big.iso", 10000, 3)
+	sendFullDownloads(d2, 1734345944, "203.0.113.7", "/big.iso", 10000, 3)
 	d2.waitProcessed(t, 3)
 	doc := d2.getReports(t, nil)
 	if len(doc.Reports) != 1 {

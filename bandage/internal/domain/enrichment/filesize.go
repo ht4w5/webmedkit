@@ -22,9 +22,9 @@ type FilesizeRecord struct {
 // exactly for paths with at least one observation; Update is the port's
 // only writer.
 type FilesizeCache interface {
-	// Lookup returns the record for path (zero-valued if none exists)
+	// Get returns the record for path (zero-valued if none exists)
 	// without creating or changing any record.
-	Lookup(ctx context.Context, path string) (FilesizeRecord, error)
+	Get(ctx context.Context, path string) (FilesizeRecord, error)
 	// Update atomically applies fn to the record for path (zero-valued if none
 	// exists); fn runs under the store's per-path lock and must not do I/O.
 	Update(ctx context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error)
@@ -59,7 +59,7 @@ func NewFilesizeEnricher(cache FilesizeCache, period int64) (*FilesizeEnricher, 
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) (observed, enriched bool, err error) {
 	obs, ok := sizeObservation(event)
 	if !ok {
-		rec, err := fe.cache.Lookup(ctx, event.Path)
+		rec, err := fe.cache.Get(ctx, event.Path)
 		if err != nil {
 			return false, false, fmt.Errorf("enrichment: lookup filesize record: %w", err)
 		}

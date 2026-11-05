@@ -35,12 +35,7 @@ chains:
 	// Three full transfers of the small file: each counts one download
 	// equivalent from request one - the low rung (at 1) fires at values
 	// 2 and 3.
-	send := func(client, path string, sent int64, i int) {
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), client, "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
-	}
-	for i := 0; i < 3; i++ {
-		send("203.0.113.7", "/small.iso", 1000, i)
-	}
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/small.iso", 1000, 3)
 	d.waitProcessed(t, 3)
 	if got, want := marks(d), []string{"MARK:LOW", "MARK:LOW"}; !slices.Equal(got, want) {
 		t.Fatalf("marks = %v, want %v (one low mark per event above the rung)", got, want)
@@ -48,9 +43,7 @@ chains:
 
 	// The big file climbs the same: the same three transfers, the same
 	// marks - the thresholds are download equivalents, not bytes.
-	for i := 3; i < 6; i++ {
-		send("203.0.113.8", "/big.iso", 100000, i)
-	}
+	sendFullDownloads(d, 1734345937, "203.0.113.8", "/big.iso", 100000, 3)
 	d.waitProcessed(t, 6)
 	want := []string{"MARK:LOW", "MARK:LOW", "MARK:LOW", "MARK:LOW"}
 	if got := marks(d); !slices.Equal(got, want) {
