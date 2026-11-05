@@ -22,9 +22,10 @@ _Avoid_: where clause, condition
 
 **Filesize**:
 The total size of a path's content, learned from observed response sizes
-(Content-Length on GET/HEAD 200, Content-Range totals on GET 206);
-unknown until enough observations have been seen. Empty content is
-indistinguishable from not-yet-known.
+(Content-Length on GET/HEAD 200, Content-Range totals on GET 206). A
+path's estimate exists from its first observation and each later
+observation refines it. Unknown until that first observation. Empty
+content is indistinguishable from not-yet-known.
 _Avoid_: size index, file length
 
 **Sampling rule**:

@@ -145,12 +145,12 @@ the rule's own enrich action produced. A terminal action upstream of
 the enrich rule (`stop`, or `goto`'s "this chain ends") starves the
 estimate on that path (the stop-skew): the event never reaches the
 enrich action and never observes (accepted and recorded in ADR 0028;
-the familiar warm-up blindness holds until enough observations
-arrive).
+while nothing observes the path the estimate stays unknown and
+replay stays blind).
 
 The documented composition for feeding a replay tracker is therefore a
 **tracker-less enrich rule ahead of the consuming rule** - it turns
-blind replay warm-up into live volume tracking:
+replay's blindness to unknown sizes into live volume tracking:
 
 ```yaml
 version: 0
@@ -495,9 +495,9 @@ size of the path's content, learned from response sizes
 never from the bytes a request happened to transfer
 ([GLOSSARY.md](../GLOSSARY.md),
 [ADR 0019](adr/0019-filesize-from-response-sizes.md)). While the
-estimate is unknown - warm-up, or a log emitter without the
-response-size fields - replay is blind and the event adds nothing to
-the tracker.
+estimate is unknown - the path not yet observed, or a log emitter
+without the response-size fields - replay is blind and the event adds
+nothing to the tracker.
 
 The shipped ladder's `bandage -t` output shows every rung with its
 threshold and its actions; the tracker line carries no volume (the
@@ -524,9 +524,9 @@ absent key means the default, while a written `counter` must carry
 Two quantities, counted exactly under the worker pool:
 
 - `total` counts every event the rule is evaluated against - events
-  its filter rejected and replay warm-up skips included. A chain
-  dispatched more than once for one event counts one visit per
-  dispatch.
+  its filter rejected and replay's blind skips of unknown sizes
+  included. A chain dispatched more than once for one event
+  counts one visit per dispatch.
 - `matched` counts exactly the rule's Matches - one per matching
   Event, a ladder counting once however many rungs fired.
 
