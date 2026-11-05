@@ -16,7 +16,7 @@ import (
 func BenchmarkEnrichMemory(b *testing.B) {
 	corpus := bench.NewCorpus(bench.Seed, bench.ShapeFull, bench.DistZipf, 1024)
 	store := memory.New(benchCacheRoomy, benchClock, zerolog.Nop())
-	fe, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(store), filesizePeriod, filesizeMinSamples)
+	fe, err := enrichment.NewFilesizeEnricher(memory.NewFilesize(store), filesizePeriod)
 	if err != nil {
 		b.Fatalf("NewFilesizeEnricher: %v", err)
 	}

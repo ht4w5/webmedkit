@@ -12,8 +12,8 @@ format as `clen` and `crange`. Parsing is asymmetric on purpose: a
 malformed `clen` is an invalid field and drops the line like any bad log
 line, while an unusual `crange` degrades to no observation and never
 drops the event. Nothing falls back to transferred bytes: an emitter
-without the new fields leaves the estimate unknown (the existing
-warm-up blindness) until it is upgraded and the path re-observed.
+without the new fields leaves the estimate unknown (replay stays
+blind) until it is upgraded and the path re-observed.
 
 Two gates keep the layers honest. The user-defined **Filter** (the
 rules file's `enrichment` block, `enrichment.filter`, default `any`
@@ -37,10 +37,15 @@ the compressed and identity representations, while per-representation
 increments stay wire-consistent and the increment cap at 1 absorbs the
 residual skew; `206` transfers now yield exact totals and count as their
 true fraction of a download; rollout must deploy the log format
-(`clen`, `crange`) before upgrading bandage.
+(`clen`, `crange`) before upgrading bandage; after an emitter upgrade,
+one observation now suffices to know a path's size instead of several.
 
 Amended by ADR 0028: the two gates are gone - there is no
 `enrichment.filter` and no pre-evaluation enrichment path. Enrichment
 runs as an `enrich` action where a rule matches (demand-driven), so an
 eligible response observes only where the rules ask for it, and the
 Sampling rule alone still decides what it contributes.
+
+Amended by ADR 0029: the warm-up gate is gone - a path's estimate
+exists from its first observation and each later observation refines
+it.

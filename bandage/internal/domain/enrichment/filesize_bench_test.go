@@ -18,6 +18,10 @@ func newBenchCache() *benchCache {
 	return &benchCache{records: make(map[string]FilesizeRecord)}
 }
 
+func (c *benchCache) Get(_ context.Context, path string) (FilesizeRecord, error) {
+	return c.records[path], nil
+}
+
 func (c *benchCache) Update(_ context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error) {
 	r := c.records[path]
 	fn(&r)
@@ -38,7 +42,7 @@ func benchEvents(n int) []domain.Event {
 }
 
 func BenchmarkEnrich(b *testing.B) {
-	fe, err := NewFilesizeEnricher(newBenchCache(), 5, 5)
+	fe, err := NewFilesizeEnricher(newBenchCache(), 5)
 	if err != nil {
 		b.Fatalf("NewFilesizeEnricher: %v", err)
 	}

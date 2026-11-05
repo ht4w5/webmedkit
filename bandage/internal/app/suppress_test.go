@@ -491,7 +491,8 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// The bandwidth rule Triggers every event (1000 > 100) but writes only
-	// the first; the replay rule overflows on the sixth (value 2 > 1).
+	// the first; the replay rule counts from request one and overflows on
+	// the second (value 2 > 1).
 	const events = 6
 	for i := range events {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
@@ -547,21 +548,22 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Two paths, one Target: each path overflows on its sixth transfer;
-	// the second path's Trigger is suppressed at (rule, Target) grain.
-	for i := range 6 {
+	// Two paths, one Target: each path overflows on its second transfer
+	// (value 2 > 1, counted from request one); the second path's Trigger
+	// is suppressed at (rule, Target) grain.
+	for i := range 2 {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/a.iso", 200, 1000, "1000"))
 	}
-	d.waitProcessed(t, 6)
+	d.waitProcessed(t, 2)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 || doc.Reports[0].Sample.Path != "/a.iso" {
 		t.Fatalf("reports = %+v, want one for /a.iso", doc.Reports)
 	}
 
-	for i := 6; i < 12; i++ {
+	for i := 2; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/b.iso", 200, 1000, "1000"))
 	}
-	d.waitProcessed(t, 12)
+	d.waitProcessed(t, 4)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want still 1 ((rule, Target) grain, not per path)", doc.Reports)

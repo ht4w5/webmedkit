@@ -105,15 +105,14 @@ func (s *Store) updateLocked(sh *shard, fullKey, ns, key string, ttl time.Durati
 	defer sh.mu.Unlock()
 	now := s.now()
 
+	if e := lookupLocked(sh, fullKey, now); e != nil {
+		s.sets.Add(1)
+		fn(&e.rec)
+		e.expires = expiry(now, ttl)
+		sh.l.MoveToFront(sh.m[fullKey])
+		return e.rec, nil
+	}
 	if el, ok := sh.m[fullKey]; ok {
-		e := el.Value.(*entry)
-		if e.expires.IsZero() || now.Before(e.expires) {
-			s.sets.Add(1)
-			fn(&e.rec)
-			e.expires = expiry(now, ttl)
-			sh.l.MoveToFront(el)
-			return e.rec, nil
-		}
 		// Lazy expiry: drop the entry, restart accumulation below.
 		sh.remove(el)
 	}
@@ -129,6 +128,35 @@ func (s *Store) updateLocked(sh *shard, fullKey, ns, key string, ttl time.Durati
 	return e.rec, s.evictLocked(sh)
 }
 
+// Get returns the record for (ns, key) without touching any state - not
+// even the entry's LRU order or expiry (Update is the only writer).
+// Absent and expired entries read as the zero record.
+func (s *Store) Get(ctx context.Context, ns, key string) track.Record {
+	s.gets.Add(1)
+	fullKey := ns + "\x00" + key
+	sh := s.shardFor(fullKey)
+
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if e := lookupLocked(sh, fullKey, s.now()); e != nil {
+		return e.rec
+	}
+	s.misses.Add(1)
+	return track.Record{}
+}
+
+// lookupLocked returns the entry stored for fullKey when it is live at now
+// (a zero expiry never expires); absent and expired entries read as none.
+// The caller holds sh's lock.
+func lookupLocked(sh *shard, fullKey string, now time.Time) *entry {
+	if el, ok := sh.m[fullKey]; ok {
+		if e := el.Value.(*entry); e.expires.IsZero() || now.Before(e.expires) {
+			return e
+		}
+	}
+	return nil
+}
+
 // SweepExpired removes every expired entry across all shards (no-TTL entries
 // never expire). TTL removals are not evictions: nothing is logged or counted.
 func (s *Store) SweepExpired() {
@@ -138,7 +166,7 @@ func (s *Store) SweepExpired() {
 		sh.mu.Lock()
 		for el := sh.l.Back(); el != nil; {
 			prev := el.Prev()
-			if e := el.Value.(*entry); !e.expires.IsZero() && !now.Before(e.expires) {
+			if e := el.Value.(*entry); lookupLocked(sh, e.fullKey, now) == nil {
 				sh.remove(el)
 			}
 			el = prev
@@ -147,7 +175,7 @@ func (s *Store) SweepExpired() {
 	}
 }
 
-// Statistics returns the operational counters; Misses counts lookups that found
+// Statistics returns the operational counters; Misses counts reads that found
 // no live entry, Size counts expired entries until removed or swept.
 func (s *Store) Statistics() track.Statistics {
 	var size int64

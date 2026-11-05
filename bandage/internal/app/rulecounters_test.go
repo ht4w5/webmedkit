@@ -210,9 +210,10 @@ chains:
 	}
 }
 
-// TestE2ERuleCountersCountReplayWarmUpSkipsInTotal: a replay warm-up
-// skip is a visit - the real traffic hitting the rule - but not a Match.
-func TestE2ERuleCountersCountReplayWarmUpSkipsInTotal(t *testing.T) {
+// TestE2ERuleCountersCountReplaySkipsInTotal: a replay unknown-size
+// skip is a visit - the real traffic hitting the rule - but not a
+// Match.
+func TestE2ERuleCountersCountReplaySkipsInTotal(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -228,19 +229,19 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Warm-up (the first 4 of 5 samples): the skips are visits, never
-	// Matches.
+	// Never-observed traffic (unknown size): the skips are visits,
+	// never Matches.
 	for i := range 4 {
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, ""))
 	}
 	d.waitProcessed(t, 4)
 	want := []ruleCounterDoc{{ID: "iso-replay", Total: 4, Matched: 0}}
 	_, doc := d.getStats(t)
 	if got := statsRules(t, doc); !slices.Equal(got, want) {
-		t.Fatalf("rules block after warm-up = %+v, want %+v (skips are visits, not Matches)", got, want)
+		t.Fatalf("rules block on an unobserved path = %+v, want %+v (skips are visits, not Matches)", got, want)
 	}
 
-	// The enriched samples match on the third (value 3 > volume 2).
+	// The observed samples match on the third (value 3 > volume 2).
 	for i := 4; i < 7; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}

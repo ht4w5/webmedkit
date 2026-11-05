@@ -350,6 +350,14 @@ func (d *testDaemon) waitProcessed(t *testing.T, n int64) {
 	}
 }
 
+// sendFullDownloads sends n full downloads of path from client at sent bytes
+// each: one 200 line with matching Content-Length per epoch, from epoch on.
+func sendFullDownloads(d *testDaemon, epoch int, client, path string, sent int64, n int) {
+	for i := range n {
+		d.send(nginxLineClen(fmt.Sprintf("%d", epoch+i), client, "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
+	}
+}
+
 // apiClient makes one-shot HTTP calls (keep-alive disabled) so no pooled
 // connection can outlive a test and race the cleanup deadline.
 var apiClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
@@ -1014,18 +1022,18 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 		}
 	}
 
-	// The tracker cache block: each parsed event updated the shared store
-	// twice (the enrich action's file-size record + the tracker record),
-	// and both records stay live.
+	// The tracker cache block: each parsed event read the file-size record
+	// read-only (an old-format line observes nothing, so no record exists)
+	// and wrote the tracker record; only the tracker record stays live.
 	for _, f := range []struct {
 		field string
 		want  float64
 	}{
 		{"gets", 4},
-		{"sets", 4},
-		{"misses", 2},
+		{"sets", 2},
+		{"misses", 3},
 		{"evictions", 0},
-		{"size", 2},
+		{"size", 1},
 		{"entry_cap", 65536},
 	} {
 		if got := statsNum(t, doc, "tracker_cache", f.field); got != f.want {
@@ -1043,9 +1051,9 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
 	// Nothing resets tracker state, so the enrich action's file-size record
 	// and the tracker record both keep cache_size at 2.
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000, "12000"))
 	d.send("this is not json")
 	d.waitProcessed(t, 4)
 	d.logStats()
@@ -1101,12 +1109,12 @@ chains:
 `
 	// max_entries 1: the enrich action's file-size record and the tracker
 	// record share one slot, so inserting the tracker record evicts the
-	// file-size record.
+	// file-size record (the observed response creates it first).
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
 
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/api", 200, 500, "500"))
 	d.waitProcessed(t, 1)
 
 	_, doc := d.getStats(t)
@@ -2562,9 +2570,10 @@ chains:
 	}
 }
 
-// TestE2EReplayWarmUpBlindThenReports: the replay tracker is blind until a
-// path's file-size estimate warms, then accumulates and reports.
-func TestE2EReplayWarmUpBlindThenReports(t *testing.T) {
+// TestE2EReplayTracksFromRequestOne: the enrich-then-replay composition
+// counts a download from its very first request - one observation
+// suffices - so the third full transfer overflows volume 2.
+func TestE2EReplayTracksFromRequestOne(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -2579,25 +2588,22 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Warm-up (the first 4 of 5 samples): the size estimate is unknown,
-	// so every event is skipped entirely.
-	for i := 0; i < 4; i++ {
+	// The first two full transfers are counted from request one (each
+	// adds fraction 1) but still sit at the tolerance.
+	for i := 0; i < 2; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}
-	d.waitProcessed(t, 4)
+	d.waitProcessed(t, 2)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports during warm-up = %+v, want none (replay is blind until the estimate warms)", doc.Reports)
+		t.Fatalf("reports at value 2 = %+v, want none (2 does not exceed the tolerance 2)", doc.Reports)
 	}
 
-	// Samples 5..7 are enriched (size 1000): each full transfer adds
-	// fraction 1, and value 3 > volume 2 overflows on the third.
-	for i := 4; i < 7; i++ {
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
-	}
-	d.waitProcessed(t, 7)
+	// The third full transfer pushes value 3 > volume 2 over the edge.
+	d.send(nginxLineClen("1734345936", "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
+	d.waitProcessed(t, 3)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
-		t.Fatalf("reports after warm-up = %+v, want 1", doc.Reports)
+		t.Fatalf("reports after the third transfer = %+v, want 1", doc.Reports)
 	}
 	r := doc.Reports[0]
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 3 || r.Tracker.Leak != 0 || r.Tracker.Volume != 2 {
@@ -2629,20 +2635,22 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// Interleave small (100 B) and big (10 000 B) transfers of two paths
-	// from one client: each path warms and accumulates on its own.
-	for i := 0; i < 6; i++ {
+	// from one client: each path seeds its own estimate from its first
+	// response and accumulates on its own.
+	for i := 0; i < 3; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100, "100"))
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000, "10000"))
 	}
-	d.waitProcessed(t, 12)
+	d.waitProcessed(t, 6)
 
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want exactly the small file's (the big file stays under its tolerance)", doc.Reports)
 	}
 	r := doc.Reports[0]
-	// The small file's samples 5 and 6 add fraction 1 each: value 2
-	// overflows its volume 1 (volume_low at size 100).
+	// The small file's second transfer adds fraction 2 > 1 (volume_low
+	// at size 100); the big file would need four transfers to pass its
+	// volume 3 and gets three.
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
 		t.Errorf("tracker = %+v, want {replay 2 0 1} (volume_low at size 100)", r.Tracker)
 	}
@@ -2668,8 +2676,10 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Five partial downloads (500 of 1000 bytes on the wire) warm the
-	// estimate to the reported length 1000; each counts half a download.
+	// Five partial downloads (500 of 1000 bytes on the wire): the first
+	// seeds the estimate to the reported length 1000 from its own
+	// response, and every one counts half a download - the fifth pushes
+	// 2.5 past volume 2.
 	for i := 0; i < 5; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
 	}
@@ -2677,8 +2687,8 @@ chains:
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", "GET", "/releases/24.04.iso", 304, 0, ""))
 	}
-	// Four more partial downloads add 0.5 each and overflow volume 2 at
-	// 2.5 on the last.
+	// Four more partial downloads keep counting (the report's reading
+	// stays frozen at the trigger).
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345943+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
 	}
@@ -2690,7 +2700,7 @@ chains:
 	}
 	r := doc.Reports[0]
 	if r.Tracker.Value != 2.5 {
-		t.Errorf("tracker value = %v, want 2.5 (nine half-downloads; the revalidations added none)", r.Tracker.Value)
+		t.Errorf("tracker value = %v, want 2.5 (five half-downloads at trigger; the revalidations added none)", r.Tracker.Value)
 	}
 	if r.Sample.SizeBytes != 1000 {
 		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.SizeBytes)
@@ -2740,17 +2750,15 @@ chains:
 `
 			d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-			// Warm the /f estimate to 1000 (samples 1-4 stay blind).
-			for i := 0; i < 5; i++ {
-				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
+			// Seed the /f estimate to 1000 from its first response.
+			d.send(nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
+			for i := 0; i < 2; i++ {
+				d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345935+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen, tt.crange))
 			}
 			for i := 0; i < 2; i++ {
-				d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen, tt.crange))
+				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345937+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
 			}
-			for i := 0; i < 2; i++ {
-				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345941+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
-			}
-			d.waitProcessed(t, 9)
+			d.waitProcessed(t, 5)
 
 			doc := d.getReports(t, nil)
 			if len(doc.Reports) != 1 {
@@ -2793,39 +2801,30 @@ chains:
 		d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345934+seq), "203.0.113.7", "GET", "/iso", 206, 250, "250", ranges[i]))
 	}
 
-	// The first download's four range transfers warm the estimate to the exact
-	// total 1000; still blind to replay, they add nothing.
+	// The first download's four range transfers count from request one:
+	// the first range response's Content-Range total seeds the estimate
+	// to the exact total 1000, and each transfer adds its true quarter.
 	for i := range ranges {
 		sendRange(i, i)
 	}
 	d.waitProcessed(t, 4)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports during warm-up = %+v, want none (replay is blind until the estimate warms)", doc.Reports)
+		t.Fatalf("reports after one download = %+v, want none (one download totals one download-equivalent, not one per request)", doc.Reports)
 	}
 
-	// The resumed download's four transfers cross the warm-up gate and
-	// accumulate exactly 4 x 0.25 = one download-equivalent.
+	// A second full download accumulates one more: value 2.0 still sits
+	// at its tolerance, so no report yet.
 	for i := range ranges {
 		sendRange(4+i, i)
 	}
 	d.waitProcessed(t, 8)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports after one resumed download = %+v, want none (one download totals one download-equivalent, not one per request)", doc.Reports)
-	}
-
-	// A third full download accumulates one more: value 2.0 still sits
-	// at its tolerance, so no report yet.
-	for i := range ranges {
-		sendRange(8+i, i)
-	}
-	d.waitProcessed(t, 12)
-	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("reports at value 2.0 = %+v, want none (2.0 does not exceed the tolerance 2)", doc.Reports)
 	}
 
-	// The fourth download's first chunk pushes 2.25 past the tolerance.
-	sendRange(12, 0)
-	d.waitProcessed(t, 13)
+	// The third download's first chunk pushes 2.25 past the tolerance.
+	sendRange(8, 0)
+	d.waitProcessed(t, 9)
 
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -2833,7 +2832,7 @@ chains:
 	}
 	r := doc.Reports[0]
 	if r.Tracker.Value != 2.25 {
-		t.Errorf("tracker value = %v, want 2.25 (nine counted quarters: the resumed downloads' true fractions)", r.Tracker.Value)
+		t.Errorf("tracker value = %v, want 2.25 (nine counted quarters, all from request one)", r.Tracker.Value)
 	}
 	if r.Tracker.Volume != 2 {
 		t.Errorf("tracker volume = %v, want 2 (volume_high at the exact total 1000, not at the 250-byte chunk)", r.Tracker.Volume)

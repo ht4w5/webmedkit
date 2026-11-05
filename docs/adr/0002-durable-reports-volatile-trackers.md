@@ -8,4 +8,4 @@ re-warm quickly. The `TrackerCache` port is the seam where a write-back
 persistence layer can be added later without touching the trackers.
 
 Consequences: a restart is a free pass for abusers (all buckets empty,
-file-size EWMA re-warms after `minSamples` observations); accepted for v0.
+file-size EWMA re-warms after one observation); accepted for v0.

@@ -9,7 +9,7 @@ import (
 )
 
 // FilesizeUnknown marks an event whose estimated file size is not known
-// yet (enrichment warm-up).
+// yet (the path has never been observed).
 const FilesizeUnknown int64 = 0
 
 // Event is a single parsed access-log record as it flows through

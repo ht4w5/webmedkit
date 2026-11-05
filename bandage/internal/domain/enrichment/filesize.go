@@ -18,8 +18,13 @@ type FilesizeRecord struct {
 	Samples int
 }
 
-// FilesizeCache stores file-size records keyed by path.
+// FilesizeCache stores file-size records keyed by path. A record exists
+// exactly for paths with at least one observation; Update is the port's
+// only writer.
 type FilesizeCache interface {
+	// Get returns the record for path (zero-valued if none exists)
+	// without creating or changing any record.
+	Get(ctx context.Context, path string) (FilesizeRecord, error)
 	// Update atomically applies fn to the record for path (zero-valued if none
 	// exists); fn runs under the store's per-path lock and must not do I/O.
 	Update(ctx context.Context, path string, fn func(*FilesizeRecord)) (FilesizeRecord, error)
@@ -27,37 +32,47 @@ type FilesizeCache interface {
 
 // FilesizeEnricher estimates each path's file size from observed response sizes.
 type FilesizeEnricher struct {
-	cache      FilesizeCache
-	period     int64
-	minSamples int
+	cache  FilesizeCache
+	period int64
 }
 
-// NewFilesizeEnricher builds an enricher over cache; period is the EWMA window (alpha = 1/period) and minSamples the warm-up gate (both >= 1).
-func NewFilesizeEnricher(cache FilesizeCache, period int64, minSamples int) (*FilesizeEnricher, error) {
+// NewFilesizeEnricher builds an enricher over cache; period is the EWMA
+// window (alpha = 1/period, >= 1).
+func NewFilesizeEnricher(cache FilesizeCache, period int64) (*FilesizeEnricher, error) {
 	if period < 1 {
 		return nil, errors.New("enrichment: period must be at least 1")
 	}
-	if minSamples < 1 {
-		return nil, errors.New("enrichment: minSamples must be at least 1")
-	}
 	return &FilesizeEnricher{
-		cache:      cache,
-		period:     period,
-		minSamples: minSamples,
+		cache:  cache,
+		period: period,
 	}, nil
 }
 
-// Enrich sets event.SizeBytes from the path's estimate (from sample
-// minSamples on, else FilesizeUnknown); only the Sampling rule observes.
+// Enrich sets event.SizeBytes from the path's estimate: seeded exactly
+// by the path's first observation and refined by EWMA thereafter,
+// FilesizeUnknown until that first observation. Only the Sampling rule
+// observes; a run without an observation reads the estimate and never
+// writes.
 // observed reports whether the run fed the estimate (an eligible
 // observation under the Sampling rule), enriched whether the run left
 // a non-default derived value (GLOSSARY: Enrichment counter).
 func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) (observed, enriched bool, err error) {
 	obs, ok := sizeObservation(event)
-	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
-		if !ok {
-			return // ineligible: read the record, observe nothing
+	if !ok {
+		rec, err := fe.cache.Get(ctx, event.Path)
+		if err != nil {
+			return false, false, fmt.Errorf("enrichment: lookup filesize record: %w", err)
 		}
+		if rec.Samples == 0 {
+			// Unknown until the first observation; stale values overwritten.
+			event.SizeBytes = domain.FilesizeUnknown
+			return false, false, nil
+		}
+		event.SizeBytes = rec.SizeEWMA
+		return false, true, nil
+	}
+
+	rec, err := fe.cache.Update(ctx, event.Path, func(r *FilesizeRecord) {
 		if r.Samples == 0 {
 			// Seed with the first observation exactly (no blending).
 			r.SizeEWMA = obs
@@ -70,13 +85,8 @@ func (fe *FilesizeEnricher) Enrich(ctx context.Context, event *domain.Event) (ob
 	if err != nil {
 		return false, false, fmt.Errorf("enrichment: update filesize record: %w", err)
 	}
-
-	if rec.Samples >= fe.minSamples {
-		event.SizeBytes = rec.SizeEWMA
-		return ok, true, nil
-	}
-	event.SizeBytes = domain.FilesizeUnknown
-	return ok, false, nil
+	event.SizeBytes = rec.SizeEWMA
+	return true, true, nil
 }
 
 // sizeObservation reports the event's response size under the Sampling rule

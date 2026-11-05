@@ -39,19 +39,13 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	send := func(d *testDaemon) {
-		for i := 0; i < 7; i++ {
-			d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
-		}
-		d.waitProcessed(t, 7)
-	}
-
 	// The enrich action beside a replay tracker never runs: the rule's
 	// own tracker update is blind first, so the rule never Matches and
 	// nothing observes - the estimate cannot bootstrap itself.
 	clock := newTestClock(mustTime(t, wallBase))
 	blind := startTestDaemon(t, clock, "unixgram", ":memory:", blindRules)
-	send(blind)
+	sendFullDownloads(blind, 1734345934, "203.0.113.7", "/releases/24.04.iso", 1000, 7)
+	blind.waitProcessed(t, 7)
 	if doc := blind.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("reports with the self-feeding rule = %+v, want none (its own tracker update runs before its enrich action)", doc.Reports)
 	}
@@ -63,18 +57,21 @@ chains:
 	}
 
 	// The composition - a tracker-less enrich rule ahead of the same
-	// consuming rule - warms the estimate and reports exactly as the
-	// tracker was blind before.
+	// consuming rule - counts the download from its very first request:
+	// the first response's observation seeds the estimate and feeds the
+	// tracker at once, and the third full transfer overflows (value 3 >
+	// volume 2) - the same report the tracker could not write before.
 	clock = newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", composedRules)
-	send(d)
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/releases/24.04.iso", 1000, 7)
+	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports with the composed enrich rule = %+v, want 1 (reports appear where the tracker was blind before)", doc.Reports)
 	}
 	r := doc.Reports[0]
 	if r.Tracker.Value != 3 {
-		t.Errorf("tracker value = %v, want 3 (three known-size downloads of 1000/1000)", r.Tracker.Value)
+		t.Errorf("tracker value = %v, want 3 (three counted downloads of 1000/1000, from request one)", r.Tracker.Value)
 	}
 	if r.Sample.SizeBytes != 1000 {
 		t.Errorf("sample size = %d, want 1000 (the enrich action fed the event before the replay rule)", r.Sample.SizeBytes)
@@ -83,8 +80,8 @@ chains:
 
 // TestE2EEnrichmentObservesOnlyWhereAnEnrichActionRuns: demand-driven
 // learning - an eligible response contributes an observation only when
-// its event reaches an enrich action, a warm estimate never leaks to
-// events outside the demand domain, and untouched traffic touches no
+// its event reaches an enrich action, the learned estimate never leaks
+// to events outside the demand domain, and untouched traffic touches no
 // enrichment state at all.
 func TestE2EEnrichmentObservesOnlyWhereAnEnrichActionRuns(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -93,7 +90,7 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-warm-source
+      - id: enrich-source
         filter: 'src 203.0.113.7/32'
         actions: [{enrich: {type: filesize}}]
       - id: iso-replay
@@ -103,30 +100,34 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// Eligible GETs on one path, alternating the enriched source .7
-	// with the unreached source .8: only .7's five responses observe,
-	// so the estimate warms on the fifth .7 event - had .8's eligible
-	// responses observed too, it would have warmed three pairs earlier.
+	// with the unreached source .8: only .7's responses observe and feed
+	// the tracker - .7 learns the path from its first response and
+	// reports at its third (value 3 > volume 2) - while .8's events
+	// reach no enrich action and so observe nothing.
 	for i := range 5 {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.8", "GET", "/f", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 10)
-	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports after 5 pairs = %+v, want none (five observations only, still warming)", doc.Reports)
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports after 5 pairs = %+v, want exactly 1 for the enriched source (the third .7 download overflows)", doc.Reports)
 	}
 	// The unreached source touched nothing at all: its events neither
-	// observed nor fed the tracker (warm-up skips), so the store holds
-	// the file-size record and .7's replay tracker record from 6 updates.
+	// observed nor fed the tracker (an unobserved path's size stays
+	// unknown), so the store holds the file-size record and .7's replay
+	// tracker record from 10 updates.
 	_, stats := d.getStats(t)
-	for field, want := range map[string]float64{"gets": 6, "sets": 6, "misses": 2, "size": 2} {
+	for field, want := range map[string]float64{"gets": 10, "sets": 10, "misses": 2, "size": 2} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (five enrich runs and one fed tracker update)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (five enrich runs and five fed tracker updates)", field, got, want)
 		}
 	}
 
-	// The seventh .7 response pushes .7's tracker to 3 > 2 and reports;
-	// the interleaved .8 response observes nothing and its warm-size
-	// blindness keeps it out of the report set entirely.
+	// More .7 responses keep feeding the tracker (the report's reading
+	// stays frozen at the first write); the interleaved .8 response
+	// observes nothing and its unknown size keeps it out of the report
+	// set entirely.
 	for i, line := range []string{
 		nginxLineClen("1734345944", "203.0.113.7", "GET", "/f", 200, 1000, "1000"),
 		nginxLineClen("1734345945", "203.0.113.8", "GET", "/f", 200, 1000, "1000"),
@@ -135,7 +136,7 @@ chains:
 		d.send(line)
 		d.waitProcessed(t, int64(11+i))
 	}
-	doc := d.getReports(t, nil)
+	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
 		t.Fatalf("reports = %+v, want exactly 1 for the enriched source", doc.Reports)
 	}
@@ -150,10 +151,11 @@ chains:
 
 // TestE2EOneEventTraversingTwoEnrichActionsRunsTwice: no memoization
 // per event - one event traversing two enrich actions of one kind runs
-// the enrichment twice and observes twice, so three events warm a
-// minSamples-5 estimate (six observations) where one enrich action
-// would need five. Counting the runs is the Enrichment counters' job;
-// preventing double enrichment is the rules author's (ADR 0028).
+// the enrichment twice and observes twice, moving the estimate two EWMA
+// steps per event where one enrich action moves one (pinned by the
+// triggering event's sample size). Counting the runs is the Enrichment
+// counters' job; preventing double enrichment is the rules author's
+// (ADR 0028).
 func TestE2EOneEventTraversingTwoEnrichActionsRunsTwice(t *testing.T) {
 	doubleRules := `
 version: 0
@@ -179,52 +181,50 @@ chains:
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
-	send := func(d *testDaemon, from, to int) {
-		for i := from; i < to; i++ {
-			d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
-		}
-		d.waitProcessed(t, int64(to))
-	}
 
-	// Two enrich actions per event: observations 5 and 6 land on event
-	// 3, which is fed immediately and reports on event 5 (value 3).
+	// Two enrich actions per event: observations 2 and 3 land on event
+	// 2 (1000 -> 1200 -> 1360), observations 4 and 5 on event 3 (1488 ->
+	// 1590). The tracker overflows on event 3 (value 3 > volume 2) and
+	// the report sample carries the double-stepped estimate 1590.
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", doubleRules)
-	send(d, 0, 3)
-	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports after 3 double-traversed events = %+v, want none (value 1, still under the tolerance)", doc.Reports)
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/f", 1000, 1)
+	sendFullDownloads(d, 1734345935, "203.0.113.7", "/f", 2000, 2)
+	d.waitProcessed(t, 3)
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports after 3 double-traversed events = %+v, want 1 (value 3 overflows on the third)", doc.Reports)
+	}
+	if v := doc.Reports[0].Tracker.Value; v != 3 {
+		t.Errorf("tracker value = %v, want 3 (events 1-3 fed one download each)", v)
+	}
+	if got := doc.Reports[0].Sample.SizeBytes; got != 1590 {
+		t.Errorf("sample size = %d, want 1590 (two observations per event: 1000->1200->1360->1488->1590)", got)
 	}
 	_, stats := d.getStats(t)
-	for field, want := range map[string]float64{"gets": 7, "sets": 7} {
+	for field, want := range map[string]float64{"gets": 9, "sets": 9} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
 			t.Errorf("tracker_cache.%s = %v, want %v (two enrich updates per event, one fed tracker update)", field, got, want)
 		}
 	}
-	send(d, 3, 5)
-	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 {
-		t.Fatalf("reports after 5 double-traversed events = %+v, want 1", doc.Reports)
-	}
-	if v := doc.Reports[0].Tracker.Value; v != 3 {
-		t.Errorf("tracker value = %v, want 3 (events 3-5 fed one download each)", v)
-	}
 
 	// One enrich action per event: the same traffic observes once per
-	// event and needs five events to warm - the report lands two
-	// events later.
+	// event and moves the estimate one step per event (1000 -> 1200 ->
+	// 1360) - the report sample exposes the difference.
 	clock = newTestClock(mustTime(t, wallBase))
 	single := startTestDaemon(t, clock, "unixgram", ":memory:", singleRules)
-	send(single, 0, 5)
-	if doc := single.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports after 5 single-traversed events = %+v, want none (the fifth event just warmed the estimate)", doc.Reports)
-	}
-	send(single, 5, 7)
+	sendFullDownloads(single, 1734345934, "203.0.113.7", "/f", 1000, 1)
+	sendFullDownloads(single, 1734345935, "203.0.113.7", "/f", 2000, 2)
+	single.waitProcessed(t, 3)
 	doc = single.getReports(t, nil)
 	if len(doc.Reports) != 1 {
-		t.Fatalf("reports after 7 single-traversed events = %+v, want 1", doc.Reports)
+		t.Fatalf("reports after 3 single-traversed events = %+v, want 1", doc.Reports)
 	}
 	if v := doc.Reports[0].Tracker.Value; v != 3 {
-		t.Errorf("tracker value = %v, want 3 (events 5-7 fed one download each)", v)
+		t.Errorf("tracker value = %v, want 3 (events 1-3 fed one download each)", v)
+	}
+	if got := doc.Reports[0].Sample.SizeBytes; got != 1360 {
+		t.Errorf("sample size = %d, want 1360 (one observation per event: 1000->1200->1360)", got)
 	}
 }
 

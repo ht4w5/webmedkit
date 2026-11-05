@@ -27,7 +27,7 @@ type enrichmentRunner interface {
 // cannot drift.
 var enrichmentBuilders = map[string]func(cache *memory.Store) (enrichmentRunner, error){
 	"filesize": func(cache *memory.Store) (enrichmentRunner, error) {
-		return enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod, filesizeMinSamples)
+		return enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod)
 	},
 }
 

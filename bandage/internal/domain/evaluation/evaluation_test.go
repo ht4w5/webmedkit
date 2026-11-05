@@ -238,7 +238,7 @@ func event(at int64, path string, sent, size int64) *domain.Event {
 }
 
 // Unknown size estimates are skipped entirely: no increment, no decay, no
-// cache touch - no Match is possible during enrichment warm-up.
+// cache touch - no Match is possible while the size stays unknown.
 func TestReplaySkipsUnknownSize(t *testing.T) {
 	h := newHarness(t, &domain.TrackerConfig{
 		Kind: domain.TrackReplay, Leak: 0, Volume: 0.5,
@@ -249,7 +249,7 @@ func TestReplaySkipsUnknownSize(t *testing.T) {
 		t.Errorf("cache updates = %+v, want none (unknown size skips the cache entirely)", h.cch.updates)
 	}
 	if len(h.sink.upserts) != 0 {
-		t.Errorf("upserts = %+v, want none (no Match during warm-up)", h.sink.upserts)
+		t.Errorf("upserts = %+v, want none (no Match on an unknown size)", h.sink.upserts)
 	}
 }
 
@@ -626,7 +626,7 @@ func TestEvaluateCountsOneEnrichRunPerTraversal(t *testing.T) {
 	counts := &stubEnrichCounters{}
 	sink, cache := &stubSink{}, &stubCache{}
 	chains := []domain.Chain{{Name: domain.EntryChain, Rules: []domain.Rule{{
-		ID: "warm-estimate", Filter: matchAll{},
+		ID: "enrich-twice", Filter: matchAll{},
 		Actions: []domain.Action{
 			{Enrich: &domain.EnrichAction{Type: "filesize"}},
 			{Enrich: &domain.EnrichAction{Type: "filesize"}},
@@ -645,8 +645,8 @@ func TestEvaluateCountsOneEnrichRunPerTraversal(t *testing.T) {
 		t.Errorf("enrichment invocations = %v, want one per enrich action traversed, by kind name (no memoization)", enrich.kinds)
 	}
 	want := []enrichCountCall{
-		{ruleID: "warm-estimate", kind: "filesize", observed: true},
-		{ruleID: "warm-estimate", kind: "filesize", observed: true},
+		{ruleID: "enrich-twice", kind: "filesize", observed: true},
+		{ruleID: "enrich-twice", kind: "filesize", observed: true},
 	}
 	if !slices.Equal(counts.calls, want) {
 		t.Errorf("counting points = %+v, want %+v (one Run per run, carrying its outcomes)", counts.calls, want)
