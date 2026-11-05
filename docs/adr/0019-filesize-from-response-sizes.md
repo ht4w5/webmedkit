@@ -44,7 +44,8 @@ Amended by ADR 0028: the two gates are gone - there is no
 `enrichment.filter` and no pre-evaluation enrichment path. Enrichment
 runs as an `enrich` action where a rule matches (demand-driven), so an
 eligible response observes only where the rules ask for it, and the
-Sampling rule alone still decides what it contributes. Amended again
-(no new ADR: this adjusts a parameter of the existing decision, not a
-new trade-off): the warm-up gate is gone - a path's estimate exists
-from its first observation and each later observation refines it.
+Sampling rule alone still decides what it contributes.
+
+Amended by ADR 0029: the warm-up gate is gone - a path's estimate
+exists from its first observation and each later observation refines
+it.

@@ -29,3 +29,10 @@ ADR 0019's amendment note follows the earlier in-place style rather
 than the repo's numbered amendment-ADR pattern (see the code review;
 human decision pending).
 Context: spec `../spec.md` (Implementation Decisions; Further Notes).
+
+## Comments
+
+The pending ADR amendment-style question resolved as option (b): the
+warm-up-gate decision moved to ADR 0029 and ADR 0019 reads
+`Amended by ADR 0029`, matching the repo's numbered amendment-ADR
+pattern.
