@@ -130,7 +130,11 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker record. An unknown size means the path was never observed.
+	// The /api/stats counters prove the lookups reach the store and
+	// nothing else: every ineligible run reads the file-size record
+	// read-only (gets and misses) and no run writes (no sets, no record)
+	// - an unknown size means the path was never observed. The tracker
+	// record is never touched.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, ""))
 	}
@@ -142,9 +146,9 @@ chains:
 		t.Fatalf("reports on an unobserved path = %+v, want none", doc.Reports)
 	}
 	_, stats := d.getStats(t)
-	for field, want := range map[string]float64{"gets": 4, "sets": 4, "misses": 1, "size": 1} {
+	for field, want := range map[string]float64{"gets": 4, "sets": 0, "misses": 4, "size": 0} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (only the file-size record, no tracker touch)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (read-only lookups only: the ineligible runs never write)", field, got, want)
 		}
 	}
 
@@ -162,9 +166,9 @@ chains:
 		t.Errorf("tracker value = %v, want 3 (the unknown-size events never incremented)", v)
 	}
 	_, stats = d.getStats(t)
-	for field, want := range map[string]float64{"misses": 2, "size": 2} {
+	for field, want := range map[string]float64{"gets": 10, "sets": 6, "misses": 6, "size": 2} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (the tracker record appears with the first known sample)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (the writes resume with the first known sample: the tracker record appears and both records stay live)", field, got, want)
 		}
 	}
 }

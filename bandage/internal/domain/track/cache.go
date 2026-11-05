@@ -2,7 +2,7 @@ package track
 
 // Statistics is the tracker cache's operational counters (ADR 0006).
 type Statistics struct {
-	// Gets counts Update lookups; Sets counts Update writes.
+	// Gets counts lookups (read-only Get and Update); Sets counts Update writes.
 	Gets int64
 	Sets int64
 	// Misses counts lookups that found no live entry (absent or expired).

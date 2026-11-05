@@ -1014,18 +1014,18 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 		}
 	}
 
-	// The tracker cache block: each parsed event updated the shared store
-	// twice (the enrich action's file-size record + the tracker record),
-	// and both records stay live.
+	// The tracker cache block: each parsed event read the file-size record
+	// read-only (an old-format line observes nothing, so no record exists)
+	// and wrote the tracker record; only the tracker record stays live.
 	for _, f := range []struct {
 		field string
 		want  float64
 	}{
 		{"gets", 4},
-		{"sets", 4},
-		{"misses", 2},
+		{"sets", 2},
+		{"misses", 3},
 		{"evictions", 0},
-		{"size", 2},
+		{"size", 1},
 		{"entry_cap", 65536},
 	} {
 		if got := statsNum(t, doc, "tracker_cache", f.field); got != f.want {
@@ -1043,9 +1043,9 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
 	// Nothing resets tracker state, so the enrich action's file-size record
 	// and the tracker record both keep cache_size at 2.
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000, "12000"))
 	d.send("this is not json")
 	d.waitProcessed(t, 4)
 	d.logStats()
@@ -1101,12 +1101,12 @@ chains:
 `
 	// max_entries 1: the enrich action's file-size record and the tracker
 	// record share one slot, so inserting the tracker record evicts the
-	// file-size record.
+	// file-size record (the observed response creates it first).
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
 
-	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
+	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/api", 200, 500, "500"))
 	d.waitProcessed(t, 1)
 
 	_, doc := d.getStats(t)
