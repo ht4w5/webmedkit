@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,9 +89,39 @@ func (v stepVolume) String() string { return "step" }
 // harness assembles a service around one replay rule and exposes the
 // stubs' recorded state.
 type harness struct {
-	svc  *Service
-	sink *stubSink
-	cch  *stubCache
+	svc    *Service
+	sink   *stubSink
+	cch    *stubCache
+	enrich *stubEnrichments
+}
+
+// stubEnrichments is an Enrichments double: the kind's run assigns the
+// canned derived size - the value production's enrich action sets for
+// the event during evaluation.
+type stubEnrichments struct {
+	size int64
+}
+
+func (s *stubEnrichments) Enrich(_ context.Context, _ string, ev *domain.Event) (bool, bool, error) {
+	ev.SizeBytes = s.size
+	ok := s.size != domain.FilesizeUnknown
+	return ok, ok, nil
+}
+
+// stubEnrichCounters is an EnrichmentCounters double recording the
+// evaluator's counting points.
+type stubEnrichCounters struct {
+	calls []enrichCountCall
+}
+
+// enrichCountCall is one counted enrichment run.
+type enrichCountCall struct {
+	ruleID, kind       string
+	observed, enriched bool
+}
+
+func (s *stubEnrichCounters) Run(ruleID, kind string, observed, enriched bool) {
+	s.calls = append(s.calls, enrichCountCall{ruleID: ruleID, kind: kind, observed: observed, enriched: enriched})
 }
 
 func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
@@ -101,32 +132,48 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 	}
 	sink := &stubSink{}
 	cache := &stubCache{}
+	enrich := &stubEnrichments{}
 	chains := []domain.Chain{{
 		Name: domain.EntryChain,
-		Rules: []domain.Rule{{
-			ID:      "iso-replay",
-			Filter:  matchAll{},
-			Tracker: cfg,
-			Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "iso-replay", TTL: time.Hour}}},
-		}},
+		Rules: []domain.Rule{
+			// The tracker-less enrich rule ahead of the consuming rule
+			// (ADR 0028): derived fields are set by enrich actions during
+			// evaluation - the entry reset wipes any pre-set value.
+			{ID: "enrich-size", Filter: matchAll{}, Actions: []domain.Action{{Enrich: &domain.EnrichAction{Type: "filesize"}}}},
+			{
+				ID:      "iso-replay",
+				Filter:  matchAll{},
+				Tracker: cfg,
+				Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "iso-replay", TTL: time.Hour}}},
+			},
+		},
 	}}
 	return &harness{
 		svc: NewService(Deps{
-			ReasonPrefix: "bandage",
-			Chains:       chains,
-			Cache:        cache,
-			Reports:      sink,
-			Counters:     NopCounters{},
-			Now:          func() time.Time { return time.Unix(1000, 0) },
-			Logger:       NopLogger{},
+			ReasonPrefix:       "bandage",
+			Chains:             chains,
+			Cache:              cache,
+			Reports:            sink,
+			Counters:           NopCounters{},
+			Enrichments:        enrich,
+			EnrichmentCounters: NopEnrichmentCounters{},
+			Now:                func() time.Time { return time.Unix(1000, 0) },
+			Logger:             NopLogger{},
 		}),
-		sink: sink,
-		cch:  cache,
+		sink:   sink,
+		cch:    cache,
+		enrich: enrich,
 	}
 }
 
 func (h *harness) evaluate(t *testing.T, ev *domain.Event) {
 	t.Helper()
+	// The event's canned derived size rides the stub enrichment: the
+	// entry reset wipes pre-set derived fields, so the enrich action is
+	// what feeds the tracker in this model.
+	if h.enrich != nil {
+		h.enrich.size = ev.SizeBytes
+	}
 	if err := h.svc.Evaluate(context.Background(), ev); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
 	}
@@ -136,6 +183,9 @@ func (h *harness) evaluate(t *testing.T, ev *domain.Event) {
 // propagate (a failed write aborts the action list).
 func (h *harness) evaluateErr(t *testing.T, ev *domain.Event) {
 	t.Helper()
+	if h.enrich != nil {
+		h.enrich.size = ev.SizeBytes
+	}
 	if err := h.svc.Evaluate(context.Background(), ev); err == nil {
 		t.Fatalf("Evaluate error = nil, want the failed report write to propagate")
 	}
@@ -161,13 +211,15 @@ func newRuleHarness(t *testing.T, cfg *domain.TrackerConfig, actions ...domain.A
 	}}
 	return &harness{
 		svc: NewService(Deps{
-			ReasonPrefix: "bandage",
-			Chains:       chains,
-			Cache:        cache,
-			Reports:      sink,
-			Counters:     NopCounters{},
-			Now:          func() time.Time { return time.Unix(1000, 0) },
-			Logger:       NopLogger{},
+			ReasonPrefix:       "bandage",
+			Chains:             chains,
+			Cache:              cache,
+			Reports:            sink,
+			Counters:           NopCounters{},
+			Enrichments:        NopEnrichments{},
+			EnrichmentCounters: NopEnrichmentCounters{},
+			Now:                func() time.Time { return time.Unix(1000, 0) },
+			Logger:             NopLogger{},
 		}),
 		sink: sink,
 		cch:  cache,
@@ -480,7 +532,7 @@ func TestTrackerlessRuleTouchesNoTracker(t *testing.T) {
 }
 
 // Actions see the Trigger-time tracker reading (pre-reset), never the
-// emptied bucket.
+// emptied tracker.
 func TestActionsSeeTriggerTimeReading(t *testing.T) {
 	log := &captureLogger{}
 	sink, cache := &stubSink{}, &stubCache{}
@@ -493,13 +545,15 @@ func TestActionsSeeTriggerTimeReading(t *testing.T) {
 		},
 	}}}}
 	svc := NewService(Deps{
-		ReasonPrefix: "bandage",
-		Chains:       chains,
-		Cache:        cache,
-		Reports:      sink,
-		Counters:     NopCounters{},
-		Now:          func() time.Time { return time.Unix(1000, 0) },
-		Logger:       log,
+		ReasonPrefix:       "bandage",
+		Chains:             chains,
+		Cache:              cache,
+		Reports:            sink,
+		Counters:           NopCounters{},
+		Enrichments:        NopEnrichments{},
+		EnrichmentCounters: NopEnrichmentCounters{},
+		Now:                func() time.Time { return time.Unix(1000, 0) },
+		Logger:             log,
 	})
 
 	for i := 0; i < 3; i++ {
@@ -526,13 +580,15 @@ func TestEvaluateWithoutTheEntryChainErrors(t *testing.T) {
 		Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "helper", TTL: time.Hour}}},
 	}}}}
 	svc := NewService(Deps{
-		ReasonPrefix: "bandage",
-		Chains:       chains,
-		Cache:        cache,
-		Reports:      sink,
-		Counters:     NopCounters{},
-		Now:          func() time.Time { return time.Unix(1000, 0) },
-		Logger:       NopLogger{},
+		ReasonPrefix:       "bandage",
+		Chains:             chains,
+		Cache:              cache,
+		Reports:            sink,
+		Counters:           NopCounters{},
+		Enrichments:        NopEnrichments{},
+		EnrichmentCounters: NopEnrichmentCounters{},
+		Now:                func() time.Time { return time.Unix(1000, 0) },
+		Logger:             NopLogger{},
 	})
 
 	err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0))
@@ -544,5 +600,55 @@ func TestEvaluateWithoutTheEntryChainErrors(t *testing.T) {
 	}
 	if sink.attempts != 0 || len(cache.updates) != 0 {
 		t.Errorf("report writes = %d, cache updates = %d, want none (nothing ran)", sink.attempts, len(cache.updates))
+	}
+}
+
+// fixedEnrich is an Enrichments double returning fixed outcomes and
+// recording every invocation by kind name.
+type fixedEnrich struct {
+	observed, enriched bool
+	kinds              []string
+}
+
+func (f *fixedEnrich) Enrich(_ context.Context, kind string, _ *domain.Event) (bool, bool, error) {
+	f.kinds = append(f.kinds, kind)
+	return f.observed, f.enriched, nil
+}
+
+// TestEvaluateCountsOneEnrichRunPerTraversal: the evaluator owns the
+// enrichment counting points (GLOSSARY: Enrichment counter) - one Run
+// per enrich action traversal, carrying the run's outcomes - and
+// nothing memoizes per event: one event traversing two enrich actions
+// of one kind runs the enrichment twice (ADR 0028; the run-based
+// counts themselves land with the Enrichment counters).
+func TestEvaluateCountsOneEnrichRunPerTraversal(t *testing.T) {
+	enrich := &fixedEnrich{observed: true}
+	counts := &stubEnrichCounters{}
+	sink, cache := &stubSink{}, &stubCache{}
+	chains := []domain.Chain{{Name: domain.EntryChain, Rules: []domain.Rule{{
+		ID: "warm-estimate", Filter: matchAll{},
+		Actions: []domain.Action{
+			{Enrich: &domain.EnrichAction{Type: "filesize"}},
+			{Enrich: &domain.EnrichAction{Type: "filesize"}},
+		},
+	}}}}
+	svc := NewService(Deps{
+		ReasonPrefix: "bandage", Chains: chains, Cache: cache, Reports: sink,
+		Counters: NopCounters{}, Enrichments: enrich, EnrichmentCounters: counts,
+		Now: func() time.Time { return time.Unix(1000, 0) }, Logger: NopLogger{},
+	})
+
+	if err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0)); err != nil {
+		t.Fatalf("Evaluate error: %v", err)
+	}
+	if !slices.Equal(enrich.kinds, []string{"filesize", "filesize"}) {
+		t.Errorf("enrichment invocations = %v, want one per enrich action traversed, by kind name (no memoization)", enrich.kinds)
+	}
+	want := []enrichCountCall{
+		{ruleID: "warm-estimate", kind: "filesize", observed: true},
+		{ruleID: "warm-estimate", kind: "filesize", observed: true},
+	}
+	if !slices.Equal(counts.calls, want) {
+		t.Errorf("counting points = %+v, want %+v (one Run per run, carrying its outcomes)", counts.calls, want)
 	}
 }

@@ -24,7 +24,7 @@ func BenchmarkEnrichMemory(b *testing.B) {
 	var lines int
 	for b.Loop() {
 		ev := benchEvent(corpus, lines)
-		if err := fe.Enrich(ctx, &ev); err != nil {
+		if _, _, err := fe.Enrich(ctx, &ev); err != nil {
 			b.Fatalf("Enrich: %v", err)
 		}
 		lines++

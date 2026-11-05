@@ -15,9 +15,10 @@ version: 0
 # name the deployment instead of the binary.
 # reason_prefix: my-deployment
 
-# Enrichment settings live in the rules file, not bandage.yml.
-enrichment:
-  filter: any                  # rule-filter expression gating enrichment wholly (default any)
+# Enrichment is demand-driven: it runs only where a rule's action list
+# asks for it with an `enrich` action (see docs/rules.md) - the old
+# top-level `enrichment` block is gone and fails load naming the
+# migration.
 
 chains:
   # The entry chain: the front door, one filter-less jump rule per
@@ -115,6 +116,24 @@ chains:
   # The handoff target: per-path replay inspection of suspect targets.
   - name: inspect
     rules:
+      # The documented composition (docs/rules.md): a tracker-less
+      # enrich rule ahead of the consuming replay rule. It runs the
+      # Filesize enrichment where its filter says - the demand domain -
+      # and feeds the replay rule below; without it, replay warm-up
+      # stays blind because nothing enriches the path. An enrich
+      # action may carry its own counter: true (default false):
+      # enabling it counts that (rule, enrichment) pair's Enrichment
+      # counter - the pair's runs (total), the subset that fed the
+      # enrichment's learned state (observed) and the subset that
+      # produced a non-default derived value (enriched) - shown on
+      # /api/stats, the Web Panel's Stats page and /metrics.
+      # Uncomment the key to watch this pair.
+      - id: enrich-iso-size
+        filter: 'path suffix ".iso"'
+        actions:
+          - enrich:
+              type: filesize
+              # counter: true
       - id: iso-replay-inspect
         filter: 'path suffix ".iso"'
         tracker:

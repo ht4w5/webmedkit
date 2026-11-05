@@ -14,8 +14,8 @@ evaluation.
 _Avoid_: request, log entry, record
 
 **Filter**:
-A predicate over an Event deciding whether a rule or the enrichment path
-considers the event. The regex matchers (`path regex`, `agent regex`)
+A predicate over an Event deciding whether a rule considers the event.
+The regex matchers (`path regex`, `agent regex`)
 search unanchored, case-sensitive unless the pattern carries `(?i)`.
 Distinct from the Web Panel's client-side report filter.
 _Avoid_: where clause, condition
@@ -28,9 +28,11 @@ indistinguishable from not-yet-known.
 _Avoid_: size index, file length
 
 **Sampling rule**:
-The fixed, non-configurable rule deciding which events contribute an
-observation to the Filesize estimate - GET/HEAD 200 with a non-empty
-Content-Length, GET 206 with a non-empty Content-Range total. Not a
+The fixed, non-configurable rule deciding which observations are eligible
+for the Filesize estimate - GET/HEAD 200 with a non-empty Content-Length,
+GET 206 with a non-empty Content-Range total. Eligibility alone never
+observes: an observation happens when an enrichment runs for the event, and
+one event may contribute several. Not a
 Filter.
 _Avoid_: ewma filter, eligibility filter
 
@@ -58,7 +60,8 @@ ordered action list - or an escalation ladder of them.
 _Avoid_: detector, query
 
 **Action**:
-A step executed when a rule matches: report, log, goto, jump, or stop.
+A step executed when a rule matches: report, log, enrich, goto, jump,
+or stop.
 _Avoid_: statement, command
 
 **Match**:
@@ -174,6 +177,15 @@ The per-rule accounting of events: the events a rule is evaluated against and
 the subset that matched it, cumulative since daemon start. Unlike a Tracker,
 which accumulates a quantity per Target, a Rule counter counts events per rule.
 _Avoid_: tally, rule stats, hit counter
+
+**Enrichment counter**:
+The accounting of one enrichment's runs at one rule: the runs (its
+`total`), the subset that fed the enrichment's learned state (its
+`observed`), and the subset that produced its non-default derived value
+(its `enriched`), cumulative since daemon start. Where the Rule counter
+counts events per rule, an Enrichment counter counts an enrichment's
+runs per rule.
+_Avoid_: stat counter, enrichment stats, enricher tally
 
 ### Enforcement
 

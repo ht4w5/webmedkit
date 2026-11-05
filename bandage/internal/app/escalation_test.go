@@ -74,7 +74,7 @@ chains:
 	}
 }
 
-// No report rungs here: nothing resets the bucket mid-climb.
+// No report rungs here: nothing resets the tracker mid-climb.
 func TestE2EEscalationHandoffRungFiresEveryEvent(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `

@@ -47,7 +47,7 @@ func BenchmarkEnrich(b *testing.B) {
 	var lines int
 	for b.Loop() {
 		ev := events[lines%len(events)]
-		if err := fe.Enrich(ctx, &ev); err != nil {
+		if _, _, err := fe.Enrich(ctx, &ev); err != nil {
 			b.Fatalf("Enrich: %v", err)
 		}
 		lines++

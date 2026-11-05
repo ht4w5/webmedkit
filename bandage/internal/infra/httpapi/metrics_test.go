@@ -34,6 +34,14 @@ var metricsFixture = metricsSnapshot{
 			{ID: "zeta", Total: 12, Matched: 3},
 			{ID: "alpha", Total: 0, Matched: 0},
 		},
+		// Enrichment in rules-file order of pairs (zeta before alpha), so
+		// the golden pins that enrichment series render in rules-file
+		// order - deliberately unsorted, unlike the rule families' rule-ID
+		// order; alpha's zero counts pin the zero series.
+		Enrichment: []EnrichmentCounter{
+			{Rule: "zeta", Enrichment: "filesize", Total: 7, Observed: 5, Enriched: 2},
+			{Rule: "alpha", Enrichment: "filesize", Total: 0, Observed: 0, Enriched: 0},
+		},
 	},
 	runtime: Runtime{
 		Version:        "go1.27.0",
@@ -108,6 +116,18 @@ bandage_rule_events_total{rule="zeta"} 12
 # TYPE bandage_rule_events_matched_total counter
 bandage_rule_events_matched_total{rule="alpha"} 0
 bandage_rule_events_matched_total{rule="zeta"} 3
+# HELP bandage_enrichment_runs_total Enrichment runs for the rule and enrichment since daemon start.
+# TYPE bandage_enrichment_runs_total counter
+bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
+bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
+# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the enrichment's learned state since daemon start.
+# TYPE bandage_enrichment_runs_observed_total counter
+bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
+bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0
+# HELP bandage_enrichment_runs_enriched_total Enrichment runs that produced a non-default derived value since daemon start.
+# TYPE bandage_enrichment_runs_enriched_total counter
+bandage_enrichment_runs_enriched_total{rule="zeta",enrichment="filesize"} 2
+bandage_enrichment_runs_enriched_total{rule="alpha",enrichment="filesize"} 0
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1
@@ -173,6 +193,9 @@ func TestMetricsHelpAndTypeOnEveryFamily(t *testing.T) {
 		{"bandage_tracker_cache_entry_cap", "gauge"},
 		{"bandage_rule_events_total", "counter"},
 		{"bandage_rule_events_matched_total", "counter"},
+		{"bandage_enrichment_runs_total", "counter"},
+		{"bandage_enrichment_runs_observed_total", "counter"},
+		{"bandage_enrichment_runs_enriched_total", "counter"},
 		{"go_info", "gauge"},
 		{"go_goroutines", "gauge"},
 		{"go_threads", "gauge"},
@@ -200,6 +223,30 @@ func TestMetricsRuleFamiliesRenderNoSeriesWithoutCounters(t *testing.T) {
 	w := metricsRequest(t, snap, http.MethodGet)
 	body := w.Body.String()
 	for _, family := range []string{"bandage_rule_events_total", "bandage_rule_events_matched_total"} {
+		if !strings.Contains(body, "# HELP "+family+" ") {
+			t.Errorf("body lacks # HELP for %s", family)
+		}
+		if want := "# TYPE " + family + " counter\n"; !strings.Contains(body, want) {
+			t.Errorf("body lacks %q", want)
+		}
+		for _, line := range strings.Split(body, "\n") {
+			if strings.HasPrefix(line, family) {
+				t.Errorf("body renders a %s sample with no counter configured: %q", family, line)
+			}
+		}
+	}
+}
+
+// The enrichment families' series count is the number of
+// counter-enabled (rule, enrichment) pairs - no counter means HELP/TYPE
+// headers and no samples, never a bogus unlabeled series (cardinality
+// fixed per configuration).
+func TestMetricsEnrichmentFamiliesRenderNoSeriesWithoutCounters(t *testing.T) {
+	snap := metricsFixture
+	snap.stats.Enrichment = nil
+	w := metricsRequest(t, snap, http.MethodGet)
+	body := w.Body.String()
+	for _, family := range []string{"bandage_enrichment_runs_total", "bandage_enrichment_runs_observed_total", "bandage_enrichment_runs_enriched_total"} {
 		if !strings.Contains(body, "# HELP "+family+" ") {
 			t.Errorf("body lacks # HELP for %s", family)
 		}

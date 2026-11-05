@@ -43,8 +43,9 @@ type metricSeries struct {
 // One row of the machine-contract family table (ADR 0014). Rows render
 // in table order - the fixed exposition order - so a new family is one
 // new row; the row's series function renders its samples, one for the
-// scalar families and one per counter-enabled rule for the Rule counter
-// families (GLOSSARY: Rule counter).
+// scalar families and one per counter-enabled rule or (rule,
+// enrichment) pair for the counter families (GLOSSARY: Rule counter,
+// Enrichment counter).
 type metricFamily struct {
 	name   string
 	kind   metricKind
@@ -156,6 +157,24 @@ var metricFamilies = []metricFamily{
 		series: ruleSeries(func(rc RuleCounter) float64 { return float64(rc.Matched) }),
 	},
 	{
+		name:   "bandage_enrichment_runs_total",
+		kind:   metricCounter,
+		help:   "Enrichment runs for the rule and enrichment since daemon start.",
+		series: enrichmentSeries(func(ec EnrichmentCounter) float64 { return float64(ec.Total) }),
+	},
+	{
+		name:   "bandage_enrichment_runs_observed_total",
+		kind:   metricCounter,
+		help:   "Enrichment runs that fed the enrichment's learned state since daemon start.",
+		series: enrichmentSeries(func(ec EnrichmentCounter) float64 { return float64(ec.Observed) }),
+	},
+	{
+		name:   "bandage_enrichment_runs_enriched_total",
+		kind:   metricCounter,
+		help:   "Enrichment runs that produced a non-default derived value since daemon start.",
+		series: enrichmentSeries(func(ec EnrichmentCounter) float64 { return float64(ec.Enriched) }),
+	},
+	{
 		name: "go_info",
 		kind: metricGauge,
 		help: "Information about the Go environment.",
@@ -222,6 +241,22 @@ func ruleSeries(value func(rc RuleCounter) float64) func(metricsSnapshot) []metr
 		series := make([]metricSeries, len(rules))
 		for i, rc := range rules {
 			series[i] = metricSeries{labels: []metricLabel{{"rule", rc.ID}}, value: value(rc)}
+		}
+		return series
+	}
+}
+
+// enrichmentSeries is the Enrichment counter families' series
+// function: one series per counter-enabled (rule, enrichment) pair with
+// `rule` and `enrichment` labels, in rules-file order of pairs - the
+// metric contract's enrichment order, mirroring the /api/stats
+// enrichment block and deliberately asymmetric with ruleSeries, whose
+// families sort by rule ID. No counter configured means no series.
+func enrichmentSeries(value func(ec EnrichmentCounter) float64) func(metricsSnapshot) []metricSeries {
+	return func(s metricsSnapshot) []metricSeries {
+		series := make([]metricSeries, len(s.stats.Enrichment))
+		for i, ec := range s.stats.Enrichment {
+			series[i] = metricSeries{labels: []metricLabel{{"rule", ec.Rule}, {"enrichment", ec.Enrichment}}, value: value(ec)}
 		}
 		return series
 	}

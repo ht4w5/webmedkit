@@ -66,7 +66,7 @@ func TestStoreCapEvictsLeastRecentlyUsed(t *testing.T) {
 	if rec := update(t, s, "rule-one", "a", time.Hour, 1); rec.Value != 3 {
 		t.Errorf("a after drop = %v, want 3 (LRU order kept a)", rec.Value)
 	}
-	// The evicted bucket accumulates fresh state from zero on the next event.
+	// The evicted tracker accumulates fresh state from zero on the next event.
 	if rec := update(t, s, "rule-one", "b", time.Hour, 1); rec.Value != 1 {
 		t.Errorf("b after eviction = %v, want 1 (fresh accumulation)", rec.Value)
 	}

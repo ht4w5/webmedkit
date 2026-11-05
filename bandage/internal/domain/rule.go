@@ -84,11 +84,26 @@ type LogAction struct {
 	Message string
 }
 
+// EnrichAction runs one named enrichment for the event where the rule
+// matches - after the rule's own tracker update, so its derived fields
+// feed subsequent rules only (ADR 0028). The enrichments are global and
+// static: one instance per kind, shared by every enrich action naming
+// it, with no per-action configuration. It is never terminal (only goto
+// and stop are, ADR 0027).
+type EnrichAction struct {
+	// Type names the enrichment kind (the loader's closed vocabulary).
+	Type string
+	// Counter marks the (rule, enrichment) pair's Enrichment counter
+	// enabled (GLOSSARY: Enrichment counter).
+	Counter bool
+}
+
 // Action is a step executed when a rule matches; a match's actions run
 // in order. Exactly one field is set.
 type Action struct {
 	Report *ReportAction
 	Log    *LogAction
+	Enrich *EnrichAction
 	// Goto names the target chain: it runs, then this chain ends after
 	// the rule's remaining actions have run.
 	Goto string
@@ -103,6 +118,7 @@ type Action struct {
 type ActionVisitor interface {
 	VisitReport(*ReportAction) error
 	VisitLog(*LogAction) error
+	VisitEnrich(*EnrichAction) error
 	VisitGoto(target string) error
 	VisitJump(target string) error
 	VisitStop() error
@@ -116,6 +132,8 @@ func (a Action) Accept(v ActionVisitor) error {
 		return v.VisitReport(a.Report)
 	case a.Log != nil:
 		return v.VisitLog(a.Log)
+	case a.Enrich != nil:
+		return v.VisitEnrich(a.Enrich)
 	case a.Goto != "":
 		return v.VisitGoto(a.Goto)
 	case a.Jump != "":

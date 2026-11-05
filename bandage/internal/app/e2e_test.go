@@ -206,6 +206,15 @@ func (c *logCapture) messages() []string {
 	return out
 }
 
+// loadTestRules runs the daemon start path's rules-loading step over
+// rules YAML text - the same step every started test daemon's rules
+// pass through before assembly - and returns the load error instead of
+// failing the test: the load-failure outcome at the assembled-daemon
+// seam.
+func loadTestRules(rulesYAML string) (Rules, error) {
+	return ParseRules([]byte(rulesYAML))
+}
+
 func startTestDaemon(t *testing.T, clock *testClock, network, dbPath, rulesYAML string) *testDaemon {
 	t.Helper()
 	return startTestDaemonCfg(t, clock, network, dbPath, rulesYAML, nil)
@@ -248,9 +257,9 @@ func startTestDaemonBuildCfg(t *testing.T, clock *testClock, network, dbPath, ru
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	rules, err := ParseRules([]byte(rulesYAML))
+	rules, err := loadTestRules(rulesYAML)
 	if err != nil {
-		t.Fatalf("ParseRules error: %v", err)
+		t.Fatalf("rules load error: %v", err)
 	}
 	logs := &logCapture{}
 	opts := append([]Option{WithClock(clock.Now), WithLogger(zerolog.New(logs))}, extra...)
@@ -558,6 +567,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: sustained-egress
         tracker:
           track: bandwidth
@@ -1004,7 +1015,8 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 	}
 
 	// The tracker cache block: each parsed event updated the shared store
-	// twice (file-size record + tracker bucket), and both records stay live.
+	// twice (the enrich action's file-size record + the tracker record),
+	// and both records stay live.
 	for _, f := range []struct {
 		field string
 		want  float64
@@ -1029,7 +1041,8 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
-	// Nothing resets tracker state, so the filesize record and the tracker bucket both keep cache_size at 2.
+	// Nothing resets tracker state, so the enrich action's file-size record
+	// and the tracker record both keep cache_size at 2.
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000))
 	d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000))
@@ -1080,12 +1093,15 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
-	// max_entries 1: the file-size record and the tracker bucket share
-	// one slot, so inserting the bucket evicts the record.
+	// max_entries 1: the enrich action's file-size record and the tracker
+	// record share one slot, so inserting the tracker record evicts the
+	// file-size record.
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
@@ -1287,7 +1303,7 @@ func TestE2ERestartPersistsReportsNotTrackers(t *testing.T) {
 	}
 
 	// Tracker state restarts cold: one event of 100 bytes cannot overflow
-	// the fresh bucket and must not touch the persisted report.
+	// the fresh tracker and must not touch the persisted report.
 	d2.send(nginxLine(eventTime2, "203.0.113.7", "GET", "/big", 200, 100))
 	d2.waitProcessed(t, 1)
 	after := d2.getReports(t, nil)
@@ -1321,15 +1337,17 @@ chains:
 	}
 }
 
-// TestE2EEvictedBucketAccumulatesFresh: an evicted bucket accumulates fresh
+// TestE2EEvictedTrackerAccumulatesFresh: an evicted tracker accumulates fresh
 // state from zero on the next event and matches again past volume.
-func TestE2EEvictedBucketAccumulatesFresh(t *testing.T) {
+func TestE2EEvictedTrackerAccumulatesFresh(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:BURSTY"}]
@@ -1340,7 +1358,8 @@ chains:
 		c.Cache.MaxEntries = 2
 	})
 
-	// The write leaves the bucket in place: the entry the next insert evicts.
+	// The write leaves the tracker record in place: the entry the next
+	// insert evicts.
 	for i := 0; i < 3; i++ {
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
 	}
@@ -1350,8 +1369,8 @@ chains:
 		t.Fatalf("first trigger: %+v", doc.Reports)
 	}
 
-	// The new target caps the cache and evicts 203.0.113.7's bucket, so
-	// that bucket's next event must not Match (no stale Match).
+	// The new target caps the cache and evicts 203.0.113.7's tracker
+	// record, so that target's next event must not Match (no stale Match).
 	// The two events are serialized so the eviction is deterministic.
 	clock.Advance(10 * time.Minute)
 	d.send(nginxLine(eventTime2, "203.0.113.9", "GET", "/api", 200, 0))
@@ -1409,14 +1428,17 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
 	// max_entries 2 with a per-shard budget of one: the fixed keys place
 	// both tracker targets in one shard and the filesize record in the
-	// other, so the second target's insert evicts the first one's bucket
-	// (same key placement as TestE2EEvictedBucketAccumulatesFresh).
+	// other, so the second target's insert evicts the first target's
+	// tracker record (same key placement as
+	// TestE2EEvictedTrackerAccumulatesFresh).
 	trigger := func(t *testing.T, d *testDaemon) {
 		t.Helper()
 		d.send(nginxLine(eventTime1, "203.0.113.7", "GET", "/api", 200, 0))
@@ -2465,8 +2487,9 @@ chains:
 				t.Errorf("tracker value = %v, want 3 (three sources accumulated)", r.Tracker.Value)
 			}
 
-			// Another source in the same prefix lands in the emptied
-			// bucket and stays quiet: still exactly one report.
+			// Another source in the same prefix lands in the shared
+			// tracker and stays quiet: still exactly one report (its write
+			// is suppressed by the live report).
 			d.send(nginxLine(eventTime2, tt.fourth, "GET", "/api", 200, 0))
 			d.waitProcessed(t, int64(len(tt.clients))+1)
 			doc = d.getReports(t, nil)
@@ -2500,7 +2523,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Two sources per prefix give two buckets at value 2 each; nothing
+	// Two sources per prefix give two trackers at value 2 each; nothing
 	// overflows (value == volume does not overflow).
 	for _, client := range []string{"203.0.113.7", "203.0.113.8", "203.0.114.7", "203.0.114.8"} {
 		d.send(nginxLine(eventTime1, client, "GET", "/api", 200, 0))
@@ -2548,6 +2571,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2592,6 +2617,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker:
           track: replay
@@ -2633,6 +2660,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2703,6 +2732,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2745,6 +2776,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker:
           track: replay

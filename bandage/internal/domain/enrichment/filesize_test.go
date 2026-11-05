@@ -32,7 +32,7 @@ func enrichOnce(t *testing.T, fe *FilesizeEnricher, path string, observed int64)
 // enrichEvent feeds one event and returns its derived size.
 func enrichEvent(t *testing.T, fe *FilesizeEnricher, ev *domain.Event) int64 {
 	t.Helper()
-	if err := fe.Enrich(context.Background(), ev); err != nil {
+	if _, _, err := fe.Enrich(context.Background(), ev); err != nil {
 		t.Fatalf("Enrich error: %v", err)
 	}
 	return ev.SizeBytes
@@ -123,11 +123,45 @@ func TestEnrichOverwritesStaleSizeBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 100, SizeBytes: 999}
-	if err := fe.Enrich(context.Background(), ev); err != nil {
+	if _, _, err := fe.Enrich(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if ev.SizeBytes != domain.FilesizeUnknown {
 		t.Errorf("size = %d, want %d (stale value overwritten while warming)", ev.SizeBytes, domain.FilesizeUnknown)
+	}
+}
+
+// The run's outcomes (GLOSSARY: Enrichment counter): observed reports
+// the Sampling-rule eligibility that fed the estimate, enriched a
+// non-default derived value - the warm-up gate moves enriched, the
+// eligibility table moves observed.
+func TestEnrichReportsRunOutcomes(t *testing.T) {
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name         string
+		ev           *domain.Event
+		wantObserved bool
+		wantEnriched bool
+	}{
+		{"a warm-up sample observes without enriching", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, false},
+		{"another warm-up sample still enriches nothing", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, false},
+		{"the gate-opening sample observes and enriches", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, true},
+		{"an ineligible run observes nothing but carries the warm estimate", &domain.Event{Path: "/a", Method: "GET", Status: 304}, false, true},
+		{"a non-GET run observes nothing but carries the warm estimate", &domain.Event{Path: "/a", Method: "POST", Status: 200, ContentLength: 1000}, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observed, enriched, err := fe.Enrich(context.Background(), tt.ev)
+			if err != nil {
+				t.Fatalf("Enrich error: %v", err)
+			}
+			if observed != tt.wantObserved || enriched != tt.wantEnriched {
+				t.Errorf("outcomes = (%v, %v), want (observed %v, enriched %v)", observed, enriched, tt.wantObserved, tt.wantEnriched)
+			}
+		})
 	}
 }
 

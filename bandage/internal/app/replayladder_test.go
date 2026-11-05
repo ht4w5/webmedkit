@@ -19,6 +19,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -122,6 +124,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -132,7 +136,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker bucket.
+	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker record.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
@@ -165,7 +169,7 @@ chains:
 	_, stats = d.getStats(t)
 	for field, want := range map[string]float64{"misses": 2, "size": 2} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (the tracker bucket appears with the first known sample)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (the tracker record appears with the first known sample)", field, got, want)
 		}
 	}
 }
@@ -178,6 +182,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 1}
         escalations:
@@ -228,6 +234,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -294,6 +302,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:

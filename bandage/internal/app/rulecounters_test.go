@@ -219,6 +219,8 @@ version: 0
 chains:
   - name: main
     rules:
+      - id: enrich-size
+        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         counter: true
         tracker: {track: replay, leak: 0, volume: 2}

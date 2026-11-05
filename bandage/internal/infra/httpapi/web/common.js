@@ -49,11 +49,12 @@ function fetchJSON(method, url) {
 
 // The Stats view renders the snapshot as grouped key/value tables -
 // identity, pipeline, tracker cache - one row per key the daemon
-// reports, and a rule counters table for the rules block. Rows are
-// generated per reported key, never a fixed field list, so keys added
-// to the snapshot later (ADR 0006: fields may be added) appear as
-// generic extra rows and nothing the daemon reports is dropped by the
-// panel.
+// reports, plus one counter table per counter block (the rule and
+// enrichment counters tables; a later counter table adopts the same
+// mechanism). Rows are generated per reported key, never a fixed
+// field list, so keys added to the snapshot later (ADR 0006: fields
+// may be added) appear as generic extra rows and nothing the daemon
+// reports is dropped by the panel.
 
 // RULE_COUNTERS_KEY is the snapshot block feeding the rule counters
 // table; its entries are counter rows, never key/value rows.
@@ -62,21 +63,33 @@ const RULE_COUNTERS_KEY = "rules";
 // RULE_COUNTERS_SLOT is the rule counters table's row slot.
 const RULE_COUNTERS_SLOT = "group-rule-counters";
 
+// ENRICHMENT_COUNTERS_KEY is the snapshot block feeding the
+// enrichment counters table; its entries are counter rows, never
+// key/value rows.
+const ENRICHMENT_COUNTERS_KEY = "enrichment";
+
+// ENRICHMENT_COUNTERS_SLOT is the enrichment counters table's row slot.
+const ENRICHMENT_COUNTERS_SLOT = "group-enrichment-counters";
+
 // STATS_GROUPS maps the snapshot's known top-level blocks onto their
 // group tables' row slots. The one map serves both the group dispatch
 // and the row keys: a block the map names renders plain field keys -
 // its group names the block - while any other block's generic extra
-// rows keep the block-key prefix. The rules entry is the map's one
-// documented shape exception: its entries are Rule counter rows
-// (rule, total, matched; GLOSSARY: Rule counter), which key/value
-// rows cannot render (an array block has no field keys), so the
-// single dispatch below routes its value to the counters table's own
-// row builder - still through this map, never a hard-coded key check.
+// rows keep the block-key prefix. A counter block's entry is the
+// map's one documented shape exception: its entries are counter rows
+// (the rule counters' are rule, total, matched; the enrichment
+// counters' rule, enrichment, total, observed, enriched; GLOSSARY:
+// Rule counter, Enrichment counter), which key/value rows cannot
+// render (an array block has no
+// field keys), so the dispatch below routes its value to the counter
+// table's own row builder - still through this map and the
+// counter-table registry, never a hard-coded key check.
 const STATS_GROUPS = new Map([
 	["build", "group-identity"],
 	["pipeline", "group-pipeline"],
 	["tracker_cache", "group-tracker-cache"],
 	[RULE_COUNTERS_KEY, RULE_COUNTERS_SLOT],
+	[ENRICHMENT_COUNTERS_KEY, ENRICHMENT_COUNTERS_SLOT],
 ]);
 
 // GENERIC_GROUP_PREFIX marks a dynamically created group's row slot;
@@ -99,18 +112,20 @@ function valueText(value) {
 // generated_at, uptime, and any key added later - become identity rows.
 // An unknown top-level block renders within its own generic group - a
 // generic extra group table named for the block - never flattened into
-// the identity table or hidden. The rules block (the map's documented
-// shape exception) routes its entries to the rule counters table's own
-// row builder instead of key/value rows.
+// the identity table or hidden. A counter block (the map's documented
+// shape exception) routes its entries to its counter table's own row
+// builder instead of key/value rows.
 function statsTables(snapshot) {
 	const groups = { "group-identity": [], "group-pipeline": [], "group-tracker-cache": [] };
-	let ruleCounters = [];
+	// Every registered counter table starts with the empty set.
+	const counterRows = new Map();
+	for (const slot of COUNTER_TABLES.keys()) counterRows.set(slot, []);
 	for (const [key, value] of Object.entries(snapshot)) {
 		const slot = STATS_GROUPS.get(key);
-		if (slot === RULE_COUNTERS_SLOT) {
-			// The map's documented shape exception: Rule counter rows,
+		if (COUNTER_TABLES.has(slot)) {
+			// The map's documented shape exception: counter rows,
 			// never generic key/value rows.
-			if (Array.isArray(value)) ruleCounters = value;
+			if (Array.isArray(value)) counterRows.set(slot, value);
 			continue;
 		}
 		const block = typeof value === "object" && value !== null && !Array.isArray(value);
@@ -125,7 +140,7 @@ function statsTables(snapshot) {
 			: [{ key: key, value: valueText(value) }];
 		(groups[target] = groups[target] || []).push(...rows);
 	}
-	return { groups: groups, ruleCounters: ruleCounters };
+	return { groups: groups, counterRows: counterRows };
 }
 
 // kvRow builds one key/value row.
@@ -212,9 +227,16 @@ function groupBody(slot) {
 	return tbody;
 }
 
-// The rule counters table: one row per counter-enabled rule from the
-// snapshot's rules block (GLOSSARY: Rule counter) - rule, total,
-// matched.
+// The Stats page's counter tables - the rule and enrichment counters
+// tables, and any later counter table - render through one
+// counter-table mechanism: one renderer plus one config per table. The
+// config names the table's row slot, its row builder, its search
+// fields, its explicit empty-state copy, its shape - whose one source
+// is the served header row the config derives its column count from -
+// and its two wiring points: where the fetched rows land and the
+// render entry point the search filter re-renders through. loadStats
+// and applyStatsFilter iterate COUNTER_TABLES like the block dispatch
+// does, so a later counter table is one config entry.
 
 // ruleCountersColumns takes the rule counters table's column count
 // from its own header row - the served markup is the table's one shape
@@ -236,28 +258,102 @@ function ruleCounterRow(counter) {
 	return tr;
 }
 
-// renderRuleCounters renders the rule counters table - the full
-// fetched set or the search's narrowed view - with the explicit empty
-// state when no rule enables a counter, so silence is never mistaken
-// for a broken panel.
-function renderRuleCounters(counters, match) {
-	const tbody = document.getElementById(RULE_COUNTERS_SLOT);
+// RULE_COUNTERS_TABLE is the rule counters table's counter-table
+// config: its row slot, its row builder (rule, total, matched;
+// GLOSSARY: Rule counter), its search fields - rule, total and
+// matched - its explicit empty-state copy, its header-derived shape,
+// and its store/apply wiring - the fetched rows' home and the render
+// entry point the filter re-renders through.
+const RULE_COUNTERS_TABLE = {
+	slot: RULE_COUNTERS_SLOT,
+	row: ruleCounterRow,
+	narrow: (counter, match) => match.test(counter.id + "\n" + counter.total + "\n" + counter.matched),
+	empty: "No rule counters configured.",
+	columns: ruleCountersColumns,
+	store: (rows) => { fetchedRuleCounters = rows; },
+	apply: (filter) => renderRuleCounters(fetchedRuleCounters, filter),
+};
+
+// COUNTER_TABLES registers every counter table's config by its row
+// slot, so statsTables routes a counter block to its table - still
+// through STATS_GROUPS, never a hard-coded key check.
+const COUNTER_TABLES = new Map([
+	[RULE_COUNTERS_SLOT, RULE_COUNTERS_TABLE],
+	[ENRICHMENT_COUNTERS_SLOT, ENRICHMENT_COUNTERS_TABLE],
+]);
+
+// renderCounterTable renders one counter table - the full fetched set
+// or the search's narrowed view, through the table's own row builder
+// and search fields - with the table's explicit empty state when no
+// counter is configured, so silence is never mistaken for a broken
+// panel.
+function renderCounterTable(table, counters, match) {
+	const tbody = document.getElementById(table.slot);
 	if (tbody === null) return;
 	tbody.textContent = "";
 	const all = counters === null ? [] : counters;
-	const shown = match === null ? all : all.filter((counter) =>
-		match.test(counter.id + "\n" + counter.total + "\n" + counter.matched));
+	const shown = match === null ? all : all.filter((counter) => table.narrow(counter, match));
 	if (shown.length === 0) {
 		let copy;
 		if (counters === null) copy = "Loading...";
 		else if (match !== null) copy = "No keys match the filter.";
-		else copy = "No rule counters configured.";
-		tbody.appendChild(messageRow(copy, ruleCountersColumns()));
+		else copy = table.empty;
+		tbody.appendChild(messageRow(copy, table.columns()));
 		return;
 	}
 	for (const counter of shown) {
-		tbody.appendChild(ruleCounterRow(counter));
+		tbody.appendChild(table.row(counter));
 	}
+}
+
+// renderRuleCounters renders the rule counters table through the
+// shared counter-table mechanism.
+function renderRuleCounters(counters, match) {
+	renderCounterTable(RULE_COUNTERS_TABLE, counters, match);
+}
+
+// enrichmentCountersColumns takes the enrichment counters table's
+// column count from its own header row - the served markup is the
+// table's one shape source - so the full-width message rows and the
+// page's columns cannot drift.
+function enrichmentCountersColumns() {
+	return document.getElementById(ENRICHMENT_COUNTERS_SLOT).closest("table").querySelectorAll("thead th").length;
+}
+
+// enrichmentCounterRow builds one enrichment counter row: rule,
+// enrichment, total, observed, enriched.
+function enrichmentCounterRow(counter) {
+	const tr = document.createElement("tr");
+	tr.className = "enrichment-counter-row";
+	for (const text of [counter.rule, counter.enrichment, String(counter.total), String(counter.observed), String(counter.enriched)]) {
+		const td = document.createElement("td");
+		td.textContent = text;
+		tr.appendChild(td);
+	}
+	return tr;
+}
+
+// ENRICHMENT_COUNTERS_TABLE is the enrichment counters table's
+// counter-table config: its row slot, its row builder (rule,
+// enrichment, total, observed, enriched; GLOSSARY: Enrichment
+// counter), its search fields - rule, enrichment, total, observed and
+// enriched - its explicit empty-state copy, its header-derived shape,
+// and its store/apply wiring - the fetched rows' home and the render
+// entry point the filter re-renders through.
+const ENRICHMENT_COUNTERS_TABLE = {
+	slot: ENRICHMENT_COUNTERS_SLOT,
+	row: enrichmentCounterRow,
+	narrow: (counter, match) => match.test(counter.rule + "\n" + counter.enrichment + "\n" + counter.total + "\n" + counter.observed + "\n" + counter.enriched),
+	empty: "No enrichment counters configured.",
+	columns: enrichmentCountersColumns,
+	store: (rows) => { fetchedEnrichmentCounters = rows; },
+	apply: (filter) => renderEnrichmentCounters(fetchedEnrichmentCounters, filter),
+};
+
+// renderEnrichmentCounters renders the enrichment counters table
+// through the shared counter-table mechanism.
+function renderEnrichmentCounters(counters, match) {
+	renderCounterTable(ENRICHMENT_COUNTERS_TABLE, counters, match);
 }
 
 // fetchedStatsGroups holds the three groups' rows from the last fetch;
@@ -269,6 +365,12 @@ let fetchedStatsGroups = {};
 // row), an empty list after one reporting no counters (the explicit
 // empty state).
 let fetchedRuleCounters = null;
+
+// fetchedEnrichmentCounters holds the enrichment block from the last
+// fetch - the enrichment counters table's rows; null before the first
+// fetch (the loading row), an empty list after one reporting no
+// counters (the explicit empty state).
+let fetchedEnrichmentCounters = null;
 
 // fillLegend puts the running binary's identity and uptime in the
 // header's right-aligned legend - build identity and uptime at a
@@ -291,7 +393,7 @@ function loadStats() {
 		.then((snapshot) => {
 			const tables = statsTables(snapshot);
 			fetchedStatsGroups = tables.groups;
-			fetchedRuleCounters = tables.ruleCounters;
+			for (const table of COUNTER_TABLES.values()) table.store(tables.counterRows.get(table.slot));
 			fillLegend(snapshot);
 			applyStatsFilter();
 		})
@@ -536,15 +638,15 @@ function applyReportFilter() {
 
 // applyStatsFilter narrows the visible rows to the search box's
 // matches - over key and value, unanchored and case-insensitive, and
-// over the rule counter rows the same way - so the search box behaves
-// the same whichever view is on screen. An invalid pattern leaves the
-// full rows visible.
+// over the rule and enrichment counter rows the same way - so the
+// search box behaves the same whichever view is on screen. An invalid
+// pattern leaves the full rows visible.
 function applyStatsFilter() {
 	if (document.getElementById("group-identity") === null) return;
 	const { match, invalid } = searchMatcher();
 	const filter = invalid ? null : match;
 	renderStatsGroups(fetchedStatsGroups, filter);
-	renderRuleCounters(fetchedRuleCounters, filter);
+	for (const table of COUNTER_TABLES.values()) table.apply(filter);
 }
 
 // applySearch runs the search box against whichever view's rows are on
