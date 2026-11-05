@@ -274,14 +274,6 @@ const RULE_COUNTERS_TABLE = {
 	apply: (filter) => renderRuleCounters(fetchedRuleCounters, filter),
 };
 
-// COUNTER_TABLES registers every counter table's config by its row
-// slot, so statsTables routes a counter block to its table - still
-// through STATS_GROUPS, never a hard-coded key check.
-const COUNTER_TABLES = new Map([
-	[RULE_COUNTERS_SLOT, RULE_COUNTERS_TABLE],
-	[ENRICHMENT_COUNTERS_SLOT, ENRICHMENT_COUNTERS_TABLE],
-]);
-
 // renderCounterTable renders one counter table - the full fetched set
 // or the search's narrowed view, through the table's own row builder
 // and search fields - with the table's explicit empty state when no
@@ -355,6 +347,16 @@ const ENRICHMENT_COUNTERS_TABLE = {
 function renderEnrichmentCounters(counters, match) {
 	renderCounterTable(ENRICHMENT_COUNTERS_TABLE, counters, match);
 }
+
+// COUNTER_TABLES registers every counter table's config by its row
+// slot, so statsTables routes a counter block to its table - still
+// through STATS_GROUPS, never a hard-coded key check. Every config is
+// declared above this initializer: it names the config at script load,
+// where a below-declared const is still in its temporal dead zone.
+const COUNTER_TABLES = new Map([
+	[RULE_COUNTERS_SLOT, RULE_COUNTERS_TABLE],
+	[ENRICHMENT_COUNTERS_SLOT, ENRICHMENT_COUNTERS_TABLE],
+]);
 
 // fetchedStatsGroups holds the three groups' rows from the last fetch;
 // anything narrowing the view only ever re-renders a filtered view.

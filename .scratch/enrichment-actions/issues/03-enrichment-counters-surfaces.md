@@ -53,3 +53,12 @@ Context: spec `../spec.md` (Implementation Decisions, user stories
 18-29), GLOSSARY (Enrichment counter).
 
 ## Comments
+2026-11-04, post-merge hotfix: the registry adoption shipped a
+load-time ReferenceError - `COUNTER_TABLES`'s initializer named
+`ENRICHMENT_COUNTERS_TABLE` before its `const` (temporal dead zone),
+ so common.js died at load and the whole panel went inert (browser
+console: "can't access lexical declaration ... before
+initialization"). The served-bytes pins and `node --check` cannot see
+load order. Fixed by declaring every config above the registry;
+`TestCounterTableConfigsAreDeclaredBeforeTheRegistry` now pins the
+order for the next adopted table.
