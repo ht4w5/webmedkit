@@ -40,25 +40,40 @@ func enrichEvent(t *testing.T, fe *FilesizeEnricher, ev *domain.Event) int64 {
 
 func TestNewFilesizeEnricherValidation(t *testing.T) {
 	tests := []struct {
-		name       string
-		period     int64
-		minSamples int
-		wantErr    bool
+		name    string
+		period  int64
+		wantErr bool
 	}{
-		{"valid", 5, 5, false},
-		{"period 1 is valid", 1, 1, false},
-		{"zero period rejected", 0, 1, true},
-		{"negative period rejected", -1, 1, true},
-		{"zero minSamples rejected", 1, 0, true},
-		{"negative minSamples rejected", 1, -3, true},
+		{"valid", 5, false},
+		{"period 1 is valid", 1, false},
+		{"zero period rejected", 0, true},
+		{"negative period rejected", -1, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewFilesizeEnricher(&stubCache{}, tt.period, tt.minSamples)
+			_, err := NewFilesizeEnricher(&stubCache{}, tt.period)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("NewFilesizeEnricher(%d, %d) error = %v, wantErr %v", tt.period, tt.minSamples, err, tt.wantErr)
+				t.Errorf("NewFilesizeEnricher(%d) error = %v, wantErr %v", tt.period, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// First encounter: the run that observes a path's first response
+// enriches its own event in the same run, seeded exactly - no blending,
+// no waiting.
+func TestEnrichSeedsFromFirstObservation(t *testing.T) {
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The observing run's own event carries the seed exactly.
+	if got := enrichOnce(t, fe, "/a", 4000); got != 4000 {
+		t.Errorf("first observation's size = %d, want 4000 (seeded exactly, no blending)", got)
+	}
+	// Blending starts only at the second observation: 4000 + (100-4000)/5 = 3220.
+	if got := enrichOnce(t, fe, "/a", 100); got != 3220 {
+		t.Errorf("second observation's size = %d, want 3220", got)
 	}
 }
 
@@ -75,7 +90,7 @@ func TestEnrichEWMAIntegerMath(t *testing.T) {
 		{993, 1015},  // 1020 + (-27)/5 = 1020 - 5 (truncates toward zero)
 		{2000, 1212}, // 1015 + 985/5
 	}
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 1)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +103,7 @@ func TestEnrichEWMAIntegerMath(t *testing.T) {
 
 // period 1 means no smoothing: the estimate tracks the last observation.
 func TestEnrichPeriodOneTracksObservations(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 1, 1)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,58 +114,53 @@ func TestEnrichPeriodOneTracksObservations(t *testing.T) {
 	}
 }
 
-// Warm-up: SizeBytes stays unknown until minSamples, and the Nth sample's
-// own event is already enriched.
-func TestEnrichWarmUpGating(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wants := []int64{0, 0, 1000, 1000, 1000}
-	for i, want := range wants {
-		got := enrichOnce(t, fe, "/a", 1000)
-		if got != want {
-			t.Errorf("sample %d: size = %d, want %d (0 = unknown until sample %d)", i+1, got, want, 3)
-		}
-	}
-}
-
-// While warming, SizeBytes is overwritten with FilesizeUnknown: a stale
-// derived value never leaks through.
+// SizeBytes is overwritten on every run - with the estimate when one
+// exists, with FilesizeUnknown before the first observation - so a
+// stale derived value never leaks through.
 func TestEnrichOverwritesStaleSizeBytes(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 2)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 100, SizeBytes: 999}
-	if _, _, err := fe.Enrich(context.Background(), ev); err != nil {
-		t.Fatal(err)
+	// Before the first observation the stale value is overwritten with unknown.
+	ev := &domain.Event{Path: "/a", Method: "GET", Status: 304, SizeBytes: 999}
+	if got := enrichEvent(t, fe, ev); got != domain.FilesizeUnknown {
+		t.Errorf("unobserved path: size = %d, want unknown (stale value overwritten)", got)
 	}
-	if ev.SizeBytes != domain.FilesizeUnknown {
-		t.Errorf("size = %d, want %d (stale value overwritten while warming)", ev.SizeBytes, domain.FilesizeUnknown)
+	// The first observation overwrites with the exact seed.
+	ev = &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 100, SizeBytes: 999}
+	if got := enrichEvent(t, fe, ev); got != 100 {
+		t.Errorf("first observation: size = %d, want 100 (stale value overwritten with the seed)", got)
+	}
+	// Every later run overwrites with the current estimate.
+	ev = &domain.Event{Path: "/a", Method: "GET", Status: 304, SizeBytes: 999}
+	if got := enrichEvent(t, fe, ev); got != 100 {
+		t.Errorf("observed path: size = %d, want 100 (stale value overwritten with the estimate)", got)
 	}
 }
 
-// The run's outcomes (GLOSSARY: Enrichment counter): observed reports
-// the Sampling-rule eligibility that fed the estimate, enriched a
-// non-default derived value - the warm-up gate moves enriched, the
-// eligibility table moves observed.
+// The run-outcome table (GLOSSARY: Enrichment counter): a successful
+// observation - the first or any later one - observes and enriches; a
+// run without one on an observed path enriches only; any run on an
+// unobserved path neither observes nor enriches.
 func TestEnrichReportsRunOutcomes(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 3)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {
 		name         string
 		ev           *domain.Event
+		wantSize     int64
 		wantObserved bool
 		wantEnriched bool
 	}{
-		{"a warm-up sample observes without enriching", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, false},
-		{"another warm-up sample still enriches nothing", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, false},
-		{"the gate-opening sample observes and enriches", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, true, true},
-		{"an ineligible run observes nothing but carries the warm estimate", &domain.Event{Path: "/a", Method: "GET", Status: 304}, false, true},
-		{"a non-GET run observes nothing but carries the warm estimate", &domain.Event{Path: "/a", Method: "POST", Status: 200, ContentLength: 1000}, false, true},
+		{"a run before the first observation neither observes nor enriches", &domain.Event{Path: "/a", Method: "GET", Status: 304}, domain.FilesizeUnknown, false, false},
+		{"the first observation observes and enriches in the same run", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 1000}, 1000, true, true},
+		{"a later observation observes and enriches", &domain.Event{Path: "/a", Method: "GET", Status: 200, ContentLength: 2000}, 1200, true, true},
+		{"an ineligible run on an observed path enriches without observing", &domain.Event{Path: "/a", Method: "GET", Status: 304}, 1200, false, true},
+		{"a non-GET run on an observed path enriches without observing", &domain.Event{Path: "/a", Method: "POST", Status: 200, ContentLength: 1000}, 1200, false, true},
+		{"any run on an unobserved path neither observes nor enriches", &domain.Event{Path: "/b", Method: "GET", Status: 304}, domain.FilesizeUnknown, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,41 +171,45 @@ func TestEnrichReportsRunOutcomes(t *testing.T) {
 			if observed != tt.wantObserved || enriched != tt.wantEnriched {
 				t.Errorf("outcomes = (%v, %v), want (observed %v, enriched %v)", observed, enriched, tt.wantObserved, tt.wantEnriched)
 			}
+			if tt.ev.SizeBytes != tt.wantSize {
+				t.Errorf("size = %d, want %d", tt.ev.SizeBytes, tt.wantSize)
+			}
 		})
 	}
 }
 
-// Estimates are per path: one path's observations never move another's.
+// Estimates are per path: each path seeds from its own first
+// observation, and one path's observations never move another's.
 func TestEnrichStateIsPerPath(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 2)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := enrichOnce(t, fe, "/a", 1000); got != 0 {
-		t.Errorf("/a first size = %d, want unknown", got)
-	}
-	if got := enrichOnce(t, fe, "/b", 2000); got != 0 {
-		t.Errorf("/b first size = %d, want unknown", got)
-	}
 	if got := enrichOnce(t, fe, "/a", 1000); got != 1000 {
-		t.Errorf("/a warm size = %d, want 1000", got)
+		t.Errorf("/a first size = %d, want 1000 (seeded from its own first observation)", got)
 	}
 	if got := enrichOnce(t, fe, "/b", 2000); got != 2000 {
-		t.Errorf("/b warm size = %d, want 2000", got)
+		t.Errorf("/b first size = %d, want 2000 (seeded from its own first observation)", got)
+	}
+	if got := enrichOnce(t, fe, "/a", 1900); got != 1180 {
+		t.Errorf("/a refined size = %d, want 1180 (1000 + 900/5, /b untouched)", got)
+	}
+	if got := enrichOnce(t, fe, "/b", 2900); got != 2180 {
+		t.Errorf("/b refined size = %d, want 2180 (2000 + 900/5, /a untouched)", got)
 	}
 }
 
 // The Sampling rule admits only GET/HEAD 200 responses carrying a
-// Content-Length; every other event is enriched but observes nothing.
+// Content-Length and GET 206 responses carrying a Content-Range total;
+// every other event observes nothing and never moves the estimate.
 func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 5)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, want := range []int64{0, 0, 0, 0, 1000} {
-		if got := enrichOnce(t, fe, "/a", 1000); got != want {
-			t.Fatalf("warm-up sample %d: size = %d, want %d", i+1, got, want)
-		}
+	// The first observation seeds the estimate.
+	if got := enrichOnce(t, fe, "/a", 1000); got != 1000 {
+		t.Fatalf("first observation: size = %d, want 1000", got)
 	}
 	ineligible := []*domain.Event{
 		{Path: "/a", Method: "GET", Status: 304, ContentLength: 99999},     // revalidation, even carrying a length
@@ -218,28 +232,10 @@ func TestEnrichIneligibleEventsAddNoObservation(t *testing.T) {
 	}
 }
 
-// The warm-up gate covers ineligible events too: they carry the current
-// estimate only from the gate on, else the unknown default.
-func TestEnrichIneligibleEventsFollowWarmUpGate(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	enrichOnce(t, fe, "/a", 1000)
-	enrichOnce(t, fe, "/a", 1000)
-	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 304}); got != domain.FilesizeUnknown {
-		t.Errorf("ineligible during warm-up: size = %d, want unknown", got)
-	}
-	enrichOnce(t, fe, "/a", 1000)
-	if got := enrichEvent(t, fe, &domain.Event{Path: "/a", Method: "GET", Status: 304}); got != 1000 {
-		t.Errorf("ineligible after warm-up: size = %d, want the current estimate 1000", got)
-	}
-}
-
 // Range responses observe the Content-Range total - the file's exact
 // size - never their Content-Length; a 206 without a total observes nothing.
 func TestEnrichRangeResponsesObserveContentRangeTotal(t *testing.T) {
-	fe, err := NewFilesizeEnricher(&stubCache{}, 5, 1)
+	fe, err := NewFilesizeEnricher(&stubCache{}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

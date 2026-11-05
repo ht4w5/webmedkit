@@ -10,7 +10,8 @@ import (
 )
 
 // Replay escalation ladders at the daemon seam: thresholds in download equivalents
-// (normalized by Filesize), warm-up blindness, the top-rung TTL, and rate/bandwidth parity.
+// (normalized by Filesize), blind skipping of unknown sizes, the top-rung TTL,
+// and rate/bandwidth parity.
 
 func TestE2EReplayLadderRungsAreDownloadEquivalents(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
@@ -31,36 +32,26 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The first 4 samples warm the size estimate and are skipped; only known sizes climb.
+	// Three full transfers of the small file: each counts one download
+	// equivalent from request one - the low rung (at 1) fires at values
+	// 2 and 3.
 	send := func(client, path string, sent int64, i int) {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), client, "GET", path, 200, sent, fmt.Sprintf("%d", sent)))
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		send("203.0.113.7", "/small.iso", 1000, i)
 	}
-	d.waitProcessed(t, 4)
-	if got := marks(d); len(got) != 0 {
-		t.Fatalf("marks during warm-up = %v, want none (the tracker is blind until the estimate warms)", got)
-	}
-	for i := 4; i < 7; i++ {
-		send("203.0.113.7", "/small.iso", 1000, i)
-	}
-	d.waitProcessed(t, 7)
+	d.waitProcessed(t, 3)
 	if got, want := marks(d), []string{"MARK:LOW", "MARK:LOW"}; !slices.Equal(got, want) {
 		t.Fatalf("marks = %v, want %v (one low mark per event above the rung)", got, want)
 	}
 
-	for i := 7; i < 11; i++ {
+	// The big file climbs the same: the same three transfers, the same
+	// marks - the thresholds are download equivalents, not bytes.
+	for i := 3; i < 6; i++ {
 		send("203.0.113.8", "/big.iso", 100000, i)
 	}
-	d.waitProcessed(t, 11)
-	if got := marks(d); len(got) != 2 {
-		t.Fatalf("marks = %v, want still 2 (the big file's warm-up is blind too)", got)
-	}
-	for i := 11; i < 14; i++ {
-		send("203.0.113.8", "/big.iso", 100000, i)
-	}
-	d.waitProcessed(t, 14)
+	d.waitProcessed(t, 6)
 	want := []string{"MARK:LOW", "MARK:LOW", "MARK:LOW", "MARK:LOW"}
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Fatalf("marks = %v, want %v (the same climb for both file sizes)", got, want)
@@ -117,7 +108,10 @@ chains:
 	}
 }
 
-func TestE2EReplayLadderWarmUpSkipsTheTrackerEntirely(t *testing.T) {
+// TestE2EReplayLadderUnknownSizeSkipsTheTrackerEntirely: replay's
+// blind skipping of unknown sizes is unchanged - a never-observed
+// path's events add nothing and never touch the tracker record.
+func TestE2EReplayLadderUnknownSizeSkipsTheTrackerEntirely(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -136,16 +130,16 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker record.
+	// The /api/stats counters prove the skip reaches the store: one Update per event (the file-size record alone), never the tracker record. An unknown size means the path was never observed.
 	for i := 0; i < 4; i++ {
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
+		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, ""))
 	}
 	d.waitProcessed(t, 4)
 	if got := marks(d); len(got) != 0 {
-		t.Fatalf("marks during warm-up = %v, want none", got)
+		t.Fatalf("marks on an unobserved path = %v, want none", got)
 	}
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports during warm-up = %+v, want none", doc.Reports)
+		t.Fatalf("reports on an unobserved path = %+v, want none", doc.Reports)
 	}
 	_, stats := d.getStats(t)
 	for field, want := range map[string]float64{"gets": 4, "sets": 4, "misses": 1, "size": 1} {
@@ -154,17 +148,18 @@ chains:
 		}
 	}
 
-	// Only the known-size samples climb: the report's reading counts those alone.
+	// Only the known-size samples climb: the first observation seeds the
+	// estimate, and the report's reading counts the three transfers.
 	for i := 4; i < 7; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
-		t.Fatalf("reports after warm-up = %+v, want 1", doc.Reports)
+		t.Fatalf("reports after the first observations = %+v, want 1", doc.Reports)
 	}
 	if v := doc.Reports[0].Tracker.Value; v != 3 {
-		t.Errorf("tracker value = %v, want 3 (the warm-up events never incremented)", v)
+		t.Errorf("tracker value = %v, want 3 (the unknown-size events never incremented)", v)
 	}
 	_, stats = d.getStats(t)
 	for field, want := range map[string]float64{"misses": 2, "size": 2} {
@@ -194,18 +189,14 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	for i := 0; i < 4; i++ {
-		d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
-	}
-	d.waitProcessed(t, 4)
-
-	// Events share one event second (no leak decay) and sit 5s apart on the wall clock, well inside the top rung's 20s TTL.
+	// Five events sharing one event second (no leak decay), sitting 5s
+	// apart on the wall clock and well inside the top rung's 20s TTL.
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			clock.Advance(5 * time.Second)
 		}
 		d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
-		d.waitProcessed(t, int64(5+i))
+		d.waitProcessed(t, int64(1+i))
 	}
 	if got := marks(d); len(got) != 4 {
 		t.Fatalf("marks = %v, want one per event above the rung (4)", got)
@@ -213,14 +204,14 @@ chains:
 
 	clock.Advance(30 * time.Second)
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
-	d.waitProcessed(t, 10)
+	d.waitProcessed(t, 6)
 	if got := marks(d); len(got) != 4 {
 		t.Errorf("marks = %v, want still 4 (state restarted past the TTL)", got)
 	}
 
 	clock.Advance(5 * time.Second)
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/iso", 200, 1000, "1000"))
-	d.waitProcessed(t, 11)
+	d.waitProcessed(t, 7)
 	if got := marks(d); len(got) != 5 {
 		t.Errorf("marks = %v, want 5 (the climb resumes from the fresh state)", got)
 	}
@@ -252,21 +243,19 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 3; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 		d.waitProcessed(t, int64(i+1))
 	}
 
 	// The inspect chain runs only when a rung dispatches to it: once per
-	// handoff event, and not at all while the ladder is quiet.
-	var want []string
-	for i := 0; i < 5; i++ {
-		want = append(want, "MARK:AFTER")
+	// handoff event, and not at all while the ladder is quiet (the first
+	// event's value 1 sits at the low rung).
+	want := []string{
+		"MARK:AFTER",
+		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
+		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
 	}
-	want = append(want,
-		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
-		"MARK:WATCH", "MARK:HANDOFF", "MARK:AFTER",
-	)
 	if got := marks(d); !slices.Equal(got, want) {
 		t.Errorf("marks = %v, want %v (fired rungs run lowest first and the report rung continues the chain, as on rate and bandwidth ladders)", got, want)
 	}
@@ -314,19 +303,16 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	for i := 0; i < 4; i++ {
+	// Two full transfers: the second (value 2 > 1) writes at the low rung.
+	for i := 0; i < 2; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
-	d.waitProcessed(t, 4)
+	d.waitProcessed(t, 2)
 
 	// The wall clock moves between the first write and the climb so a frozen created_at is observable.
-	d.send(nginxLineClen("1734345938", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
-	d.waitProcessed(t, 5)
-	d.send(nginxLineClen("1734345939", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
-	d.waitProcessed(t, 6)
 	clock.Advance(10 * time.Minute)
-	d.send(nginxLineClen("1734345940", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
-	d.waitProcessed(t, 7)
+	d.send(nginxLineClen("1734345938", "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
+	d.waitProcessed(t, 3)
 
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {

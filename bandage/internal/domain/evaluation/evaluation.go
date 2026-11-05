@@ -31,7 +31,7 @@ type ReportSink interface {
 // the worker pool.
 type Counters interface {
 	// Visit counts one rule visit: every event the rule is evaluated
-	// against, filter rejects and replay warm-up skips included; a
+	// against, filter rejects and replay's unknown-size skips included; a
 	// chain dispatched more than once for one event counts one visit
 	// per dispatch.
 	Visit(ruleID string)
@@ -201,7 +201,7 @@ func (s *Service) runChain(ctx context.Context, ci int, event *domain.Event) err
 	chain := &s.chains[ci]
 	for ri := range chain.Rules {
 		rule := &chain.Rules[ri]
-		s.counters.Visit(rule.ID) // total: filter rejects and replay warm-up skips are visits too
+		s.counters.Visit(rule.ID) // total: filter rejects and replay's unknown-size skips are visits too
 		if !rule.Filter.Match(event) {
 			continue
 		}
@@ -306,7 +306,7 @@ func (s *Service) runNamedChain(ctx context.Context, rule *domain.Rule, name str
 }
 
 // updateTracker feeds the rule's tracker (when it has one) and reports the
-// post-accumulation reading. fed is false only for replay warm-up with an unknown size.
+// post-accumulation reading. fed is false only for replay with an unknown size (a never-observed path).
 func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *domain.Event) (domain.TrackerReading, bool, error) {
 	if rule.Tracker == nil {
 		// Tracker-less rules match on filter alone.
@@ -322,8 +322,8 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		increment = float64(event.SentBytes)
 	case domain.TrackReplay:
 		if event.SizeBytes == domain.FilesizeUnknown {
-			// Warm-up blindness: skip unknown sizes entirely - no increment,
-			// no decay, no cache touch.
+			// Blind skip of unknown sizes (a never-observed path): no
+			// increment, no decay, no cache touch.
 			return domain.TrackerReading{}, false, nil
 		}
 		// Increment is the transferred fraction of the estimated size, capped
