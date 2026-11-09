@@ -10,7 +10,7 @@ persistence layer can be added later without touching the trackers.
 Consequences: a restart is a free pass for abusers (all buckets empty,
 file-size EWMA re-warms after one observation); accepted for v0.
 
-Amended (dynamic reports): reports survive restarts only while fixed -
+Amended (dynamic reports, ADR 0031): reports survive restarts only while fixed -
 the daemon sweeps every dynamic report at startup, so no Report outlives
 the volatile tracker state that justifies it. The free pass extends to
 dynamic reports by construction: re-flagging after a restart requires

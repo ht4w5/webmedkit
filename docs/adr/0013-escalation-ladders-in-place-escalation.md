@@ -30,7 +30,7 @@ That suppression states "no downgrade and no rewrite" - and it narrows
 to no downgrade *from Triggers*. Decay-driven Downgrade is its inverse:
 a dynamic report restates itself down the ladder as its tracker value
 decays, written lazily against live tracker state and never by a
-Trigger (the dynamic-report lifecycle).
+Trigger (ADR 0031, the dynamic-report lifecycle).
 
 Considered: one report row per reason (rejected for now - in-place keeps
 report identity (rule, Target) and the report document contract

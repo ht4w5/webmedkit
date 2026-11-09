@@ -22,7 +22,8 @@ implementation cannot drift.
 | `reports` | array | live report entries (below), possibly empty |
 
 The reports are ordered by `created_at` descending, then `rule` and
-`target` ascending. Expired reports are never served. The `?rule=` and
+`target` ascending. Only live reports are served: expiry, Underflow and
+deletion all withdraw an entry (below). The `?rule=` and
 `?target=` query parameters return a subset under the same ordering; they
 do not change the document's shape.
 
@@ -53,7 +54,7 @@ The `tracker` reading:
 | `track` | string | tracker kind: `rate`, `bandwidth`, or `replay`; empty `""` and a zeroed reading when the rule is tracker-less |
 | `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents - the tracker kind's quantity) |
 | `leak` | number | the per-second decay applied to `value` |
-| `volume` | number | the overflow threshold `value` exceeded; also the death line of a dynamic entry (below) |
+| `volume` | number | the overflow threshold `value` exceeded; the base of a dynamic entry's death line (below) |
 
 The `sample` is the whole event that justified the report's current
 stance - never a curated subset of its fields. Absent observations
@@ -80,9 +81,12 @@ A report action with a `ttl` writes a **fixed** report; the paragraphs
 below describe it. A report action without a `ttl` writes a **dynamic**
 report - the entry carries `"dynamic": true` and `"expires_at": null`.
 Its life is bound to the tracker value that justified it: the report is
-alive while that value is strictly above the `volume` recorded in its
-`tracker` reading, and it dies at **Underflow**, the moment the value
-decays to the line. There is no timer - the death is materialized
+alive while that value is strictly above its **death line**, and it
+dies at **Underflow**, the moment the value decays to the line. The
+death line is the `volume` recorded in its `tracker` reading, or below
+it when the writing report action declared a `grace` - the widening
+margin is a rules-side setting this document does not carry. There is
+no timer - the death is materialized
 lazily, at document generation (a dead dynamic report is simply absent
 from this document) and at sweep time (when its row goes), and the next
 overflow writes a fresh report at the accumulation's current stance.
@@ -93,19 +97,36 @@ running.
 One report lives per (rule, target). A Trigger writes it when no report
 for the pair is alive. While one is alive, a Trigger at or below the
 volume recorded in the report's `tracker` reading - the threshold of
-the rung that last wrote it - writes nothing: no downgrade and no
-rewrite. A rule without a ladder never overrides its live report: one
+the rung that last wrote it - writes nothing: no downgrade from
+Triggers and no rewrite. A rule without a ladder never overrides its
+live report: one
 write per report lifetime. A Trigger from a strictly higher rung
 overrides the report in
 place: `reason`, `penalty`, the `tracker` reading, `sample`, `updated_at`
-and `expires_at` all move to the overriding rung's values, and
-`expires_at` runs from its `ttl`. `created_at` alone stays frozen at
+and `expires_at` all move to the overriding rung's values, and the
+entry adopts the overriding rung's lifecycle - `expires_at` runs from
+its `ttl`, or stays `null` when that rung writes a dynamic stance.
+`created_at` alone stays frozen at
 first flagged
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). The
 `sample` is the event that justified the report's current stance, so
 the sample always backs the penalty the report carries.
 
-The report dies at its `expires_at` or when `DELETE /api/reports` removes
+On a ladder a dynamic report **Downgrades** as its tracker value
+decays: when the value falls to the report's death line and a lower
+rung is still exceeded, the report restates itself to the highest rung
+still exceeded - `reason` and `penalty` move to that rung's with a
+fresh `updated_at`, while `created_at` and the `sample` stay (the
+climb event crossed every lower rung) - and the `tracker` reading's
+`volume` restates to the rung's threshold. The restated entry adopts
+the rung's lifecycle: a fixed rung makes it a fixed entry again
+(`dynamic` gone, `expires_at` stamped from the downgrade write), a
+dynamic rung keeps it value-bound. It dies - absent from this document
+- when no rung remains exceeded. A Downgrade is decay's act, never a
+Trigger's.
+
+The report dies at its `expires_at` (fixed), at Underflow (dynamic), or
+when `DELETE /api/reports` removes
 it; the next matching event then writes a fresh report at the
 accumulation's current stance - a dead report's stance is not
 remembered, and one event's writes climb the crossed rungs, each
