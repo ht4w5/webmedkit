@@ -206,6 +206,19 @@ func (c *logCapture) messages() []string {
 	return out
 }
 
+// atAndAbove returns the captured records at or above the level.
+func (c *logCapture) atAndAbove(level zerolog.Level) []capturedLog {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []capturedLog
+	for _, r := range c.recs {
+		if r.Level >= level {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // loadTestRules runs the daemon start path's rules-loading step over
 // rules YAML text - the same step every started test daemon's rules
 // pass through before assembly - and returns the load error instead of

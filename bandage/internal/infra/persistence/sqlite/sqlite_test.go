@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -714,19 +715,10 @@ func TestDeleteExpiredKeepsDynamicRows(t *testing.T) {
 	}
 }
 
-// TestOldFormatDatabaseOpensAndServesAfterUpgrade: a pre-upgrade database
-// (no dynamic column) opens with the column added by one guarded ALTER at
-// open; its rows are fixed reports by construction and keep serving, and
-// dynamic rows work over the upgraded table.
-func TestOldFormatDatabaseOpensAndServesAfterUpgrade(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reports.db")
-	ctx := context.Background()
-	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
-
-	// The pre-upgrade schema and rows, hand-written: no current code
-	// path emits the old shape (spec: Persistence, "old rows are fixed
-	// reports by construction").
-	const oldSchema = `
+// The pre-upgrade schema and body, hand-written: no current code path
+// emits the old shape (spec: Persistence, "old rows are fixed reports
+// by construction"). They seed the migration and rollback tests.
+const oldSchema = `
 CREATE TABLE reports (
 	rule       TEXT    NOT NULL,
 	target     TEXT    NOT NULL,
@@ -739,7 +731,17 @@ CREATE TABLE reports (
 CREATE INDEX idx_reports_rule ON reports (rule);
 CREATE INDEX idx_reports_target ON reports (target);
 CREATE INDEX idx_reports_expires_at ON reports (expires_at);`
-	const oldBody = `{"chain":"c","reason":"why","tracker":{"track":"bandwidth","value":11000,"leak":1000,"volume":10000},"sample":{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","status":200},"penalty":{"action":"limit-bandwidth","rate":1000000}}`
+const oldBody = `{"chain":"c","reason":"why","tracker":{"track":"bandwidth","value":11000,"leak":1000,"volume":10000},"sample":{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","status":200},"penalty":{"action":"limit-bandwidth","rate":1000000}}`
+
+// TestOldFormatDatabaseOpensAndServesAfterUpgrade: a pre-upgrade database
+// (no dynamic column) opens with the column added by one guarded ALTER at
+// open; its rows are fixed reports by construction and keep serving, and
+// dynamic rows work over the upgraded table.
+func TestOldFormatDatabaseOpensAndServesAfterUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports.db")
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
 	db, err := sql.Open(driverName, path)
 	if err != nil {
 		t.Fatalf("open old-format database: %v", err)
@@ -799,4 +801,295 @@ CREATE INDEX idx_reports_expires_at ON reports (expires_at);`
 	if len(got) != 1 || !got[0].Dynamic {
 		t.Errorf("rows = %+v, want the dynamic row over the upgraded table", got)
 	}
+}
+
+// TestColumnAdditionIsGuardedAcrossReopen: the dynamic column is added
+// by one guarded ALTER at open - a reopen over the upgraded database
+// neither re-migrates nor disturbs the rows, and old rows stay fixed
+// reports by construction.
+func TestColumnAdditionIsGuardedAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports.db")
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
+	db, err := sql.Open(driverName, path)
+	if err != nil {
+		t.Fatalf("open old-format database: %v", err)
+	}
+	if _, err := db.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body) VALUES (?, ?, ?, ?, ?, ?)`,
+		"r-live", "203.0.113.7/32", base.UnixNano(), base.UnixNano(), base.Add(time.Hour).UnixNano(), oldBody,
+	); err != nil {
+		t.Fatalf("insert old-format row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old-format database: %v", err)
+	}
+
+	// The first open migrates; the guard makes the second one a schema
+	// no-op (without it the ALTER fails on the duplicate column).
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open over the old-format database: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	repo, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen over the upgraded database: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
+
+	var cols int
+	if err := repo.read.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('reports') WHERE name = 'dynamic'`).Scan(&cols); err != nil {
+		t.Fatalf("read dynamic columns: %v", err)
+	}
+	if cols != 1 {
+		t.Errorf("dynamic columns = %d, want 1 (one guarded addition)", cols)
+	}
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Rule != "r-live" || got[0].Dynamic {
+		t.Errorf("rows = %+v, want the old row kept as a fixed report", got)
+	}
+}
+
+// --- rollback safety (spec: Persistence) ---
+
+// oldListSQL is the pre-upgrade live-rows query - unexpired-only, no
+// dynamic column - the serve shape an older binary runs against a
+// new-format database: the extra column is ignored and the 0 sentinel
+// falls outside its expiry filter.
+const oldListSQL = `SELECT rule, target, created_at, updated_at, expires_at, body FROM reports WHERE expires_at > ? ORDER BY created_at DESC, rule ASC, target ASC`
+
+// oldUpsertSQL is the pre-upgrade upsert shape - six parameters, no
+// dynamic column - the write an older binary runs.
+const oldUpsertSQL = `
+INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT (rule, target) DO UPDATE SET
+	updated_at = excluded.updated_at,
+	expires_at = excluded.expires_at,
+	body       = excluded.body`
+
+// oldBodyShape is the pre-upgrade record body decode - no dynamic flag.
+type oldBodyShape struct {
+	Chain   string                `json:"chain"`
+	Reason  string                `json:"reason"`
+	Tracker domain.TrackerReading `json:"tracker"`
+	Sample  domain.Event          `json:"sample"`
+	Penalty *domain.Penalty       `json:"penalty,omitempty"`
+}
+
+// rawRows returns every row of rule (all rows when rule is empty) as
+// its raw column values - the byte-level view for before/after
+// comparisons across binary shapes.
+func rawRows(t *testing.T, repo *ReportRepository, rule string) []string {
+	t.Helper()
+	query := `SELECT rule, target, created_at, updated_at, expires_at, dynamic, body FROM reports`
+	var args []any
+	if rule != "" {
+		query += ` WHERE rule = ?`
+		args = append(args, rule)
+	}
+	query += ` ORDER BY rule, target`
+	rows, err := repo.read.Query(query, args...)
+	if err != nil {
+		t.Fatalf("raw rows: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var rule, target, body string
+		var createdNS, updatedNS, expiresNS, dynamic int64
+		if err := rows.Scan(&rule, &target, &createdNS, &updatedNS, &expiresNS, &dynamic, &body); err != nil {
+			t.Fatalf("raw rows: %v", err)
+		}
+		out = append(out, fmt.Sprintf("%s|%s|%d|%d|%d|%d|%s", rule, target, createdNS, updatedNS, expiresNS, dynamic, body))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("raw rows: %v", err)
+	}
+	return out
+}
+
+// TestOldQueryShapeServesFixedAndSkipsDynamicRows: rollback safety -
+// the old query shape serves the unexpired fixed set and skips dynamic
+// rows entirely (the 0 sentinel falls outside its expiry filter),
+// leaving them untouched.
+func TestOldQueryShapeServesFixedAndSkipsDynamicRows(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	dynA := dynamicReport(base)
+	dynB := dynamicReport(base)
+	dynB.Rule, dynB.Target = "dyn-b", "203.0.113.8/32"
+	live := domain.Report{
+		Rule: "fix-live", Chain: "c", Reason: "why", Target: "203.0.113.9/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+	}
+	gone := domain.Report{
+		Rule: "fix-gone", Chain: "c", Reason: "why", Target: "203.0.113.10/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(-time.Hour),
+	}
+	for _, rec := range []domain.Report{dynA, dynB, live, gone} {
+		if err := repo.Upsert(ctx, rec); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+	before := rawRows(t, repo, "")
+
+	// The old serve pass decodes what it returns with the old body shape.
+	rows, err := repo.read.Query(oldListSQL, base.UnixNano())
+	if err != nil {
+		t.Fatalf("old query shape: %v", err)
+	}
+	defer rows.Close()
+	var served []string
+	for rows.Next() {
+		var rule, target, body string
+		var createdNS, updatedNS, expiresNS int64
+		if err := rows.Scan(&rule, &target, &createdNS, &updatedNS, &expiresNS, &body); err != nil {
+			t.Fatalf("old query shape: %v", err)
+		}
+		var b oldBodyShape
+		if err := json.Unmarshal([]byte(body), &b); err != nil {
+			t.Fatalf("old body decode for %s: %v", rule, err)
+		}
+		served = append(served, rule)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("old query shape: %v", err)
+	}
+	if !slices.Equal(served, []string{"fix-live"}) {
+		t.Errorf("old query shape served %v, want the one unexpired fixed row (dynamic rows skipped)", served)
+	}
+
+	// A serve pass touches nothing: every row, dynamic included, is
+	// byte-identical after it.
+	if after := rawRows(t, repo, ""); !slices.Equal(after, before) {
+		t.Errorf("rows changed across the old serve pass:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// TestOldUpsertOverwritesOneAndLeavesTheRest: rollback safety - the old
+// upsert shape cleanly overwrites one dynamic row when its (rule,
+// Target) is re-flagged (the row serves as the fresh report with its
+// identity preserved) and never rewrites the others.
+func TestOldUpsertOverwritesOneAndLeavesTheRest(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	dyn := dynamicReport(base) // the row the old binary re-flags
+	keep := dynamicReport(base)
+	keep.Rule, keep.Target = "dyn-keep", "203.0.113.8/32"
+	fix := domain.Report{
+		Rule: "fix-live", Chain: "c", Reason: "why", Target: "203.0.113.9/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+	}
+	for _, rec := range []domain.Report{dyn, keep, fix} {
+		if err := repo.Upsert(ctx, rec); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+	before := rawRows(t, repo, "")
+
+	// The old binary re-flags (dyn) with a fresh fixed report.
+	reflag := domain.Report{
+		Rule: dyn.Rule, Chain: "c", Reason: "reflagged", Target: dyn.Target,
+		CreatedAt: base.Add(30 * time.Minute), UpdatedAt: base.Add(30 * time.Minute),
+		ExpiresAt: base.Add(90 * time.Minute),
+		Penalty:   &domain.Penalty{Action: domain.PenaltyDrop},
+		Sample:    domain.Event{Time: base.Add(30 * time.Minute), Method: "GET", Path: "/re", Status: 200},
+	}
+	rawBody, err := json.Marshal(oldBodyShape{
+		Chain: reflag.Chain, Reason: reflag.Reason, Tracker: reflag.Tracker,
+		Sample: reflag.Sample, Penalty: reflag.Penalty,
+	})
+	if err != nil {
+		t.Fatalf("marshal old body: %v", err)
+	}
+	if _, err := repo.write.ExecContext(ctx, oldUpsertSQL,
+		reflag.Rule, reflag.Target,
+		reflag.CreatedAt.UnixNano(), reflag.UpdatedAt.UnixNano(), reflag.ExpiresAt.UnixNano(),
+		string(rawBody),
+	); err != nil {
+		t.Fatalf("old upsert shape: %v", err)
+	}
+
+	// The old serve path sees the fresh report where the dynamic row
+	// stood - one row, overwritten cleanly, its identity preserved.
+	rows, err := repo.read.Query(oldListSQL, reflag.UpdatedAt.UnixNano())
+	if err != nil {
+		t.Fatalf("old query shape: %v", err)
+	}
+	defer rows.Close()
+	var found int
+	for rows.Next() {
+		var rule, target, body string
+		var createdNS, updatedNS, expiresNS int64
+		if err := rows.Scan(&rule, &target, &createdNS, &updatedNS, &expiresNS, &body); err != nil {
+			t.Fatalf("old query shape: %v", err)
+		}
+		if rule != reflag.Rule {
+			continue
+		}
+		found++
+		var b oldBodyShape
+		if err := json.Unmarshal([]byte(body), &b); err != nil {
+			t.Fatalf("old body decode: %v", err)
+		}
+		if b.Reason != "reflagged" {
+			t.Errorf("served reason = %q, want the re-flagged %q", b.Reason, "reflagged")
+		}
+		if createdNS != base.UnixNano() {
+			t.Errorf("created_at = %d, want the row's first-insert %d (identity preserved)", createdNS, base.UnixNano())
+		}
+		if expiresNS != reflag.ExpiresAt.UnixNano() {
+			t.Errorf("expires_at = %d, want the re-flagged %d", expiresNS, reflag.ExpiresAt.UnixNano())
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("old query shape: %v", err)
+	}
+	if found != 1 {
+		t.Errorf("rows served for %s = %d, want 1 (the overwrite, not a second row)", reflag.Rule, found)
+	}
+
+	// Every other row is byte-identical: the old write path never
+	// rewrites what it does not re-flag.
+	after := rawRows(t, repo, "")
+	if len(after) != len(before) {
+		t.Fatalf("row count = %d, want %d (an overwrite, nothing added or lost)", len(after), len(before))
+	}
+	for i := range before {
+		if strings.HasPrefix(before[i], "dyn|") {
+			continue // the re-flagged row, asserted above
+		}
+		if before[i] != after[i] {
+			t.Errorf("row %q changed under the old write path: %q -> %q", before[i], before[i], after[i])
+		}
+	}
+
+	// A current reader sees the re-flagged row as the fresh fixed report.
+	got, err := repo.List(ctx, report.Query{Now: reflag.UpdatedAt})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, rec := range got {
+		if rec.Rule != reflag.Rule {
+			continue
+		}
+		if rec.Dynamic || rec.Reason != "reflagged" || !rec.ExpiresAt.Equal(reflag.ExpiresAt) {
+			t.Errorf("re-flagged row = %+v, want the fresh fixed report", rec)
+		}
+		return
+	}
+	t.Errorf("List = %+v, want the re-flagged row served", got)
 }

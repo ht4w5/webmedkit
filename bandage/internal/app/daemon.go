@@ -212,6 +212,15 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 func (d *Daemon) Start(lifetime context.Context) error {
 	d.ctx, d.cancel = context.WithCancel(context.WithoutCancel(lifetime))
 	d.startedAt = d.now()
+	// Startup sweep (spec: Startup sweep): dynamic reports are deleted
+	// before the live-report set is rebuilt - no Report outlives the
+	// volatile tracker state that justifies it. One summary line counts
+	// the sweep; nothing is logged per report.
+	n, err := d.reports.DeleteDynamic(d.ctx)
+	if err != nil {
+		return fmt.Errorf("reports: startup sweep: %w", err)
+	}
+	d.logger.Info().Int("count", n).Msg("startup sweep: dynamic reports deleted")
 	// Rebuild must run before the workers start: suppression state
 	// (ADR 0008) has to be complete before the first event evaluates.
 	if err := d.reports.Rebuild(d.ctx, d.now()); err != nil {

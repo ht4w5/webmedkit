@@ -44,6 +44,9 @@ type Repository interface {
 	// returns the number of deleted rows; dynamic rows die by value,
 	// never by time (spec: Persistence).
 	DeleteExpired(ctx context.Context, now time.Time) (int, error)
+	// DeleteDynamic deletes every dynamic report and returns the number
+	// of deleted rows - the startup sweep (spec: Startup sweep).
+	DeleteDynamic(ctx context.Context) (int, error)
 }
 
 // TrackerLookup reads tracker state: the liveness seam dynamic reports
@@ -296,6 +299,25 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 			continue
 		}
 		delete(s.live, key)
+	}
+	s.mu.Unlock()
+	return n, nil
+}
+
+// DeleteDynamic deletes every dynamic report and returns the number of
+// deleted rows - the startup sweep (spec: Startup sweep): no Report
+// outlives the volatile tracker state that justifies it. The deleted
+// dynamic pairs leave the live set; fixed entries are untouched.
+func (s *Service) DeleteDynamic(ctx context.Context) (int, error) {
+	n, err := s.repo.DeleteDynamic(ctx)
+	if err != nil {
+		return n, err
+	}
+	s.mu.Lock()
+	for key, e := range s.live {
+		if e.dynamic && e.inflight == nil {
+			delete(s.live, key)
+		}
 	}
 	s.mu.Unlock()
 	return n, nil
