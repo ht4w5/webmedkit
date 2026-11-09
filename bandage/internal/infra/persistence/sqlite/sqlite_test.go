@@ -1093,3 +1093,81 @@ func TestOldUpsertOverwritesOneAndLeavesTheRest(t *testing.T) {
 	}
 	t.Errorf("List = %+v, want the re-flagged row served", got)
 }
+
+// TestStaleDynamicFlagIsRepairedAtOpen: the rollback corner - an older
+// binary's upsert overwrites a dynamic row with a fixed report and
+// leaves the stale dynamic column set (its statement knows nothing of
+// the column), so the "unexpired or dynamic" query would serve the row
+// past its expiry. The repair at open clears the flag (a real
+// expires_at marks a fixed row; dynamic rows store the 0 sentinel),
+// and the overwritten report serves then expires normally after the
+// reopen.
+func TestStaleDynamicFlagIsRepairedAtOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports.db")
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
+	// The current binary writes the dynamic row.
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := repo.Upsert(ctx, dynamicReport(base)); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// An older binary re-flags (rule, target) with a fixed report: the
+	// old upsert overwrites every column it knows, leaving the stale
+	// dynamic 1 behind.
+	db, err := sql.Open(driverName, path)
+	if err != nil {
+		t.Fatalf("open for the old upsert shape: %v", err)
+	}
+	rawBody, err := json.Marshal(oldBodyShape{
+		Chain: "c", Reason: "reflagged",
+		Tracker: domain.TrackerReading{Track: "bandwidth", Value: 11000, Leak: 1000, Volume: 10000},
+		Sample:  domain.Event{Time: base.Add(30 * time.Minute), Method: "GET", Path: "/re", Status: 200},
+	})
+	if err != nil {
+		t.Fatalf("marshal old body: %v", err)
+	}
+	expiry := base.Add(90 * time.Minute)
+	if _, err := db.ExecContext(ctx, oldUpsertSQL,
+		"dyn", "203.0.113.7/32",
+		base.Add(30*time.Minute).UnixNano(), base.Add(30*time.Minute).UnixNano(), expiry.UnixNano(),
+		string(rawBody),
+	); err != nil {
+		t.Fatalf("old upsert shape: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old upsert: %v", err)
+	}
+
+	// The reopen runs the repair; the overwritten row is a fixed report
+	// again and serves before its expiry.
+	repo, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
+
+	got, err := repo.List(ctx, report.Query{Now: base.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Dynamic || got[0].Reason != "reflagged" || !got[0].ExpiresAt.Equal(expiry) {
+		t.Errorf("rows = %+v, want the overwritten fixed report serving", got)
+	}
+
+	// And it expires normally: no stale dynamic flag keeps it serving.
+	got, err = repo.List(ctx, report.Query{Now: expiry.Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("List past expiry: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("rows past expiry = %+v, want none (the repaired row expires normally)", got)
+	}
+}

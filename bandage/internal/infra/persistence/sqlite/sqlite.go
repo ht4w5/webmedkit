@@ -73,6 +73,10 @@ func Open(path string) (*ReportRepository, error) {
 		write.Close()
 		return nil, err
 	}
+	if err := repairStaleDynamicFlag(write); err != nil {
+		write.Close()
+		return nil, err
+	}
 	read := write
 	if !isMemory(path) {
 		// Opened after the pragmas (WAL is a property of the database
@@ -136,6 +140,20 @@ func ensureDynamicColumn(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`ALTER TABLE reports ADD COLUMN dynamic INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return fmt.Errorf("sqlite: schema: add dynamic column: %w", err)
+	}
+	return nil
+}
+
+// repairStaleDynamicFlag clears the dynamic flag on rows an older
+// binary overwrote with fixed reports: its upsert knows nothing of the
+// column, so the stale 1 survives the overwrite and the live-rows
+// query would serve the row past its expiry. Rows with a real
+// expires_at are fixed by construction (dynamic rows store the 0
+// sentinel), so the predicate is the guard - the repair runs at every
+// open and touches only the stale rows (spec: Persistence).
+func repairStaleDynamicFlag(db *sql.DB) error {
+	if _, err := db.Exec(`UPDATE reports SET dynamic = 0 WHERE dynamic = 1 AND expires_at <> 0`); err != nil {
+		return fmt.Errorf("sqlite: schema: repair stale dynamic flag: %w", err)
 	}
 	return nil
 }
