@@ -52,7 +52,7 @@ from the climb event - only the recorded volume restates - user story
 14 (the Sample keeps backing the stance from the climb) read over the
 spec's Implementation Decisions "Sample ... move" clause, which the
 shipped restatement does not follow. Fixed stances never
-decay-interact: no Downgrade, no underflow death.
+decay-interact: no Downgrade, no Underflow.
 
 The lifecycle also amends the trigger-semantics and durable-reports
 decisions. The suppression gate in ADR 0008 becomes mode-aware: a

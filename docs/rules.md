@@ -554,7 +554,7 @@ How it behaves:
   The grace margin guards the downgrade line too, so stances do not
   flap between rungs at the boundary; the report dies at Underflow when
   no rung remains exceeded. Fixed stances never decay-interact - no
-  Downgrade, no underflow death - and fixed and dynamic rungs mix
+  Downgrade, no Underflow - and fixed and dynamic rungs mix
   freely on one ladder. A Downgrade is decay's act, never a Trigger's
   (the suppression above narrows to no downgrade from Triggers).
 - `log` actions on any rung log the same rule, Target, Event and
