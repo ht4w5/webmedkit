@@ -527,6 +527,43 @@ func TestServiceConcurrentTriggerWaitsForTheWriteOutcome(t *testing.T) {
 	})
 }
 
+// TestServiceDeleteDuringAnInFlightWriteKeepsThePair pins the Delete/Trigger
+// interleaving: a write in flight is not the delete's - it lands after and its
+// report stands - and every waiter on it is released.
+func TestServiceDeleteDuringAnInFlightWriteKeepsThePair(t *testing.T) {
+	now := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	expiry := now.Add(time.Hour)
+	rec := liveRec("sticky", "203.0.113.7/32", now, expiry)
+	wedge := make(chan struct{})
+	repo := &stubRepository{upWedge: wedge, upEntered: make(chan struct{}, 4)}
+	svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
+
+	a := triggerAsync(svc, rec)
+	<-repo.upEntered // the write is in flight
+	b := triggerAsync(svc, liveRec(rec.Rule, rec.Target, now, expiry))
+	waitPending(t, b) // a waiter on the in-flight write
+
+	if _, err := svc.Delete(context.Background(), Query{Rule: rec.Rule, Target: rec.Target}); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	close(wedge) // the in-flight write lands
+
+	if err := <-a; err != nil {
+		t.Errorf("in-flight Trigger error = %v, want nil", err)
+	}
+	if err := <-b; err != nil {
+		t.Errorf("waiting Trigger error = %v, want nil", err)
+	}
+	// The landed report stands: its pair still suppresses, so the delete
+	// did not re-arm writing under an in-flight write.
+	if err := svc.Trigger(context.Background(), liveRec(rec.Rule, rec.Target, now.Add(time.Minute), expiry), false); err != nil {
+		t.Fatalf("next Trigger: %v", err)
+	}
+	if got := repo.upserts(); got != 1 {
+		t.Errorf("write attempts = %d, want 1 (the landed pair still suppresses)", got)
+	}
+}
+
 // TestServiceRebuildKeepsInFlightWrites pins the rebuild/Trigger interleaving:
 // an in-flight write keeps its suppression across Rebuild.
 func TestServiceRebuildKeepsInFlightWrites(t *testing.T) {

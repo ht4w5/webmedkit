@@ -411,14 +411,14 @@ func (s *Service) downgrade(ctx context.Context, rec domain.Report, st Stance, n
 
 	if err := s.repo.Upsert(ctx, next); err != nil {
 		s.mu.Lock()
-		if s.live[key] == e {
-			if created {
-				delete(s.live, key)
-			}
-			ch := e.inflight
-			e.inflight = nil
-			close(ch)
+		if s.live[key] == e && created {
+			delete(s.live, key)
 		}
+		// The channel is the writer's to close - exactly once, settled or
+		// failed - so a waiter can never hang on an orphaned entry.
+		ch := e.inflight
+		e.inflight = nil
+		close(ch)
 		s.mu.Unlock()
 		return nil, fmt.Errorf("downgrade report: %w", err)
 	}
@@ -526,15 +526,18 @@ func (s *Service) settleDeath(ctx context.Context, rec domain.Report) (bool, err
 }
 
 // Delete removes reports matching the query and returns the number of deleted
-// rows (Repository.Delete). The deleted pairs leave the live set: re-arms writing.
+// rows (Repository.Delete). The deleted pairs leave the live set: re-arms
+// writing. A pair with a write in flight is not the delete's: its write lands
+// after the delete and its report stands, suppressing normally (spec: Trigger
+// suppression) - the same skip discipline as DeleteExpired and DeleteDynamic.
 func (s *Service) Delete(ctx context.Context, q Query) (int, error) {
 	n, err := s.repo.Delete(ctx, q)
 	if err != nil {
 		return n, err
 	}
 	s.mu.Lock()
-	for key := range s.live {
-		if q.Matches(key.rule, key.target) {
+	for key, e := range s.live {
+		if e.inflight == nil && q.Matches(key.rule, key.target) {
 			delete(s.live, key)
 		}
 	}
