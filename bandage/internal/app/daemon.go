@@ -159,8 +159,10 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
 	// The tracker cache is the report service's liveness seam: dynamic
 	// reports die against the records the evaluator accumulates (spec:
-	// Dynamic report liveness).
-	reports := report.NewService(repo, cache)
+	// Dynamic report liveness). The loaded ladders are its Downgrade
+	// seam: a decaying dynamic report restates itself to the highest
+	// rung still exceeded (spec: Downgrade).
+	reports := report.NewService(repo, cache, newRuleStances(rules.Chains, rules.effectiveReasonPrefix(build.Name())), domainLogger{o.logger})
 	ruleCounters := newRuleCounters(rules.Chains)
 	// The Enrichment counter registry counts the counter-enabled
 	// (rule, enrichment) pairs the evaluator's counting points run
