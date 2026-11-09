@@ -82,8 +82,7 @@ the estimate (`observed`) and the subset it successfully enriched
 13. As a rules author, I want unknown keys inside the `enrich` block
     to fail load, so that a misspelled key is caught before runtime.
 14. As a rules author, I want the old top-level `enrichment` block to
-    fail load with a pointed error naming the migration to enrich
-    actions, so that I fix my rules file once, loudly.
+    fail load, so that I fix my rules file once, loudly.
 15. As a rules author, I want disabling an enrichment to mean removing
     its enrich actions, so that my file always describes exactly what
     runs - no hidden runtime switch.
@@ -192,8 +191,9 @@ the estimate (`observed`) and the subset it successfully enriched
   Terminal actions upstream of the enrich rule starve the estimate on
   that path - accepted and documented (ADR 0028).
 - Rules format: the top-level `enrichment` block is removed. Its
-  presence fails load with a pointed error naming the migration to
-  enrich actions; the rules file's `version: 0` stays. Inside the
+  presence fails load through the strict decoder's unknown-key refusal
+  (no dedicated check is kept for removed syntax); the rules file's
+  `version: 0` stays. Inside the
   enrich block, `type` is required and must name a known kind; `counter`
   is optional (default `false`) and strictly boolean when written;
   unknown keys and unknown kinds fail load with errors naming them.

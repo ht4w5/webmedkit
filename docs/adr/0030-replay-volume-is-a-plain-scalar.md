@@ -22,6 +22,10 @@ compatibility. Rejected: the format is pre-release, so a
 half-supported method block is worse than its absence - the plain
 scalar already is the constant method.
 
+Review note: the pointed "error naming the removal", promised in this
+decision and its Rejected rationale until review, is superseded
+(removed rule syntax gets no dedicated check, `b2a31cf`).
+
 Consequences: the per-event volume re-derivation in evaluation is
 replaced by the rule's constant; the tracker cache-entry TTL still
 derives per event from it, and the `bandage -t` plan prints the
