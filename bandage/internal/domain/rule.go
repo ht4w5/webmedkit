@@ -18,14 +18,6 @@ const (
 	TrackReplay TrackKind = "replay"
 )
 
-// VolumeMethod computes a tracker's tolerated volume (download
-// equivalents) from the estimated file size; only replay configures one.
-type VolumeMethod interface {
-	Volume(sizeBytes float64) float64
-	// String renders the method for the --test plan.
-	String() string
-}
-
 // TrackerConfig is a rule's leaky-bucket tracker: explicit leak and
 // volume with the cache-entry TTL derived as volume/leak.
 type TrackerConfig struct {
@@ -34,9 +26,6 @@ type TrackerConfig struct {
 	// Volume is the constant volume: requests (rate), bytes (bandwidth),
 	// or tolerated download equivalents (plain scalar replay).
 	Volume float64
-	// VolumeMethod computes the replay volume from the estimated file
-	// size instead of Volume; nil otherwise.
-	VolumeMethod VolumeMethod
 	// TTL is the cache-entry TTL derived at build (volume/leak); replay
 	// derives it per event and leaves this zero.
 	TTL time.Duration
@@ -44,20 +33,8 @@ type TrackerConfig struct {
 	TargetPrefix TargetPrefix
 }
 
-// VolumeFor returns the tolerated volume for an estimated file size in
-// bytes: the volume method's output when configured, Volume otherwise.
-func (c *TrackerConfig) VolumeFor(sizeBytes float64) float64 {
-	if c.VolumeMethod != nil {
-		return c.VolumeMethod.Volume(sizeBytes)
-	}
-	return c.Volume
-}
-
-// VolumeDesc renders the volume configuration for the --test plan.
+// VolumeDesc renders the volume for the --test plan.
 func (c *TrackerConfig) VolumeDesc() string {
-	if c.VolumeMethod != nil {
-		return c.VolumeMethod.String()
-	}
 	return strconv.FormatFloat(c.Volume, 'f', -1, 64)
 }
 
@@ -67,8 +44,20 @@ func (c *TrackerConfig) VolumeDesc() string {
 type ReportAction struct {
 	// Reason is the machine-readable slug feeding downstream ban rules.
 	Reason string
-	// TTL is the report's expiry since the trigger wall-clock time.
+	// TTL is the report's expiry since the trigger wall-clock time;
+	// zero means no ttl: a dynamic report, alive while the tracker
+	// value stays above its recorded volume (spec: Two lifecycle
+	// modes). Load accepts it only where tracker liveness can kill it.
 	TTL time.Duration
+	// Grace is the authored grace on a dynamic report: load refuses it
+	// beside ttl (spec: Report action grammar). Zero means no grace:
+	// the strict death line at the recorded volume.
+	Grace time.Duration
+	// Margin is the compiled grace - leak x grace in the tracker's
+	// quantity - set at rule build, zero when grace is absent. The
+	// death line is the recorded volume minus this margin (spec:
+	// Report action grammar).
+	Margin float64
 	// Penalty is the advisory enforcement stance the report recommends
 	// for the target (ADR 0010).
 	Penalty Penalty

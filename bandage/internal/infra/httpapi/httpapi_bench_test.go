@@ -52,7 +52,7 @@ func benchListReport(target string) domain.Report {
 func seedReports(b *testing.B, repo *sqlite.ReportRepository, rows int) {
 	b.Helper()
 	ctx := context.Background()
-	svc := report.NewService(repo)
+	svc := report.NewService(repo, report.NopTrackerLookup{}, report.NopLadder{}, report.NopLogger{})
 	for i := 0; i < rows; i++ {
 		if err := svc.Trigger(ctx, benchListReport("bench-target-"+strconv.Itoa(i)+"/32"), false); err != nil {
 			b.Fatalf("seed Trigger: %v", err)
@@ -79,7 +79,7 @@ func BenchmarkReportsList(b *testing.B) {
 			}
 			b.Cleanup(func() { repo.Close() })
 			seedReports(b, repo, tt.rows)
-			srv := New(report.NewService(repo), benchStats{}, benchRuntime{}, benchNow)
+			srv := New(report.NewService(repo, report.NopTrackerLookup{}, report.NopLadder{}, report.NopLogger{}), benchStats{}, benchRuntime{}, benchNow)
 			req := httptest.NewRequest(http.MethodGet, "/api/reports", nil)
 			w := httptest.NewRecorder()
 			for b.Loop() {

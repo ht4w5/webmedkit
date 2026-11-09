@@ -330,9 +330,9 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		// at 1 per event.
 		size := float64(event.SizeBytes)
 		increment = math.Min(float64(event.SentBytes)/size, 1)
-		// Volume is the volume method's output; the TTL re-derives from it per event.
-		// A ladder's rungs stand in for the volume, so its TTL derives from the top rung.
-		volume = cfg.VolumeFor(size)
+		// The reading's volume is the rule's constant scalar; a ladder's
+		// rungs stand in for the volume, so its TTL derives from the top
+		// rung. The cache-entry TTL re-derives from the volume per event.
 		if top, ok := rule.TopRung(); ok {
 			volume = top.At
 		}
@@ -365,6 +365,14 @@ func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.ReportAction) error {
 	now := s.now()
 	penalty := action.Penalty // the stance of the rules loaded at write time
+	// A report action without ttl writes a dynamic report: no scheduled
+	// expiry, alive while the tracker value stays above the recorded
+	// volume (spec: Two lifecycle modes).
+	dynamic := action.TTL == 0
+	expires := now.Add(action.TTL)
+	if dynamic {
+		expires = time.Time{}
+	}
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
@@ -372,10 +380,12 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,
-		ExpiresAt: now.Add(action.TTL),
+		ExpiresAt: expires,
 		Tracker:   m.reading,
 		Sample:    *m.event, // the Event whole (ADR 0021), never a projection
 		Penalty:   &penalty,
+		Dynamic:   dynamic,
+		Margin:    action.Margin, // the writing action's grace margin (spec: Report action grammar)
 	}
 	return s.reports.Trigger(ctx, rec, len(m.rule.Escalations) > 0)
 }

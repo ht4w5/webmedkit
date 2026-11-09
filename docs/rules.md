@@ -17,7 +17,8 @@ the DSL's design is recorded in
 Two glossary entries govern what happens at runtime
 ([GLOSSARY.md](../GLOSSARY.md),
 [ADR 0008](adr/0008-trigger-semantics-one-live-report.md) as amended by
-[ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)):
+[ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md) and
+[ADR 0031](adr/0031-dynamic-report-lifecycle.md)):
 
 - **Match** - the rule's filter accepts the Event and its tracker (if
   any) overflows; the rule's actions then run - or, on a ladder, the
@@ -26,20 +27,24 @@ Two glossary entries govern what happens at runtime
 - **Trigger** - a Match that ran the rule's report action. The report
   action is the only write path to reports.
 
-Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
+Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013
+and ADR 0031):
 
 - One **Report** per (rule, Target) per report lifetime. While the
   report for (rule, Target) is alive, a Trigger at or below the volume
   recorded in its `tracker` reading - the threshold of the rung that
-  last wrote it - writes nothing: no downgrade and no rewrite. A rule
+  last wrote it - writes nothing: no downgrade from Triggers and no
+  rewrite (decay-driven **Downgrade** is its inverse - never written by
+  a Trigger; see [Escalation ladders](#escalation-ladders)). A rule
   without a ladder never overrides its live report: one write per
   report lifetime. A Trigger from a strictly higher rung overrides the
   report **in place**:
   reason, penalty, rate, Sample, tracker reading, update time and
-  expiry all move to the overriding rung's values, and its `ttl` runs
-  from that write. Only `created_at` stays frozen at first flagged. The
-  rule itself is untouched: it keeps matching and its other actions
-  keep running per event.
+  expiry all move to the overriding rung's values, and the report
+  adopts that rung's lifecycle - its `ttl` runs from that write, or
+  absent `ttl` keeps it dynamic. Only `created_at` stays frozen at
+  first flagged. The rule itself is untouched: it keeps matching and
+  its other actions keep running per event.
 - A Trigger never empties the rule's tracker for the Target (or the
   (Target, path) records of a replay tracker). The record keeps
   accumulating across writes - landed or suppressed - so a Tracker used
@@ -47,8 +52,9 @@ Trigger semantics hold for every rule (ADR 0008, amended by ADR 0013):
   write. Only the tracker cache's TTL and eviction restart a record.
 - A failed report write is not a Trigger outcome: the tracker stays
   intact and the next matching event retries the report.
-- Deleting a report (`DELETE /api/reports`) or letting its `ttl` expire
-  re-arms writing: the next matching event writes a fresh report at the
+- Deleting a report (`DELETE /api/reports`), letting its `ttl` expire,
+  or - dynamic - dying at Underflow re-arms writing: the next matching
+  event writes a fresh report at the
   accumulation's current stance - a dead report's stance is not
   remembered, and one event's writes climb the crossed rungs, each
   overriding the last. Its Sample and tracker reading come from that
@@ -302,7 +308,8 @@ replay tracker on every handoff event.
 
 Every report action declares a **Penalty** - the enforcement stance the
 report recommends for the Target - with a `penalty` key beside `reason`
-and `ttl` ([GLOSSARY.md](../GLOSSARY.md),
+and the [lifecycle keys](#report-lifecycle-ttl-and-grace)
+([GLOSSARY.md](../GLOSSARY.md),
 [ADR 0010](adr/0010-reports-carry-an-advisory-penalty.md)). The
 vocabulary is closed to five values; the limit penalties carry a `rate`:
 
@@ -328,7 +335,7 @@ report's Target - the whole prefix, not each host inside it.
 every recommendation can be audited before deploying:
 
 ```
-    action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000
+    action report reason=bandage.iso-egress-overflow ttl=168h0m0s grace=none penalty=limit-bandwidth rate=1000000
 ```
 
 Load refuses a rules file where:
@@ -392,6 +399,74 @@ per second:
 These pairings are idiomatic, not enforced: `limit-pkt-rate` (packets
 per second) and `reject` round out the vocabulary for rules whose
 traffic calls for them.
+
+## Report lifecycle: `ttl` and `grace`
+
+Every report action's lifecycle keys are an optional `ttl` and an
+optional `grace`, mutually exclusive - one lifecycle policy per report
+action, in two modes ([ADR 0031](adr/0031-dynamic-report-lifecycle.md)):
+
+- **`ttl` written - fixed.** The report is immune to tracker decay and
+  dies at `updated_at + ttl`, exactly the semantics existing rules
+  files have always had.
+- **`ttl` absent - dynamic.** On a tracked rule the report is bound to
+  the tracker value that justified it: alive while that value is
+  strictly above its **death line**, dead at **Underflow** when it
+  decays to the line - the strict mirror of Overflow. Without `grace`
+  the death line is the report's recorded volume: dead at
+  `value <= volume`.
+
+`grace` widens the death line below the volume, so a brief pause in
+otherwise sustained abuse does not withdraw and re-flag enforcement in
+a flap. It parses the `ttl` quantity language (Go duration strings
+plus `d` for days - `7d`, `24h`, `30m`) and compiles to a margin of
+`leak × grace`: the death line is `volume − leak × grace`. Under
+linear decay grace and margin are one quantity, so no lifecycle state
+exists (ADR 0031). One edge on record: a margin wider than the volume
+leaves a negative death line, and such a report never dies by decay at
+all - only deletion or the daemon's startup sweep end it.
+
+Dynamic death is lazy: nothing runs between events and no timer exists
+- the death materializes at document generation (a dead dynamic report
+is simply absent from `GET /api/reports`, withdrawing its enforcement
+at the consumer's next sync), at sweep time, and at the Trigger write
+that finds the dead row (the death settles before the write) - the
+dead row goes at every act.
+The next overflow writes a fresh report at the accumulation's current
+stance, its `created_at` fresh even with no document or sweep in
+between. On a ladder a dynamic report **Downgrades** instead of
+vanishing at the top rung's line - see
+[Escalation ladders](#escalation-ladders) below.
+
+A dynamic report action looks like any other, minus `ttl`:
+
+```yaml
+      - id: sustained-iso-egress
+        tracker: {track: bandwidth, leak: 1MB, volume: 100GB}
+        actions:
+          - report:
+              reason: iso-egress-overflow
+              grace: 10m
+              penalty: limit-bandwidth
+              rate: 1MB
+```
+
+`bandage -t` prints the lifecycle of every report action - `ttl=` and
+`grace=` beside the namespaced reason, `none` when the key is absent:
+
+```
+    action report reason=bandage.iso-egress-overflow ttl=none grace=10m0s penalty=limit-bandwidth rate=1000000
+    action report reason=bandage.iso-egress-ban ttl=168h0m0s grace=none penalty=drop
+```
+
+Load refuses a rules file where:
+
+- a report action carries both `ttl` and `grace` - one lifecycle policy
+  per action;
+- a report action without `ttl` sits on a tracker-less rule - a
+  tripwire report can never be unbounded;
+- a report action without `ttl` sits on a zero-leak tracker - a bucket
+  that can never underflow cannot declare a dynamic report.
 
 ## Escalation ladders
 
@@ -465,8 +540,25 @@ How it behaves:
   values - while a rung at or below its recorded threshold is silent;
   only `created_at` stays frozen at first flagged, so the Sample always
   backs the report's current stance. Rung reasons may be distinct or
-  shared; each report action carries its own `ttl` (the ban's lifetime
-  runs from the ban rung) and `penalty`.
+  shared; each report action carries its own `penalty` and lifecycle
+  policy - the ban's `ttl` runs from the ban rung, and a rung without
+  `ttl` writes a dynamic stance
+  ([Report lifecycle](#report-lifecycle-ttl-and-grace)).
+- A dynamic report on a ladder **Downgrades** as the value decays: when
+  the value falls to the current stance's death line and a lower rung
+  is still exceeded, the report restates itself to the highest rung
+  still exceeded - reason, penalty, rate and the tracker reading's
+  volume (now the lower rung's threshold) move down with a fresh update
+  time, while `created_at` and the Sample (the climb event, which
+  crossed every lower rung) stay. The restated stance adopts the target
+  rung's policy: a fixed rung's `ttl` runs from the downgrade write and
+  the report is fixed again, a dynamic rung keeps value-bound liveness.
+  The grace margin guards the downgrade line too, so stances do not
+  flap between rungs at the boundary; the report dies at Underflow when
+  no rung remains exceeded. Fixed stances never decay-interact - no
+  Downgrade, no Underflow - and fixed and dynamic rungs mix
+  freely on one ladder. A Downgrade is decay's act, never a Trigger's
+  (the suppression above narrows to no downgrade from Triggers).
 - `log` actions on any rung log the same rule, Target, Event and
   tracker reading detail as today; the reading's `volume` is the firing
   rung's threshold.
@@ -476,10 +568,9 @@ How it behaves:
   per event from the same top rung.
 
 Load refuses, each error naming the rule: a ladder beside `actions` or
-beside `tracker.volume` - a scalar volume is the single-volume rule a
-ladder is never declared on, and a volume-method block (`constant`,
-`clamped-linear`, `inverse-square`, `step`) stays exclusive to the
-single-volume form; a ladder without a tracker; fewer than two rungs;
+beside `tracker.volume` - a volume is the single-volume rule a ladder
+is never declared on (the rungs carry every threshold); a ladder
+without a tracker; fewer than two rungs;
 `at` thresholds that are not strictly ascending; and thresholds that do
 not parse in the tracker kind's quantity - bytes for bandwidth
 (`50MB`), plain counts for rate, download equivalents for replay
@@ -499,6 +590,10 @@ estimate is unknown - the path not yet observed, or a log emitter
 without the response-size fields - replay is blind and the event adds
 nothing to the tracker.
 
+Replay's `volume` is a plain scalar in those download equivalents
+(`2` means two full downloads of the path, whatever its size)
+([ADR 0030](adr/0030-replay-volume-is-a-plain-scalar.md)).
+
 The shipped ladder's `bandage -t` output shows every rung with its
 threshold and its actions; the tracker line carries no volume (the
 rungs carry every threshold) and its `ttl` from the top rung:
@@ -508,8 +603,8 @@ rungs carry every threshold) and its `ttl` from the top rung:
     filter: any
     tracker: bandwidth leak=1000000 ttl=11h6m40s
     rung at=50000000 jump target=inspect
-    rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000
-    rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop
+    rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s grace=none penalty=limit-bandwidth rate=1000000
+    rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s grace=none penalty=drop
 ```
 
 ## Rule counters
@@ -552,7 +647,9 @@ chains:
 The tripwire flags every request carrying a known-bad signal (classically
 a user agent) immediately - no accumulation, no volume: an agent keyword
 filter plus a report action, and **no tracker**. Its writes are bounded
-by report suppression alone (see the Trigger semantics above).
+by report suppression alone (see the Trigger semantics above) - and
+in time by its `ttl`, which a tripwire report must carry
+([Report lifecycle](#report-lifecycle-ttl-and-grace)).
 
 ```yaml
 version: 0
@@ -611,6 +708,7 @@ How it behaves:
 Rules with a tracker work the same way with one difference in the
 Match semantics: a Match additionally requires the tracker to overflow
 (on a ladder, exceed a rung - then the fired rungs' actions run,
-lowest first). Nothing empties the tracker on a Trigger, so a deleted
-or expired report is rewritten on the next matching event, its Sample
-and tracker reading reflecting the accumulation as it stands.
+lowest first). Nothing empties the tracker on a Trigger, so a deleted,
+expired or Underflowed report is rewritten on the next matching event,
+its Sample and tracker reading reflecting the accumulation as it
+stands.

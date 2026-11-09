@@ -34,3 +34,10 @@ stays intact and the next matching event retries the report - the
 reset applies only when the write landed or a live report suppressed
 it. ADR 0007's "a duplicate trigger just refreshes the same row" is
 superseded: while the report is alive, further Triggers write nothing.
+
+Amended (dynamic reports, ADR 0031): the alive-gate is mode-aware - a
+fixed report is alive until its expiry, a dynamic report while its
+tracker value stays above its death line - and a dynamic report's
+Underflow re-arms writing exactly as expiry and deletion do. The
+suppression gate (one live report per (rule, Target)) and the
+single-writer path stand as written.

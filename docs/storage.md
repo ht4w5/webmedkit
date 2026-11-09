@@ -2,7 +2,9 @@
 
 Reports live in one sqlite database (`db.sqlite.path`, e.g.
 `/var/lib/bandage/reports.db` - see `configs/bandage.yml`), one row per
-(rule, Target). Reports survive restarts (memory mode excepted - see
+(rule, Target). Reports survive restarts while fixed - the daemon
+sweeps every dynamic report at startup (ADR 0002, ADR 0031) (memory
+mode excepted - see
 below); tracker state is memory-only (ADR 0002). The file database runs `journal_mode=WAL` with
 `synchronous=NORMAL`: writes go through a single connection and API
 reads use their own, so `GET /api/reports` never queues behind upserts
@@ -57,7 +59,7 @@ files behind and every start begins with an empty store. The option is
 mutually exclusive with `db.sqlite.path` - setting both is a config
 validation error, so no run guesses which one won.
 
-Memory mode is the exception to "reports survive restarts": reports do
+Memory mode is the exception to fixed-report durability: reports do
 not survive, deliberately, and the daemon warns about exactly that at
 startup (ADR 0002's durability is bent here, for debugging only). The
 WAL files, the backup procedures and the durability notes above

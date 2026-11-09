@@ -34,3 +34,16 @@ func SplitTrackerKey(key string) (target, path string) {
 	}
 	return key, ""
 }
+
+// WritingKey returns the tracker-cache state behind this report's
+// reading - the Tracker record named in its reading, the key the
+// writing event fed (spec: Dynamic report liveness): the rule ID
+// namespaces the record, keyed by the Target, or for replay by the
+// Target and the sample's path. The sample moves with every write
+// (ADR 0021), so it always names the writing key.
+func (r Report) WritingKey() (ns, key string) {
+	if r.Tracker.Track == string(TrackReplay) {
+		return r.Rule, ReplayTrackerKey(r.Target, r.Sample.Path)
+	}
+	return r.Rule, TrackerKey(r.Target)
+}

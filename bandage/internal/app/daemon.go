@@ -157,7 +157,12 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 		repo = r
 	}
 	cache := memory.New(cfg.Cache.MaxEntries, o.now, o.logger)
-	reports := report.NewService(repo)
+	// The tracker cache is the report service's liveness seam: dynamic
+	// reports die against the records the evaluator accumulates (spec:
+	// Dynamic report liveness). The loaded ladders are its Downgrade
+	// seam: a decaying dynamic report restates itself to the highest
+	// rung still exceeded (spec: Downgrade).
+	reports := report.NewService(repo, cache, newRuleStances(rules.Chains, rules.effectiveReasonPrefix(build.Name())), domainLogger{o.logger})
 	ruleCounters := newRuleCounters(rules.Chains)
 	// The Enrichment counter registry counts the counter-enabled
 	// (rule, enrichment) pairs the evaluator's counting points run
@@ -209,6 +214,15 @@ func New(cfg Config, rules Rules, build identity.Build, opts ...Option) (*Daemon
 func (d *Daemon) Start(lifetime context.Context) error {
 	d.ctx, d.cancel = context.WithCancel(context.WithoutCancel(lifetime))
 	d.startedAt = d.now()
+	// Startup sweep (spec: Startup sweep): dynamic reports are deleted
+	// before the live-report set is rebuilt - no Report outlives the
+	// volatile tracker state that justifies it. One summary line counts
+	// the sweep; nothing is logged per report.
+	n, err := d.reports.DeleteDynamic(d.ctx)
+	if err != nil {
+		return fmt.Errorf("reports: startup sweep: %w", err)
+	}
+	d.logger.Info().Int("count", n).Msg("startup sweep: dynamic reports deleted")
 	// Rebuild must run before the workers start: suppression state
 	// (ADR 0008) has to be complete before the first event evaluates.
 	if err := d.reports.Rebuild(d.ctx, d.now()); err != nil {

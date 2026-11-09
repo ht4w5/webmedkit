@@ -22,14 +22,16 @@ implementation cannot drift.
 | `reports` | array | live report entries (below), possibly empty |
 
 The reports are ordered by `created_at` descending, then `rule` and
-`target` ascending. Expired reports are never served. The `?rule=` and
+`target` ascending. Only live reports are served: expiry, Underflow and
+deletion all withdraw an entry (below). The `?rule=` and
 `?target=` query parameters return a subset under the same ordering; they
 do not change the document's shape.
 
 ## Report entry
 
-One report entry per (rule, target). `penalty` is the last key of the
-entry, so future additive fields append after it.
+One report entry per (rule, target). `penalty` is the last key a fixed
+entry carries; additive fields append after it (`dynamic` below is
+one), so future additive fields land there too.
 
 | field | type | meaning |
 |---|---|---|
@@ -39,10 +41,11 @@ entry, so future additive fields append after it.
 | `target` | string | the aggregated source prefix the report is about, e.g. `203.0.113.7/32` |
 | `created_at` | string | when the report entry was first written, RFC 3339 UTC |
 | `updated_at` | string | when the report entry was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
-| `expires_at` | string | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it |
+| `expires_at` | string or null | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it; `null` on a dynamic entry (below) - no scheduled withdrawal |
 | `tracker` | object | the tracker reading that justified the report (below) |
 | `sample` | object | the event that justified the report's current stance (below) |
 | `penalty` | object | the advisory enforcement stance (below); present on every canonical report entry |
+| `dynamic` | boolean | `true` exactly on a dynamic entry (below); absent on a fixed one |
 
 The `tracker` reading:
 
@@ -51,7 +54,7 @@ The `tracker` reading:
 | `track` | string | tracker kind: `rate`, `bandwidth`, or `replay`; empty `""` and a zeroed reading when the rule is tracker-less |
 | `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents - the tracker kind's quantity) |
 | `leak` | number | the per-second decay applied to `value` |
-| `volume` | number | the overflow threshold `value` exceeded |
+| `volume` | number | the overflow threshold `value` exceeded; the base of a dynamic entry's death line (below) |
 
 The `sample` is the whole event that justified the report's current
 stance - never a curated subset of its fields. Absent observations
@@ -74,22 +77,59 @@ read empty.
 
 ### Lifecycle
 
+A report action with a `ttl` writes a **fixed** report; the paragraphs
+below describe it. A report action without a `ttl` writes a **dynamic**
+report - the entry carries `"dynamic": true` and `"expires_at": null`.
+Its life is bound to the tracker value that justified it: the report is
+alive while that value is strictly above its **death line**, and it
+dies at **Underflow**, the moment the value decays to the line. The
+death line is the `volume` recorded in its `tracker` reading, or below
+it when the writing report action declared a `grace` - the widening
+margin is a rules-side setting this document does not carry. There is
+no timer - the death is materialized
+lazily, at document generation (a dead dynamic report is simply absent
+from this document), at sweep time, and at the Trigger write that
+finds the row dead (the death settles before the write) - the dead
+row goes at every act - and the next overflow writes a fresh report at
+the accumulation's current stance, its `created_at` fresh even with no
+document or sweep in between.
+Suppression follows the same aliveness in both modes: while a report is
+alive, Triggers write nothing and the rule's other actions keep
+running.
+
 One report lives per (rule, target). A Trigger writes it when no report
 for the pair is alive. While one is alive, a Trigger at or below the
 volume recorded in the report's `tracker` reading - the threshold of
-the rung that last wrote it - writes nothing: no downgrade and no
-rewrite. A rule without a ladder never overrides its live report: one
+the rung that last wrote it - writes nothing: no downgrade from
+Triggers and no rewrite. A rule without a ladder never overrides its
+live report: one
 write per report lifetime. A Trigger from a strictly higher rung
 overrides the report in
 place: `reason`, `penalty`, the `tracker` reading, `sample`, `updated_at`
-and `expires_at` all move to the overriding rung's values, and
-`expires_at` runs from its `ttl`. `created_at` alone stays frozen at
+and `expires_at` all move to the overriding rung's values, and the
+entry adopts the overriding rung's lifecycle - `expires_at` runs from
+its `ttl`, or stays `null` when that rung writes a dynamic stance.
+`created_at` alone stays frozen at
 first flagged
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)). The
 `sample` is the event that justified the report's current stance, so
 the sample always backs the penalty the report carries.
 
-The report dies at its `expires_at` or when `DELETE /api/reports` removes
+On a ladder a dynamic report **Downgrades** as its tracker value
+decays: when the value falls to the report's death line and a lower
+rung is still exceeded, the report restates itself to the highest rung
+still exceeded - `reason` and `penalty` move to that rung's with a
+fresh `updated_at`, while `created_at` and the `sample` stay (the
+climb event crossed every lower rung) - and the `tracker` reading's
+`volume` restates to the rung's threshold. The restated entry adopts
+the rung's lifecycle: a fixed rung makes it a fixed entry again
+(`dynamic` gone, `expires_at` stamped from the downgrade write), a
+dynamic rung keeps it value-bound. It dies - absent from this document
+- when no rung remains exceeded. A Downgrade is decay's act, never a
+Trigger's.
+
+The report dies at its `expires_at` (fixed), at Underflow (dynamic), or
+when `DELETE /api/reports` removes
 it; the next matching event then writes a fresh report at the
 accumulation's current stance - a dead report's stance is not
 remembered, and one event's writes climb the crossed rungs, each
@@ -97,14 +137,17 @@ overriding the last. The tracker's record is never emptied by a Trigger
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)), so
 the reading describes the accumulation as it stands. `created_at` is
 fixed at the row's first insert and survives a fresh write over a
-still-stored row (expired but not yet swept).
+still-stored row (a fixed row expired but not yet swept) - a dynamic
+row a Trigger finds dead goes at the write itself, so the re-flagged
+report is a fresh row.
 
 ### Timestamps
 
 Every timestamp in the document is an RFC 3339 UTC string (a `Z`
 suffix), at second precision: sub-second components are truncated, not
 rounded. `generated_at` is the request time; `created_at`, `updated_at`
-and `expires_at` are wall-clock write times.
+and `expires_at` are wall-clock write times - except a dynamic entry's
+`expires_at`, which is `null`, not a timestamp.
 
 ### The reason
 

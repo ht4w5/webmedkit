@@ -37,3 +37,28 @@ func (r *Record) Accumulate(increment, leak float64, eventTime int64) {
 func (r Record) Overflow(volume float64) bool {
 	return r.Value > volume
 }
+
+// ValueAt returns the record's value decayed to at (unix seconds) by
+// leak without mutating the record - the Accumulate math between
+// events, so a lazy reader sees the value as it stands.
+func (r Record) ValueAt(leak float64, at int64) float64 {
+	if r.LastUpdate == 0 {
+		// No event has contributed yet: nothing to decay.
+		return 0
+	}
+	if dt := at - r.LastUpdate; dt > 0 {
+		if decayed := r.Value - leak*float64(dt); decayed > 0 {
+			return decayed
+		}
+		return 0
+	}
+	return r.Value
+}
+
+// Underflow reports whether the record's value has decayed to the
+// death line at at (unix seconds) - dead at value <= line, the strict
+// mirror of Overflow (spec: Dynamic report liveness). The line is the
+// report's recorded volume minus its grace margin.
+func (r Record) Underflow(line, leak float64, at int64) bool {
+	return r.ValueAt(leak, at) <= line
+}

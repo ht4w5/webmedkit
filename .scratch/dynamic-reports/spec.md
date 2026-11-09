@@ -118,8 +118,8 @@ equivalents.
     download equivalents, so that I state tolerated downloads without
     a volume method.
 28. As a rules author, I want a rules file carrying a volume-method
-    block to fail load with an error naming the removal, so that the
-    migration is discoverable at `bandage -t` time.
+    block to fail load, so that the migration is discoverable at
+    `bandage -t` time.
 29. As a web panel operator, I want dynamic Reports on the reports
     page with their null expiry, so that currently-justified
     enforcement is visible.
@@ -146,7 +146,8 @@ equivalents.
 - **Load validation additions**: a report action on a tracker-less
   rule must carry `ttl`; a report action on a zero-leak Tracker must
   carry `ttl`; `ttl` and `grace` together is refused; a volume-method
-  block anywhere is refused with an error naming the removal. The
+  block anywhere is refused by the ordinary quantity validation (no
+  dedicated check is kept for removed syntax). The
   `bandage -t` plan prints `grace=` beside `ttl=` on every report
   line.
 - **Dynamic report liveness**: alive iff the Tracker record named in
@@ -204,8 +205,8 @@ equivalents.
   per-event volume re-derivation in evaluation goes with it. Side
   benefit: a Tracker's volume is now constant per rule, so death lines
   are well-defined. This is a breaking rules-format change: a file
-  with a volume-method block fails load with an error naming the
-  removal. Land as a separate commit in the same change.
+  with a volume-method block fails load through the ordinary quantity
+  validation. Land as a separate commit in the same change.
 - **Vocabulary** (glossary updates land with this change): **Dynamic
   report**, **Grace**, **Downgrade**, **Underflow** as new terms; the
   Report and Trigger entries are reworded ("alive until expiry,

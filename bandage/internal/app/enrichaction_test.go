@@ -228,11 +228,6 @@ chains:
 	}
 }
 
-// wantEnrichmentMigrationErr is the pinned migration-error substring: any
-// presence of the old top-level enrichment block fails load naming the
-// enrich actions that replaced it.
-const wantEnrichmentMigrationErr = "rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)"
-
 // TestE2EPointedLoadFailuresNameWhatTheyReject: every pointed load
 // failure lands at the assembled-daemon seam (spec: Testing Decisions) -
 // rules YAML as the input surface, the pointed load error out of the
@@ -247,14 +242,6 @@ func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
 		rules   string
 		wantErr string
 	}{
-		// The old top-level enrichment block is gone: any presence - even
-		// empty or null - fails load with the migration error naming the
-		// enrich actions that replaced it (story 14, ADR 0028).
-		{name: "enrichment block fails load naming the migration", rules: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "empty enrichment block fails load naming the migration", rules: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "null enrichment block fails load naming the migration", rules: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-		{name: "empty enrichment key fails load naming the migration", rules: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
-
 		// An unknown enrichment type names the type - a typo can never
 		// silently enrich nothing (story 12).
 		{name: "enrich unknown type names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
@@ -280,6 +267,38 @@ func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error %q does not contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestE2EEnrichmentBlockFailsThroughStrictDecode: the removed
+// top-level enrichment block's shapes get no dedicated check (removed
+// rule syntax rides generic refusals) - any presence, even empty or
+// null, fails the assembled daemon's rules-loading step through the
+// strict decoder's unknown-key refusal (spec: Testing Decisions; the
+// pin asserts the generic refusal, with the removed shapes as inputs
+// only).
+func TestE2EEnrichmentBlockFailsThroughStrictDecode(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules string
+	}{
+		{name: "enrichment block fails load", rules: "version: 0\nenrichment:\n  filter: 'src 10.0.0.0/8'\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+		{name: "empty enrichment block fails load", rules: "version: 0\nenrichment: {}\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+		{name: "null enrichment block fails load", rules: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+		{name: "empty enrichment key fails load", rules: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadTestRules(tt.rules)
+			if err == nil {
+				t.Fatal("loadTestRules succeeded, want the strict decoder's unknown-key refusal")
+			}
+			for _, want := range []string{"rules: decode:", "field enrichment not found"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
 			}
 		})
 	}

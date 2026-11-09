@@ -28,12 +28,8 @@ type rawRules struct {
 	Version *int `yaml:"version"`
 	// ReasonPrefix is the optional report-namespace prefix; its node is
 	// validated in buildReasonPrefix.
-	ReasonPrefix yaml.Node `yaml:"reason_prefix"`
-	// Enrichment is the removed top-level enrichment block: its mere
-	// presence is a load error naming the migration to enrich actions
-	// (ADR 0028); the node is kept only to detect that presence.
-	Enrichment yaml.Node  `yaml:"enrichment"`
-	Chains     []rawChain `yaml:"chains"`
+	ReasonPrefix yaml.Node  `yaml:"reason_prefix"`
+	Chains       []rawChain `yaml:"chains"`
 }
 
 type rawChain struct {
@@ -62,7 +58,8 @@ type rawEscalation struct {
 }
 
 // rawTracker keeps leak and volume as yaml.Nodes so presence is
-// validated; replay volume may be a scalar or a volume-method block.
+// validated and a removed volume-method block is detectable (spec:
+// Volume-method removal).
 type rawTracker struct {
 	Track        string          `yaml:"track"`
 	Leak         yaml.Node       `yaml:"leak"`
@@ -77,9 +74,14 @@ type rawTargetPrefix struct {
 	IPv6 *int `yaml:"ipv6"`
 }
 
+// rawReportAction is the report action's block; ttl and grace are
+// yaml.Nodes so presence is validated - absent ttl means a dynamic
+// report (spec: Two lifecycle modes), a written key must carry a
+// duration.
 type rawReportAction struct {
 	Reason  string    `yaml:"reason"`
-	TTL     string    `yaml:"ttl"`
+	TTL     yaml.Node `yaml:"ttl"`
+	Grace   yaml.Node `yaml:"grace"`
 	Penalty string    `yaml:"penalty"`
 	Rate    yaml.Node `yaml:"rate"`
 }
@@ -146,9 +148,6 @@ func ParseRules(data []byte) (Rules, error) {
 	if err != nil {
 		return Rules{}, err
 	}
-	if err := rejectRemovedEnrichmentBlock(&raw.Enrichment); err != nil {
-		return Rules{}, err
-	}
 	if len(raw.Chains) == 0 {
 		return Rules{}, errors.New("rules: chains: at least one chain required")
 	}
@@ -193,18 +192,6 @@ func buildReasonPrefix(node *yaml.Node) (string, error) {
 		return "", fmt.Errorf("rules: reason_prefix: %q is not a valid slug (want %s)", node.Value, reasonRe.String())
 	}
 	return node.Value, nil
-}
-
-// rejectRemovedEnrichmentBlock fails load on any presence of the old
-// top-level enrichment block - an empty or null block included - with
-// the pointed error naming the migration to enrich actions (ADR 0028):
-// the block and its filter are gone wholly, with no replacement
-// predicate.
-func rejectRemovedEnrichmentBlock(node *yaml.Node) error {
-	if !keyWritten(node) {
-		return nil
-	}
-	return errors.New("rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)")
 }
 
 func buildChain(raw *rawChain, seen map[string]bool) (domain.Chain, error) {
@@ -303,7 +290,48 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		// tracker-less writes.
 		rule.Actions = append(rule.Actions, action)
 	}
+	if err := validateReportLifecycles(rule); err != nil {
+		return domain.Rule{}, err
+	}
+	compileGraceMargins(&rule)
 	return rule, nil
+}
+
+// compileGraceMargins compiles every report action's grace to its
+// margin: leak x grace in the tracker's quantity (spec: Report action
+// grammar - at rule build, grace compiles to a margin). The death line
+// is the recorded volume minus this margin.
+func compileGraceMargins(rule *domain.Rule) {
+	for _, actions := range rule.ActionLists() {
+		for _, action := range actions {
+			if a := action.Report; a != nil && a.Grace != 0 {
+				a.Margin = a.Grace.Seconds() * rule.Tracker.Leak
+			}
+		}
+	}
+}
+
+// validateReportLifecycles refuses a report action without ttl wherever
+// no tracker value can ever kill it: a tracker-less rule or a zero-leak
+// tracker can never underflow, so the report would be unbounded (spec:
+// Load validation additions). Errors name the rule and the action's
+// reason.
+func validateReportLifecycles(rule domain.Rule) error {
+	for _, actions := range rule.ActionLists() {
+		for _, action := range actions {
+			a := action.Report
+			if a == nil || a.TTL != 0 {
+				continue
+			}
+			switch {
+			case rule.Tracker == nil:
+				return fmt.Errorf("rules: rule %q: action report %q: report.ttl: required - a dynamic report lives and dies with its tracker value, and this rule has no tracker", rule.ID, a.Reason)
+			case rule.Tracker.Leak <= 0:
+				return fmt.Errorf("rules: rule %q: action report %q: report.ttl: required - a dynamic report lives and dies with its tracker value, and a zero-leak tracker can never underflow", rule.ID, a.Reason)
+			}
+		}
+	}
+	return nil
 }
 
 // parseCounter parses the rule's optional counter flag: true enables
@@ -322,23 +350,13 @@ func parseCounter(id string, node *yaml.Node) (bool, error) {
 	return on, nil
 }
 
-// parseTracker builds the single-volume rule's tracker config: rate and bandwidth
-// fix the TTL at build, replay derives it per event so TTL stays zero.
+// parseTracker builds the single-volume rule's tracker config: one plain
+// scalar volume in the tracker kind's quantity. Rate and bandwidth fix
+// the TTL at build, replay derives it per event so TTL stays zero.
 func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 	cfg, err := parseTrackerBase(id, raw)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.Kind == domain.TrackReplay {
-		volume, method, err := parseReplayVolume(id, &raw.Volume)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Volume, cfg.VolumeMethod = volume, method
-		return cfg, nil
-	}
-	if raw.Volume.Kind != 0 && raw.Volume.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be a quantity (volume methods are replay-only)", id)
 	}
 	volume, err := parseTrackerQuantity(id, "tracker.volume", &raw.Volume, cfg.Kind)
 	if err != nil {
@@ -348,7 +366,9 @@ func parseTracker(id string, raw *rawTracker) (*domain.TrackerConfig, error) {
 		return nil, fmt.Errorf("rules: rule %q: tracker.volume: must be positive", id)
 	}
 	cfg.Volume = volume
-	cfg.TTL = domain.TTL(cfg.Leak, volume)
+	if cfg.Kind != domain.TrackReplay {
+		cfg.TTL = domain.TTL(cfg.Leak, volume)
+	}
 	return cfg, nil
 }
 
@@ -359,11 +379,7 @@ func parseLadderTracker(id string, raw *rawTracker) (*domain.TrackerConfig, erro
 	if err != nil {
 		return nil, err
 	}
-	switch raw.Volume.Kind {
-	case 0:
-	case yaml.MappingNode:
-		return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume (volume methods are exclusive to the single-volume form)", id)
-	default:
+	if keyWritten(&raw.Volume) {
 		return nil, fmt.Errorf("rules: rule %q: escalations: cannot be declared beside tracker.volume", id)
 	}
 	return cfg, nil
@@ -465,170 +481,6 @@ func parseEscalations(id string, raw []rawEscalation, kind domain.TrackKind) ([]
 		rungs[i] = rung
 	}
 	return rungs, nil
-}
-
-// parseReplayVolume parses replay's volume: a plain scalar (the
-// constant method) or a volume-method block. Methods are replay-only.
-func parseReplayVolume(id string, node *yaml.Node) (float64, domain.VolumeMethod, error) {
-	if node == nil || node.Kind == 0 {
-		return 0, nil, fmt.Errorf("rules: rule %q: tracker.volume: required", id)
-	}
-	if node.Kind == yaml.ScalarNode {
-		v, err := track.ParseNumber(node.Value)
-		if err != nil {
-			return 0, nil, fmt.Errorf("rules: rule %q: tracker.volume: %w", id, err)
-		}
-		if v <= 0 {
-			return 0, nil, fmt.Errorf("rules: rule %q: tracker.volume: must be positive", id)
-		}
-		return v, nil, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return 0, nil, fmt.Errorf("rules: rule %q: tracker.volume: must be a quantity or a volume method", id)
-	}
-	method, err := parseVolumeMethod(id, node)
-	return 0, method, err
-}
-
-// volumeMethodKeys is each volume method's strict parameter set;
-// unknown keys are load errors.
-var volumeMethodKeys = map[string]map[string]bool{
-	"constant":       {"value": true},
-	"clamped-linear": {"intercept": true, "slope": true, "min": true, "max": true},
-	"inverse-square": {"base": true, "pivot": true},
-	"step":           {"threshold": true, "volume_low": true, "volume_high": true},
-}
-
-// parseVolumeMethod builds one replay volume method, validating its
-// parameters at load.
-func parseVolumeMethod(id string, node *yaml.Node) (domain.VolumeMethod, error) {
-	fields := map[string]*yaml.Node{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		fields[node.Content[i].Value] = node.Content[i+1]
-	}
-	method := fields["method"]
-	if method == nil || method.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("rules: rule %q: tracker.volume.method: required (want constant, clamped-linear, inverse-square or step)", id)
-	}
-	allowed := volumeMethodKeys[method.Value]
-	if allowed == nil {
-		return nil, fmt.Errorf("rules: rule %q: tracker.volume.method: unknown volume method %q (want constant, clamped-linear, inverse-square or step)", id, method.Value)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if key := node.Content[i].Value; key != "method" && !allowed[key] {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume: unknown key %q in volume method block", id, key)
-		}
-	}
-
-	switch method.Value {
-	case "constant":
-		value, err := volumeNumber(id, "value", fields["value"])
-		if err != nil {
-			return nil, err
-		}
-		if value <= 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.value: must be positive", id)
-		}
-		return track.ConstantVolume(value), nil
-
-	case "clamped-linear":
-		intercept, err := volumeNumber(id, "intercept", fields["intercept"])
-		if err != nil {
-			return nil, err
-		}
-		slope, err := volumeNumber(id, "slope", fields["slope"])
-		if err != nil {
-			return nil, err
-		}
-		minV, err := volumeNumber(id, "min", fields["min"])
-		if err != nil {
-			return nil, err
-		}
-		maxV, err := volumeNumber(id, "max", fields["max"])
-		if err != nil {
-			return nil, err
-		}
-		if minV < 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.min: must be non-negative", id)
-		}
-		if maxV < minV {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.max: must be >= min", id)
-		}
-		return track.ClampedLinearVolume{Intercept: intercept, Slope: slope, Min: minV, Max: maxV}, nil
-
-	case "inverse-square":
-		base, err := volumeNumber(id, "base", fields["base"])
-		if err != nil {
-			return nil, err
-		}
-		pivot, err := volumeSize(id, "pivot", fields["pivot"])
-		if err != nil {
-			return nil, err
-		}
-		if base < 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.base: must be non-negative", id)
-		}
-		if pivot <= 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.pivot: must be positive", id)
-		}
-		return track.InverseSquareVolume{Base: base, Pivot: pivot}, nil
-
-	case "step":
-		threshold, err := volumeSize(id, "threshold", fields["threshold"])
-		if err != nil {
-			return nil, err
-		}
-		low, err := volumeNumber(id, "volume_low", fields["volume_low"])
-		if err != nil {
-			return nil, err
-		}
-		high, err := volumeNumber(id, "volume_high", fields["volume_high"])
-		if err != nil {
-			return nil, err
-		}
-		if threshold <= 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.threshold: must be positive", id)
-		}
-		if low < 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.volume_low: must be non-negative", id)
-		}
-		if high < 0 {
-			return nil, fmt.Errorf("rules: rule %q: tracker.volume.volume_high: must be non-negative", id)
-		}
-		return track.StepVolume{Threshold: threshold, VolumeLow: low, VolumeHigh: high}, nil
-	}
-	return nil, fmt.Errorf("rules: rule %q: tracker.volume.method: unknown volume method %q", id, method.Value)
-}
-
-// volumeNumber parses one plain numeric volume-method parameter.
-func volumeNumber(id, key string, node *yaml.Node) (float64, error) {
-	if node == nil {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: required", id, key)
-	}
-	if node.Kind != yaml.ScalarNode {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: invalid number %q", id, key, node.Value)
-	}
-	v, err := strconv.ParseFloat(node.Value, 64)
-	if err != nil {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: invalid number %q", id, key, node.Value)
-	}
-	return v, nil
-}
-
-// volumeSize parses one byte-size volume-method parameter (decimal
-// human sizes: 1GB = 1e9).
-func volumeSize(id, key string, node *yaml.Node) (float64, error) {
-	if node == nil {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: required", id, key)
-	}
-	if node.Kind != yaml.ScalarNode {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: invalid quantity %q", id, key, node.Value)
-	}
-	v, err := track.ParseBytes(node.Value)
-	if err != nil {
-		return 0, fmt.Errorf("rules: rule %q: tracker.volume.%s: %w", id, key, err)
-	}
-	return v, nil
 }
 
 // actionForms is the format-version-0 action vocabulary; a nil node is
@@ -737,7 +589,12 @@ func parseEnrichCounter(id string, node *yaml.Node) (bool, error) {
 	return on, nil
 }
 
-// parseReportAction parses `- report: {reason, ttl, penalty, rate}`.
+// parseReportAction parses `- report: {reason, ttl, grace, penalty,
+// rate}`: ttl and grace are optional and mutually exclusive - an
+// absent ttl declares a dynamic report (spec: Two lifecycle modes),
+// whose liveness validateReportLifecycles checks against the rule's
+// tracker, and whose grace widens its death line (spec: Report action
+// grammar).
 func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)
@@ -746,7 +603,7 @@ func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	hasRate := false
 	for i := 0; i < len(val.Content); i += 2 {
 		switch key := val.Content[i].Value; key {
-		case "reason", "ttl", "penalty":
+		case "reason", "ttl", "grace", "penalty":
 		case "rate":
 			hasRate = true
 		default:
@@ -760,15 +617,32 @@ func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: reason: %q is not a valid slug (want %s)",
 			id, raw.Reason, reasonRe.String())
 	}
-	ttl, err := parseTTL(raw.TTL)
-	if err != nil {
-		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.ttl: %w", id, err)
+	var ttl time.Duration
+	if keyWritten(&raw.TTL) {
+		var err error
+		ttl, err = parseDuration(raw.TTL.Value)
+		if err != nil {
+			return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.ttl: %w", id, err)
+		}
+	}
+	var grace time.Duration
+	if keyWritten(&raw.Grace) {
+		var err error
+		grace, err = parseDuration(raw.Grace.Value)
+		if err != nil {
+			return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.grace: %w", id, err)
+		}
+	}
+	if ttl != 0 && grace != 0 {
+		// One lifecycle policy per report action: ttl and grace are
+		// mutually exclusive (spec: Report action grammar).
+		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.grace: not allowed with report.ttl", id)
 	}
 	penalty, err := parsePenalty(id, &raw, hasRate)
 	if err != nil {
 		return domain.Action{}, err
 	}
-	return domain.Action{Report: &domain.ReportAction{Reason: raw.Reason, TTL: ttl, Penalty: penalty}}, nil
+	return domain.Action{Report: &domain.ReportAction{Reason: raw.Reason, TTL: ttl, Grace: grace, Penalty: penalty}}, nil
 }
 
 // penaltyWant names the closed penalty vocabulary for error messages,
@@ -869,9 +743,10 @@ func parseLogAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	return domain.Action{Log: &domain.LogAction{Level: level, Message: args[1]}}, nil
 }
 
-// parseTTL parses a report ttl: Go duration strings plus "d" for days
-// (7d, 24h, 30m). It must be positive.
-func parseTTL(s string) (time.Duration, error) {
+// parseDuration parses a report lifecycle duration (ttl, grace): Go
+// duration strings plus "d" for days (7d, 24h, 30m). It must be
+// positive.
+func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, errors.New("required")
 	}

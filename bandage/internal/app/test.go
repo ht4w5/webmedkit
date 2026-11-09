@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 	"github.com/HT4w5/webmedkit/internal/identity"
@@ -87,12 +88,27 @@ type actionDescriber struct {
 	prefix string // the effective reason prefix: the namespace of the report reason (ADR 0026)
 }
 
+// VisitReport prints both lifecycle slots on every report line -
+// grace=none beside a written ttl is the one-policy-per-action audit,
+// not a missing-slot bug (spec: Load validation additions - the
+// lifecycle of every report action prints).
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.prefix, a.Reason), a.TTL, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s grace=%s penalty=%s",
+		domain.NamespacedReason(d.prefix, a.Reason), lifecycleSlot(a.TTL), lifecycleSlot(a.Grace), a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}
 	return nil
+}
+
+// lifecycleSlot renders one report lifecycle slot for the plan: the
+// duration, or "none" for the absent one (spec: Load validation
+// additions - the lifecycle of every report action prints).
+func lifecycleSlot(d time.Duration) string {
+	if d == 0 {
+		return "none"
+	}
+	return d.String()
 }
 
 func (d actionDescriber) VisitLog(a *domain.LogAction) error {

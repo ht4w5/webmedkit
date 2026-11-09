@@ -12,17 +12,36 @@ removal. Land as its own commit in the change.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A replay tracker declares its volume as a scalar in download
+- [x] A replay tracker declares its volume as a scalar in download
       equivalents; the shipped example needs no edit.
-- [ ] Load refuses a volume-method block anywhere in a rules file, the
+- [x] Load refuses a volume-method block anywhere in a rules file, the
       error naming the removal (a breaking rules-format change,
       accepted pre-release).
-- [ ] The per-event volume re-derivation in evaluation is gone; the
+- [x] The per-event volume re-derivation in evaluation is gone; the
       reading's volume is constant per rule.
-- [ ] Rules doc volume-method sections and the glossary's Volume
+- [x] Rules doc volume-method sections and the glossary's Volume
       method entry are deleted.
-- [ ] An ADR records the removal and its rationale.
-- [ ] All existing tests pass; method-specific tests are deleted and
+- [x] An ADR records the removal and its rationale.
+- [x] All existing tests pass; method-specific tests are deleted and
       scalar replay behavior is covered instead.
+
+## Comments
+
+Implemented on branch `ticket/01-remove-volume-methods` (removal in
+`a641e5c`, docs/ADR 0030 in `3e2d2a6`), targeting integration branch
+`integration/dynamic-reports`. The ladder `at` quantity language is
+unchanged; `escalations[].at: {method: ...}` keeps its existing
+`must be a quantity` refusal (it is ladder quantity language, not a
+volume-method block).
+Context: spec `../spec.md` (Implementation Decisions - Volume-method
+removal; Further Notes - work order).
+
+Review follow-up (on `integration/dynamic-reports`): the pointed
+removed-syntax checks are gone - `rejectRemovedVolumeMethod`, and the
+same-class `rejectRemovedEnrichmentBlock`, both deleted (no checks for
+removed rule syntax). A volume-method block still fails load, through
+the ordinary quantity validation (a mapping is not a quantity); the
+checklist's "error naming the removal" records the original delivery,
+amended at review.

@@ -16,7 +16,8 @@ type TrackerReading struct {
 }
 
 // Report is the record that a rule matched for a target, alive until
-// expiry or deletion. Identity is (rule, target).
+// expiry, Underflow of its recorded volume (dynamic reports), or
+// deletion. Identity is (rule, target).
 type Report struct {
 	Rule      string
 	Chain     string
@@ -24,6 +25,8 @@ type Report struct {
 	Target    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// ExpiresAt is the scheduled death of a fixed report; zero for a
+	// dynamic report (no scheduled withdrawal, spec: Two lifecycle modes).
 	ExpiresAt time.Time
 	Tracker   TrackerReading
 	// Sample is the most recent Event that created the report, carried
@@ -33,6 +36,16 @@ type Report struct {
 	// for the target (ADR 0010); nil only for rows written before the
 	// penalty existed (outside the canonical contract).
 	Penalty *Penalty
+	// Dynamic marks a dynamic report: its life is bound to the tracker
+	// value behind it, not to a ttl (spec: Two lifecycle modes). A
+	// report action without ttl writes one.
+	Dynamic bool
+	// Margin is the writing action's grace margin (leak x grace,
+	// compiled at rule build); the death line is Tracker.Volume minus
+	// this margin - the strict boundary the value must stay above.
+	// Zero means no grace: the strict line at Tracker.Volume. It is
+	// record shape, not report-document shape.
+	Margin float64
 }
 
 // NamespacedReason composes a Reason's namespaced form (GLOSSARY): prefix, dot,
@@ -92,8 +105,16 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON renders the report in the report document shape.
+// MarshalJSON renders the report in the report document shape. A
+// dynamic entry appends "dynamic": true after "penalty" and renders
+// "expires_at" as null; fixed entries stay byte-identical (spec:
+// Report document).
 func (r Report) MarshalJSON() ([]byte, error) {
+	var expiresAt *string
+	if !r.Dynamic {
+		s := formatTime(r.ExpiresAt)
+		expiresAt = &s
+	}
 	return json.Marshal(struct {
 		Rule      string         `json:"rule"`
 		Chain     string         `json:"chain"`
@@ -101,10 +122,11 @@ func (r Report) MarshalJSON() ([]byte, error) {
 		Target    string         `json:"target"`
 		CreatedAt string         `json:"created_at"`
 		UpdatedAt string         `json:"updated_at"`
-		ExpiresAt string         `json:"expires_at"`
+		ExpiresAt *string        `json:"expires_at"`
 		Tracker   TrackerReading `json:"tracker"`
 		Sample    Event          `json:"sample"`
 		Penalty   *Penalty       `json:"penalty,omitempty"`
+		Dynamic   bool           `json:"dynamic,omitempty"`
 	}{
 		Rule:      r.Rule,
 		Chain:     r.Chain,
@@ -112,9 +134,10 @@ func (r Report) MarshalJSON() ([]byte, error) {
 		Target:    r.Target,
 		CreatedAt: formatTime(r.CreatedAt),
 		UpdatedAt: formatTime(r.UpdatedAt),
-		ExpiresAt: formatTime(r.ExpiresAt),
+		ExpiresAt: expiresAt,
 		Tracker:   r.Tracker,
 		Sample:    r.Sample,
 		Penalty:   r.Penalty,
+		Dynamic:   r.Dynamic,
 	})
 }
