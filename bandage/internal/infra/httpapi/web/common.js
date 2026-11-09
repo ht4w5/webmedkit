@@ -412,9 +412,9 @@ function loadStats() {
 // /api/reports; reportRow(report) builds one row's markup including its
 // delete cell.
 
-// The review table's columns: rule, target, tracker reading, updated
-// and the delete cell - detail and message rows span all of them.
-const REPORT_COLUMNS = 5;
+// The review table's columns: rule, target, tracker reading, updated,
+// expiry and the delete cell - detail and message rows span all of them.
+const REPORT_COLUMNS = 6;
 
 function trackerLabel(tracker) {
 	if (!tracker || !tracker.track) {
@@ -423,11 +423,18 @@ function trackerLabel(tracker) {
 	return tracker.track + " " + tracker.value + "/" + tracker.volume;
 }
 
+// expiryLabel renders the report's expiry for the row: the fixed
+// entry's scheduled death, or "never" for a dynamic entry's null
+// expiry - no scheduled withdrawal.
+function expiryLabel(report) {
+	return report.expires_at || "never";
+}
+
 function reportRow(report) {
 	const row = document.createElement("tr");
 	row.className = "report-row";
 	row.setAttribute("aria-expanded", "false");
-	for (const text of [report.rule, report.target, trackerLabel(report.tracker), report.updated_at]) {
+	for (const text of [report.rule, report.target, trackerLabel(report.tracker), report.updated_at, expiryLabel(report)]) {
 		const td = document.createElement("td");
 		td.textContent = text;
 		row.appendChild(td);
