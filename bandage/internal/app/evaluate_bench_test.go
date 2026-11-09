@@ -320,7 +320,7 @@ func newBenchEpisodeRun(tb testing.TB, rules string, repo reportStore) *benchEpi
 	chains := benchRules(tb, rules)
 	clock := newTestClock(bench.Epoch)
 	ledger := &writeLedger{reportStore: repo}
-	reports := report.NewService(ledger, report.NopTrackerLookup{})
+	reports := report.NewService(ledger, report.NopTrackerLookup{}, report.NopLadder{}, report.NopLogger{})
 	sink := &countingSink{reports: reports}
 	svc := evaluation.NewService(evaluation.Deps{
 		ReasonPrefix:       "bandage",

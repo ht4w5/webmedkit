@@ -110,7 +110,7 @@ func TestServiceTriggerWritesThroughRepository(t *testing.T) {
 
 	t.Run("forwards the report", func(t *testing.T) {
 		repo := &stubRepository{}
-		if err := NewService(repo, stubTrackers{}).Trigger(context.Background(), rec, false); err != nil {
+		if err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("Trigger: %v", err)
 		}
 		if !reflect.DeepEqual(repo.ups, []domain.Report{rec}) {
@@ -120,7 +120,7 @@ func TestServiceTriggerWritesThroughRepository(t *testing.T) {
 
 	t.Run("wraps repository failures", func(t *testing.T) {
 		repo := &stubRepository{upErr: errStub}
-		err := NewService(repo, stubTrackers{}).Trigger(context.Background(), rec, false)
+		err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).Trigger(context.Background(), rec, false)
 		if !errors.Is(err, errStub) {
 			t.Errorf("Trigger error = %v, want it to identify %v", err, errStub)
 		}
@@ -146,7 +146,7 @@ func TestServiceDeleteByFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &stubRepository{delN: tt.n, delErr: tt.err}
-			n, err := NewService(repo, stubTrackers{}).Delete(context.Background(), tt.q)
+			n, err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).Delete(context.Background(), tt.q)
 			if err != tt.err {
 				t.Errorf("Delete error = %v, want the repository error unchanged (%v)", err, tt.err)
 			}
@@ -176,7 +176,7 @@ func TestServiceDeleteExpired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &stubRepository{expN: tt.n, expErr: tt.err}
-			n, err := NewService(repo, stubTrackers{}).DeleteExpired(context.Background(), now)
+			n, err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).DeleteExpired(context.Background(), now)
 			if err != tt.err {
 				t.Errorf("DeleteExpired error = %v, want the repository error unchanged (%v)", err, tt.err)
 			}
@@ -199,7 +199,7 @@ func TestServiceList(t *testing.T) {
 
 	t.Run("forwards the query and returns the reports", func(t *testing.T) {
 		repo := &stubRepository{rows: rows}
-		got, err := NewService(repo, stubTrackers{}).List(context.Background(), q)
+		got, err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).List(context.Background(), q)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
@@ -213,7 +213,7 @@ func TestServiceList(t *testing.T) {
 
 	t.Run("repository failure passes through unwrapped", func(t *testing.T) {
 		repo := &stubRepository{listErr: errStub}
-		_, err := NewService(repo, stubTrackers{}).List(context.Background(), q)
+		_, err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).List(context.Background(), q)
 		if err != errStub {
 			t.Errorf("List error = %v, want the repository error unchanged (%v)", err, errStub)
 		}
@@ -237,7 +237,7 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 
 	t.Run("a live report suppresses the write", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -251,7 +251,7 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 
 	t.Run("suppression is per (rule, target)", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestServiceTriggerSuppressesWhileReportAlive(t *testing.T) {
 
 	t.Run("an expired report does not suppress", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -290,7 +290,7 @@ func TestServiceDeleteRearmsWriting(t *testing.T) {
 
 	t.Run("a matching delete re-arms", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -307,7 +307,7 @@ func TestServiceDeleteRearmsWriting(t *testing.T) {
 
 	t.Run("a non-matching delete keeps the suppression", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), rec, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -330,7 +330,7 @@ func TestServiceDeleteExpiredRearmsWriting(t *testing.T) {
 	expiry := now.Add(time.Hour)
 	rec := liveRec("sticky", "203.0.113.7/32", now, expiry)
 	repo := &stubRepository{}
-	svc := NewService(repo, stubTrackers{})
+	svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 	if err := svc.Trigger(context.Background(), rec, false); err != nil {
 		t.Fatalf("first Trigger: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestServiceFailedWriteDoesNotSuppressTheRetry(t *testing.T) {
 	rec := liveRec("sticky", "203.0.113.7/32", now, now.Add(time.Hour))
 	errStub := errors.New("stub failure")
 	repo := &stubRepository{upErr: errStub}
-	svc := NewService(repo, stubTrackers{})
+	svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 	if err := svc.Trigger(context.Background(), rec, false); !errors.Is(err, errStub) {
 		t.Fatalf("Trigger error = %v, want %v", err, errStub)
 	}
@@ -387,7 +387,7 @@ func TestServiceRebuildDerivesLiveReportsFromTheTable(t *testing.T) {
 
 	t.Run("stored rows suppress, absent rows write", func(t *testing.T) {
 		repo := &stubRepository{rows: []domain.Report{stored}}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Rebuild(context.Background(), now); err != nil {
 			t.Fatalf("Rebuild: %v", err)
 		}
@@ -407,7 +407,7 @@ func TestServiceRebuildDerivesLiveReportsFromTheTable(t *testing.T) {
 
 	t.Run("rebuild supplants the set", func(t *testing.T) {
 		repo := &stubRepository{}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		if err := svc.Trigger(context.Background(), stored, false); err != nil {
 			t.Fatalf("first Trigger: %v", err)
 		}
@@ -425,7 +425,7 @@ func TestServiceRebuildDerivesLiveReportsFromTheTable(t *testing.T) {
 	t.Run("repository failure passes through", func(t *testing.T) {
 		errStub := errors.New("stub failure")
 		repo := &stubRepository{listErr: errStub}
-		if err := NewService(repo, stubTrackers{}).Rebuild(context.Background(), now); err != errStub {
+		if err := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{}).Rebuild(context.Background(), now); err != errStub {
 			t.Errorf("Rebuild error = %v, want the repository error unchanged (%v)", err, errStub)
 		}
 	})
@@ -463,7 +463,7 @@ func TestServiceConcurrentTriggerWaitsForTheWriteOutcome(t *testing.T) {
 		t.Helper()
 		wedge := make(chan struct{})
 		repo := &stubRepository{upWedge: wedge, upEntered: make(chan struct{}, 4), upFailFirst: failFirst}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 
 		a := triggerAsync(svc, rec)
 		<-repo.upEntered // the write is in flight
@@ -500,7 +500,7 @@ func TestServiceConcurrentTriggerWaitsForTheWriteOutcome(t *testing.T) {
 	t.Run("a cancelled waiter returns the context error", func(t *testing.T) {
 		wedge := make(chan struct{})
 		repo := &stubRepository{upWedge: wedge, upEntered: make(chan struct{}, 4)}
-		svc := NewService(repo, stubTrackers{})
+		svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 		a := triggerAsync(svc, rec)
 		<-repo.upEntered
 
@@ -535,7 +535,7 @@ func TestServiceRebuildKeepsInFlightWrites(t *testing.T) {
 	rec := liveRec("sticky", "203.0.113.7/32", now, expiry)
 	wedge := make(chan struct{})
 	repo := &stubRepository{upWedge: wedge, upEntered: make(chan struct{}, 4)}
-	svc := NewService(repo, stubTrackers{})
+	svc := NewService(repo, stubTrackers{}, NopLadder{}, NopLogger{})
 
 	a := triggerAsync(svc, rec)
 	<-repo.upEntered // the write is in flight

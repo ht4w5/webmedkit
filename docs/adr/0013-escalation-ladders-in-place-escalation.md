@@ -26,6 +26,12 @@ wrote it - so no new contract field is needed and the guard survives the
 live-set rebuild at startup; a rung at or below the recorded volume is
 suppressed exactly as in ADR 0008.
 
+That suppression states "no downgrade and no rewrite" - and it narrows
+to no downgrade *from Triggers*. Decay-driven Downgrade is its inverse:
+a dynamic report restates itself down the ladder as its tracker value
+decays, written lazily against live tracker state and never by a
+Trigger (the dynamic-report lifecycle).
+
 Considered: one report row per reason (rejected for now - in-place keeps
 report identity (rule, Target) and the report document contract
 unchanged); an explicit escalation field on the report record (rejected:

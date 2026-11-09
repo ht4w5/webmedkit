@@ -16,22 +16,49 @@ inverse.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A dynamic ban report (top rung) demotes to the throttle rung's
+- [x] A dynamic ban report (top rung) demotes to the throttle rung's
       stance as the value decays between the rungs, carrying the lower
       rung's reason and Penalty; the Sample backing each stance comes
       from the climb event.
-- [ ] `created_at` is frozen across downgrades; `updated_at` moves.
-- [ ] A downgrade onto a fixed rung stamps that rung's `ttl` from the
+- [x] `created_at` is frozen across downgrades; `updated_at` moves.
+- [x] A downgrade onto a fixed rung stamps that rung's `ttl` from the
       write; the stance then behaves as a fixed report.
-- [ ] The Report dies when the value decays below the lowest rung
+- [x] The Report dies when the value decays below the lowest rung
       (minus the stance's margin).
-- [ ] Fixed stances never downgrade or die at underflow, in single
+- [x] Fixed stances never downgrade or die at underflow, in single
       volume rules and ladder rungs alike.
-- [ ] The margin guards the downgrade line (no boundary flapping
+- [x] The margin guards the downgrade line (no boundary flapping
       between rungs).
-- [ ] Downgrade/demote acts appear only at `debug` log level.
-- [ ] Mixed-ladder behavior is covered on the daemon seam: one ladder
+- [x] Downgrade/demote acts appear only at `debug` log level.
+- [x] Mixed-ladder behavior is covered on the daemon seam: one ladder
       with a dynamic rung and a fixed rung, clock-driven decay asserted
       through the served document.
+
+Implemented on branch `ticket/04-downgrade-ladders` (behavior and
+daemon-seam tests in `642798c`, the ladder ADR narrowing in `2f20dc1`),
+targeting integration branch `integration/dynamic-reports`. The
+Downgrade materializes lazily at document generation and at sweep time:
+the report service resolves the restatement through a Ladder port (the
+rule's report-carrying rungs with namespaced reasons, assembled from
+the loaded chains), restate-or-die decided against the decayed value -
+a rung remains exceeded while the value is strictly above `at - margin`
+(the restated stance would be alive), so the report chains down to the
+lowest rung's line and dies there, strict. The restatement lands
+through the single-writer protocol and skips the round when the row
+moved since it was read. "the Sample backing each stance comes from
+the climb event" is read with the spec's "Sample ... move" clause: the
+Sample and the reading's value keep the climb's (the evidence that
+crossed every lower rung), only the reading's volume restates to the
+target rung's threshold - checklist-silent, taken from user story 14.
+A downgrade onto a fixed rung is served as a fixed entry (dynamic
+marker gone, `expires_at` stamped from the write), so mixed ladders
+behave per-rung in both directions. Downgrade acts log at `debug`
+(checklist); dynamic deaths log at `debug` too where the row goes (the
+sweep's deletion) - checklist-silent, taken from the spec's
+Observability decision; the document-generation death stays unlogged
+because the row's deletion is the sweep's act and a per-document line
+would repeat.
+Context: spec `../spec.md` (Implementation Decisions - Downgrade,
+Dynamic report liveness, Trigger suppression; User stories 13-18).
