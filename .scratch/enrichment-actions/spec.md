@@ -233,8 +233,8 @@ the estimate (`observed`) and the subset it successfully enriched
   response observes only when its event reaches an enrich action),
   enrichment feeding subsequent rules only, run-based counting under
   double traversal, the `total`/`observed`/`enriched` movements, and
-  every pointed load failure (old `enrichment` block, unknown `type`,
-  bad `counter`, unknown keys).
+  every load failure (old `enrichment` block through the strict
+  decoder, unknown `type`, bad `counter`, unknown keys).
 - Secondary seam: the surface pin tests - the Web Panel Stats page pins
   (table slot, empty state, search narrowing, single-sourced shape) and
   the metrics contract document reproduction test. Prior art: the rule
