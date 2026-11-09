@@ -36,8 +36,9 @@ A ladder's dynamic stance **Downgrades** as the value decays: when the
 value crosses the stance's death line and a lower rung is still
 exceeded, the Report restates itself to the highest rung still
 exceeded - reason and Penalty move with a fresh `updated_at`, the
-recorded volume restates to that rung's threshold, `created_at` and
-the Sample stay (the climb event crossed every lower rung) - and the
+recorded volume restates to that rung's threshold, and `created_at`,
+the Sample and the reading's recorded value stay (the climb event
+crossed every lower rung) - and the
 stance adopts the target rung's policy: a fixed rung's `ttl` runs from
 the downgrade write, a dynamic rung keeps value-bound liveness. The
 margin guards the downgrade line too, so stances do not flap between
@@ -45,7 +46,12 @@ rungs at the boundary; the Report dies, strict, when no rung remains
 exceeded. This amends the escalation-ladder decision (ADR 0013): its
 suppression clause narrows to no downgrade *from Triggers* -
 decay-driven Downgrade is the inverse, written lazily against live
-tracker state and never by a Trigger. Fixed stances never
+tracker state and never by a Trigger. One reading call on record: a
+Downgrade keeps the Sample and the tracker reading's recorded value
+from the climb event - only the recorded volume restates - user story
+14 (the Sample keeps backing the stance from the climb) read over the
+spec's Implementation Decisions "Sample ... move" clause, which the
+shipped restatement does not follow. Fixed stances never
 decay-interact: no Downgrade, no underflow death.
 
 The lifecycle also amends the trigger-semantics and durable-reports
@@ -75,7 +81,17 @@ and the sweep see live tracker state anyway, so laziness costs
 nothing). Consequences: a dynamic entry is marked in the report
 document (`dynamic: true`, `expires_at: null`, `version` 0 additive)
 and a dead one is simply absent from it - downstream withdrawal is
-absence at the next sync, no new consumer handling. `ttl` and `grace`
+absence at the next sync, no new consumer handling. The persisted
+record body carries `margin` (the compiled death-line guard) alongside
+the spec'd `dynamic` flag - record shape only; the document carries no
+margin, the death line stays a rules-side quantity. Rollback to an
+older binary is safe with two corners on record, neither corrupting a
+served row: its expiry sweep may delete the `0`-sentinel dynamic rows
+(harmless - they serve nothing under its query shape), and its upsert
+over a dynamic row leaves the stale `dynamic` column set on what is
+then a fixed report - covered by the one guarded repair at open (rows
+with a real `expires_at` are fixed by construction), so the
+overwritten report serves only until its expiry. `ttl` and `grace`
 are mutually exclusive at load, and a report action must carry `ttl`
 on a tracker-less rule (a tripwire report can never be unbounded) and
 on a zero-leak tracker (it can never underflow). Downgrades and
