@@ -15,8 +15,10 @@ to the report action that last wrote or restated the stance (Trigger
 override and Downgrade alike), and the boundary is strict - alive only
 while the value is strictly above the line - mirroring Overflow's
 strictness. Lifecycle acts are materialized lazily, at document
-generation and at sweep time, against live tracker state: nothing runs
-between events and no timer exists.
+generation, at sweep time and at the Trigger write that finds a dead
+row (the death settles before the write lands, so a re-flagged Report
+is a fresh one), against live tracker state: nothing runs between
+events and no timer exists.
 
 **Grace versus margin.** An optional `grace` widens the death line
 from the recorded volume to `volume - leak x grace`, so a brief pause

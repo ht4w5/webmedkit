@@ -429,10 +429,12 @@ all - only deletion or the daemon's startup sweep end it.
 Dynamic death is lazy: nothing runs between events and no timer exists
 - the death materializes at document generation (a dead dynamic report
 is simply absent from `GET /api/reports`, withdrawing its enforcement
-at the consumer's next sync) and at sweep time - the dead row goes at
-either act.
+at the consumer's next sync), at sweep time, and at the Trigger write
+that finds the dead row (the death settles before the write) - the
+dead row goes at every act.
 The next overflow writes a fresh report at the accumulation's current
-stance. On a ladder a dynamic report **Downgrades** instead of
+stance, its `created_at` fresh even with no document or sweep in
+between. On a ladder a dynamic report **Downgrades** instead of
 vanishing at the top rung's line - see
 [Escalation ladders](#escalation-ladders) below.
 

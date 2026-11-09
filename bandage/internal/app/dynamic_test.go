@@ -208,6 +208,53 @@ func TestE2EDynamicReportReflagsWithinAnEvent(t *testing.T) {
 	}
 }
 
+// TestE2EDynamicReportReflagsFreshOverAnUnseenDeath: the fresh-report
+// guarantee holds on the write path itself - a re-flag with no
+// document generation or sweep in between finds the stored dynamic
+// report dead at write time, settles its death before writing, and
+// lands a fresh report at a fresh created_at (spec: Dynamic report
+// liveness, user story 30). The clock stays inside the tracker
+// cache-entry TTL (the ladder's top rung over leak = 150s): past it
+// the writing record expires and the accumulation - and with it the
+// decayed-value death story - restarts from zero.
+func TestE2EDynamicReportReflagsFreshOverAnUnseenDeath(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", dynamicLadderRules)
+
+	// Climb to the ban rung: 100 flags throttle at 18:00:00, then 100
+	// more (100 + 100 - 1*30 = 170) overrides in place at the ban rung.
+	sendAt(d, "1760724000", "203.0.113.7", "/big", 100)
+	d.waitProcessed(t, 1)
+	clock.Advance(30 * time.Second) // 18:00:30
+	sendAt(d, "1760724030", "203.0.113.7", "/big2", 100)
+	d.waitProcessed(t, 2)
+
+	// 18:01:10: the value has decayed to 100 - below the ban death
+	// line 150 since 18:00:50 - and no document or sweep saw the death.
+	// Renewed abuse crosses the throttle rung alone (100 + 10 = 110,
+	// above 50, still below 150): the write finds the stored report
+	// dead at write time.
+	clock.Advance(40 * time.Second)
+	sendAt(d, "1760724100", "203.0.113.7", "/big3", 10)
+	d.waitProcessed(t, 3)
+
+	doc := d.getReports(t, nil)
+	if len(doc.Reports) != 1 {
+		t.Fatalf("reports after the re-flag = %+v, want 1", doc.Reports)
+	}
+	r := doc.Reports[0]
+	if r.Reason != "bandage.throttle" {
+		t.Errorf("reason = %q, want bandage.throttle (the rung the re-flag crossed)", r.Reason)
+	}
+	if r.CreatedAt != "2025-10-17T18:01:10Z" || r.UpdatedAt != "2025-10-17T18:01:10Z" {
+		t.Errorf("created_at/updated_at = %q/%q, want a fresh %q write (the death settled at the write)",
+			r.CreatedAt, r.UpdatedAt, "2025-10-17T18:01:10Z")
+	}
+	if r.Tracker.Value != 110 || r.Tracker.Volume != 50 {
+		t.Errorf("tracker = %+v, want value 110 at the throttle rung's threshold 50", r.Tracker)
+	}
+}
+
 // TestE2EDynamicDeathLoggedAtDebugLevel: a dynamic death act appears
 // only at debug log level (spec: Observability) - and once per act,
 // not once per document: the dead row's deletion is the act, so a

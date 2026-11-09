@@ -59,7 +59,7 @@ marker gone, `expires_at` stamped from the write), so mixed ladders
 behave per-rung in both directions. Downgrade acts log at `debug`
 (checklist); dynamic deaths log at `debug` too where the row goes -
 checklist-silent, taken from the spec's Observability decision, at
-document generation as at sweep time - one line per death act, where
-the row goes, never one per document.
+document generation, at sweep time and at the re-flag write - one
+line per death act, where the row goes, never one per document.
 Context: spec `../spec.md` (Implementation Decisions - Downgrade,
 Dynamic report liveness, Trigger suppression; User stories 13-18).

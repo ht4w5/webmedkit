@@ -199,6 +199,16 @@ func settleEntry(e *liveEntry, rec domain.Report) {
 	close(ch)
 }
 
+// settledRow is the row's identity as the entry settles it - the
+// version a settling act re-checks against the entry the next write
+// lands (its stale-row guard). Trigger knows the stored row by its
+// live entry, never by a repository read.
+func settledRow(key reportKey, e *liveEntry) domain.Report {
+	rec := domain.Report{Rule: key.rule, Target: key.target, Dynamic: e.dynamic, UpdatedAt: e.updatedAt}
+	rec.Tracker.Volume = e.volume
+	return rec
+}
+
 // Trigger records the report for (rule, target). A failed write is not a Trigger
 // outcome: the record stands and the next matching event retries (ADR 0013).
 func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride bool) error {
@@ -219,9 +229,23 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 				return fmt.Errorf("trigger report: %w", ctx.Err())
 			}
 		}
-		if ok && s.alive(ctx, key.rule, cur, rec.UpdatedAt) && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
+		alive := ok && s.alive(ctx, key.rule, cur, rec.UpdatedAt)
+		if alive && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
 			s.mu.Unlock()
 			return nil
+		}
+		if ok && !alive && cur.dynamic {
+			// The stored dynamic report is dead at write time: settle its
+			// death before writing, so this write lands a fresh report at a
+			// fresh created_at (spec: Dynamic report liveness) instead of an
+			// upsert over the dead row freezing its identity. settleDeath
+			// keeps its stale-row protections: a row that moved since this
+			// decision stands and the round re-decides against it.
+			s.mu.Unlock()
+			if _, err := s.settleDeath(ctx, settledRow(key, cur)); err != nil {
+				return fmt.Errorf("trigger report: %w", err)
+			}
+			continue
 		}
 		prev = cur
 		e = &liveEntry{inflight: make(chan struct{})}
@@ -451,9 +475,11 @@ func (s *Service) materialize(ctx context.Context, rec domain.Report, now time.T
 // settleDeath materializes the dead report's death: its row is deleted
 // and its live-set entry dropped through the single-writer protocol,
 // and the act logs at debug - once, where the row goes, never once per
-// document (spec: Observability). deleted is false when the row moved
-// since it was read: the newer stance stands and the next
-// materialization re-decides.
+// document (spec: Observability). rec carries the row identity the
+// death was decided against - read from the repository at
+// materialization, or settled on the live entry at write time. deleted
+// is false when the row moved since it was read: the newer stance
+// stands and the next materialization re-decides.
 func (s *Service) settleDeath(ctx context.Context, rec domain.Report) (bool, error) {
 	key := reportKey{rule: rec.Rule, target: rec.Target}
 	s.mu.Lock()
