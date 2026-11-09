@@ -1940,6 +1940,54 @@ chains:
 	}
 }
 
+// TestParseRulesRemovedVolumeMethodBlocksFailThroughQuantityValidation:
+// the removed volume-method shapes get no dedicated check (removed
+// rule syntax rides generic refusals) - each old block fails load
+// through the ordinary quantity validation (a mapping is not a
+// quantity), naming the rule (spec: Volume-method removal; the pin
+// asserts the generic refusal, with the removed shapes as inputs
+// only).
+func TestParseRulesRemovedVolumeMethodBlocksFailThroughQuantityValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		tracker string
+		ladder  bool
+		wantErr string
+	}{
+		{name: "constant block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: constant, value: 5}", wantErr: "must be a quantity"},
+		{name: "clamped-linear block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: clamped-linear, intercept: 5, slope: -1, min: 2, max: 5}", wantErr: "must be a quantity"},
+		{name: "inverse-square block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: inverse-square, base: 1, pivot: 1GB}", wantErr: "must be a quantity"},
+		{name: "step block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: step, threshold: 1GB, volume_low: 2, volume_high: 5}", wantErr: "must be a quantity"},
+		{name: "block on rate", tracker: "track: rate\n          leak: 1\n          volume: {method: constant, value: 2}", wantErr: "must be a quantity"},
+		{name: "block on bandwidth", tracker: "track: bandwidth\n          leak: 1MB\n          volume: {method: step, threshold: 1GB, volume_low: 1, volume_high: 2}", wantErr: "must be a quantity"},
+		// Beside a ladder the block rides the escalations-beside-volume
+		// refusal instead - still generic, still no dedicated check.
+		{name: "block beside a ladder", tracker: "track: replay\n          leak: 1\n          volume: {method: constant, value: 5}", ladder: true, wantErr: "escalations: cannot be declared beside tracker.volume"},
+		{name: "empty block", tracker: "track: replay\n          leak: 0.1\n          volume: {}", wantErr: "must be a quantity"},
+		{name: "block without a method key", tracker: "track: replay\n          leak: 0.1\n          volume: {value: 2}", wantErr: "must be a quantity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rules := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          " + tt.tracker + "\n"
+			if tt.ladder {
+				rules += "        escalations:\n          - at: 5\n            actions: [stop]\n          - at: 10\n            actions: [stop]\n"
+			} else {
+				rules += "        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]"
+			}
+			_, err := ParseRules([]byte(rules))
+			if err == nil {
+				t.Fatalf("ParseRules succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), `rule "r"`) {
+				t.Errorf("error %q does not name the rule", err)
+			}
+		})
+	}
+}
+
 // TestParseRulesReplayVolumeScalar: replay's volume is a plain scalar in
 // download equivalents - one constant tolerance per rule (spec:
 // Volume-method removal).

@@ -40,3 +40,7 @@ reaches an enrich action, so terminal actions upstream starve the
 estimate on that path (accepted; GLOSSARY: Sampling rule). The rules
 file's top-level `enrichment` block and its filter are gone; the old
 shape fails load (the strict decoder refuses the unknown key).
+
+Review note: the pointed error naming the migration, promised here
+until review, is superseded (removed rule syntax gets no dedicated
+check, `b2a31cf`).
