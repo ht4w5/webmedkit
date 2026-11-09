@@ -86,8 +86,9 @@ chains:
 	}
 }
 
-// singleVolumeMethodRules derives its tolerated volume per event from the step volume method.
-const singleVolumeMethodRules = `
+// singleVolumeRules is the single-volume form: one replay rule with a plain
+// scalar volume (spec: Volume-method removal).
+const singleVolumeRules = `
 version: 0
 chains:
   - name: main
@@ -95,17 +96,15 @@ chains:
       - id: enrich-size
         actions: [{enrich: {type: filesize}}]
       - id: iso-replay
-        tracker:
-          track: replay
-          leak: 0
-          volume: {method: step, threshold: 1000, volume_low: 1, volume_high: 2}
+        tracker: {track: replay, leak: 0, volume: 1}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 
-// US 26 "behave exactly as before": even a later event with a larger derived volume never moves the live report - only a ladder rung may override (ADR 0013).
+// US 26 "behave exactly as before": even a later overflow never moves the
+// live report - only a ladder rung may override (ADR 0013).
 func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
-	d := startTestDaemon(t, clock, "unixgram", ":memory:", singleVolumeMethodRules)
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", singleVolumeRules)
 
 	// Two full downloads overflow volume 1 on the second (value 2 > 1).
 	sendFullDownloads(d, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
@@ -115,11 +114,11 @@ func TestE2ESingleVolumeRuleNeverOverridesItsLiveReport(t *testing.T) {
 		t.Fatalf("reports = %+v, want 1", doc.Reports)
 	}
 	if doc.Reports[0].Tracker.Volume != 1 {
-		t.Fatalf("tracker = %+v, want the volume_low 1 estimate at the first write", doc.Reports[0].Tracker)
+		t.Fatalf("tracker = %+v, want the rule's volume 1 at the first write", doc.Reports[0].Tracker)
 	}
 
 	clock.Advance(10 * time.Minute) // 18:10
-	// Three big full downloads overflow the bigger derived volume 2 (3 > 2)
+	// Three big full downloads overflow the same volume again (3 > 1)
 	// - and still never move the live report.
 	sendFullDownloads(d, 1734345944, "203.0.113.7", "/big.iso", 10000, 3)
 	d.waitProcessed(t, 5)
@@ -144,7 +143,7 @@ func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	dbPath := filepath.Join(t.TempDir(), "reports.db")
 
-	d1 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
+	d1 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeRules)
 	sendFullDownloads(d1, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
 	d1.waitProcessed(t, 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -154,7 +153,7 @@ func TestE2ESingleVolumeRuleNeverOverridesAfterRestart(t *testing.T) {
 	cancel()
 
 	clock.Advance(10 * time.Minute) // 18:10
-	d2 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeMethodRules)
+	d2 := startTestDaemon(t, clock, "unixgram", dbPath, singleVolumeRules)
 	sendFullDownloads(d2, 1734345944, "203.0.113.7", "/big.iso", 10000, 3)
 	d2.waitProcessed(t, 3)
 	doc := d2.getReports(t, nil)

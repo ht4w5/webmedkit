@@ -255,6 +255,11 @@ func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
 		{name: "null enrichment block fails load naming the migration", rules: "version: 0\nenrichment: null\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
 		{name: "empty enrichment key fails load naming the migration", rules: "version: 0\nenrichment:\nchains:\n  - name: main\n    rules:\n      - id: r\n", wantErr: wantEnrichmentMigrationErr},
 
+		// The replay volume methods are removed: any volume-method block
+		// fails load naming the removal - replay's volume is a plain
+		// scalar in download equivalents (spec: Volume-method removal).
+		{name: "volume-method block fails load naming the removal", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          track: replay\n          leak: 0.1\n          volume: {method: constant, value: 2}\n", wantErr: wantVolumeMethodRemovedErr},
+
 		// An unknown enrichment type names the type - a typo can never
 		// silently enrich nothing (story 12).
 		{name: "enrich unknown type names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},

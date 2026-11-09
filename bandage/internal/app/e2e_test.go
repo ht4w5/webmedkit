@@ -2614,9 +2614,10 @@ chains:
 	}
 }
 
-// TestE2EReplayVolumeMethodScalesTolerance: the volume method scales
-// tolerance with file size; a small file overflows where a big one does not.
-func TestE2EReplayVolumeMethodScalesTolerance(t *testing.T) {
+// TestE2EReplayVolumeConstantPerRule: the tolerated volume is the rule's
+// plain scalar - one constant for every file size (spec: Volume-method
+// removal). A small file and a big one are held to the same tolerance.
+func TestE2EReplayVolumeConstantPerRule(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
@@ -2626,36 +2627,27 @@ chains:
       - id: enrich-size
         actions: [{enrich: {type: filesize}}]
       - id: iso-replay
-        tracker:
-          track: replay
-          leak: 0
-          volume: {method: step, threshold: 1000, volume_low: 1, volume_high: 3}
+        tracker: {track: replay, leak: 0, volume: 1}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Interleave small (100 B) and big (10 000 B) transfers of two paths
-	// from one client: each path seeds its own estimate from its first
-	// response and accumulates on its own.
-	for i := 0; i < 3; i++ {
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+2*i), "203.0.113.7", "GET", "/small.iso", 200, 100, "100"))
-		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345935+2*i), "203.0.113.7", "GET", "/big.iso", 200, 10000, "10000"))
-	}
-	d.waitProcessed(t, 6)
+	// Two full downloads of a small file and of a big one, from two
+	// clients: each path seeds its own estimate from its first response
+	// and accumulates on its own - and both overflow the same volume 1
+	// on their second download (2 > 1).
+	sendFullDownloads(d, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
+	sendFullDownloads(d, 1734345944, "203.0.113.8", "/big.iso", 10000, 2)
+	d.waitProcessed(t, 4)
 
 	doc := d.getReports(t, nil)
-	if len(doc.Reports) != 1 {
-		t.Fatalf("reports = %+v, want exactly the small file's (the big file stays under its tolerance)", doc.Reports)
+	if len(doc.Reports) != 2 {
+		t.Fatalf("reports = %+v, want both clients' (same tolerance for both sizes)", doc.Reports)
 	}
-	r := doc.Reports[0]
-	// The small file's second transfer adds fraction 2 > 1 (volume_low
-	// at size 100); the big file would need four transfers to pass its
-	// volume 3 and gets three.
-	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
-		t.Errorf("tracker = %+v, want {replay 2 0 1} (volume_low at size 100)", r.Tracker)
-	}
-	if r.Sample.Path != "/small.iso" || r.Sample.SizeBytes != 100 {
-		t.Errorf("sample = %+v, want /small.iso with enriched size 100", r.Sample)
+	for _, r := range doc.Reports {
+		if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
+			t.Errorf("tracker = %+v, want {replay 2 0 1} (the rule's scalar volume)", r.Tracker)
+		}
 	}
 }
 
@@ -2787,10 +2779,7 @@ chains:
       - id: enrich-size
         actions: [{enrich: {type: filesize}}]
       - id: iso-replay
-        tracker:
-          track: replay
-          leak: 0
-          volume: {method: step, threshold: 500, volume_low: 1, volume_high: 2}
+        tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
@@ -2835,7 +2824,7 @@ chains:
 		t.Errorf("tracker value = %v, want 2.25 (nine counted quarters, all from request one)", r.Tracker.Value)
 	}
 	if r.Tracker.Volume != 2 {
-		t.Errorf("tracker volume = %v, want 2 (volume_high at the exact total 1000, not at the 250-byte chunk)", r.Tracker.Volume)
+		t.Errorf("tracker volume = %v, want 2 (the rule's scalar volume)", r.Tracker.Volume)
 	}
 	if r.Sample.SizeBytes != 1000 {
 		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.SizeBytes)

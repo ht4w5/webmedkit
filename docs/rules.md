@@ -476,10 +476,9 @@ How it behaves:
   per event from the same top rung.
 
 Load refuses, each error naming the rule: a ladder beside `actions` or
-beside `tracker.volume` - a scalar volume is the single-volume rule a
-ladder is never declared on, and a volume-method block (`constant`,
-`clamped-linear`, `inverse-square`, `step`) stays exclusive to the
-single-volume form; a ladder without a tracker; fewer than two rungs;
+beside `tracker.volume` - a volume is the single-volume rule a ladder
+is never declared on (the rungs carry every threshold); a ladder
+without a tracker; fewer than two rungs;
 `at` thresholds that are not strictly ascending; and thresholds that do
 not parse in the tracker kind's quantity - bytes for bandwidth
 (`50MB`), plain counts for rate, download equivalents for replay
@@ -498,6 +497,12 @@ never from the bytes a request happened to transfer
 estimate is unknown - the path not yet observed, or a log emitter
 without the response-size fields - replay is blind and the event adds
 nothing to the tracker.
+
+Replay's `volume` is a plain scalar in those download equivalents
+(`2` means two full downloads of the path, whatever its size): the
+volume methods are removed, and a volume-method block fails load
+naming the removal
+([ADR 0030](adr/0030-replay-volume-is-a-plain-scalar.md)).
 
 The shipped ladder's `bandage -t` output shows every rung with its
 threshold and its actions; the tracker line carries no volume (the

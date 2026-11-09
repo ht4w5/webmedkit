@@ -330,9 +330,9 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		// at 1 per event.
 		size := float64(event.SizeBytes)
 		increment = math.Min(float64(event.SentBytes)/size, 1)
-		// Volume is the volume method's output; the TTL re-derives from it per event.
-		// A ladder's rungs stand in for the volume, so its TTL derives from the top rung.
-		volume = cfg.VolumeFor(size)
+		// The reading's volume is the rule's constant scalar; a ladder's
+		// rungs stand in for the volume, so its TTL derives from the top
+		// rung. The cache-entry TTL re-derives from the volume per event.
 		if top, ok := rule.TopRung(); ok {
 			volume = top.At
 		}
