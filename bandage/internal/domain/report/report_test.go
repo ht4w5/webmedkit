@@ -31,6 +31,9 @@ type stubRepository struct {
 	expires     []time.Time
 	expN        int
 	expErr      error
+	dynDels     int
+	dynN        int
+	dynErr      error
 }
 
 func (s *stubRepository) Upsert(_ context.Context, rec domain.Report) error {
@@ -73,6 +76,13 @@ func (s *stubRepository) DeleteExpired(_ context.Context, now time.Time) (int, e
 	defer s.mu.Unlock()
 	s.expires = append(s.expires, now)
 	return s.expN, s.expErr
+}
+
+func (s *stubRepository) DeleteDynamic(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dynDels++
+	return s.dynN, s.dynErr
 }
 
 // stubTrackers is a TrackerLookup stub over a settable record map

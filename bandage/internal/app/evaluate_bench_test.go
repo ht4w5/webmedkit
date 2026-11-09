@@ -184,6 +184,17 @@ func (m *memRepo) DeleteExpired(_ context.Context, now time.Time) (int, error) {
 	return n, nil
 }
 
+func (m *memRepo) DeleteDynamic(_ context.Context) (int, error) {
+	n := 0
+	for key, rec := range m.rows {
+		if rec.Dynamic {
+			delete(m.rows, key)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (m *memRepo) Close() error { return nil }
 
 // writeLedger counts report writes per (rule, Target) per report lifetime;

@@ -3,9 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 )
@@ -382,5 +386,165 @@ func TestE2EDynamicReplayDiesWithItsWritingRecord(t *testing.T) {
 	clock.Advance(time.Second)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("reports = %+v, want none (the writing record decayed to volume)", doc.Reports)
+	}
+}
+
+// mixedLifecycleRules mixes fixed and dynamic report actions on one
+// chain: every event feeds both trackers, so one restart sweeps the
+// dynamic reports and keeps the fixed ones.
+const mixedLifecycleRules = `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: egress
+        tracker: {track: bandwidth, leak: 1000, volume: 10000}
+        actions: [{report: {reason: egress-overflow, penalty: limit-bandwidth, rate: 1MB}}]
+      - id: sticky
+        tracker: {track: bandwidth, leak: 0, volume: 100}
+        actions: [{report: {reason: sticky-overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+`
+
+// reportEntryFor returns the document entry for (rule, target), or the
+// zero entry with ok false.
+func reportEntryFor(doc reportDoc, rule, target string) (reportEntry, bool) {
+	for _, r := range doc.Reports {
+		if r.Rule == rule && r.Target == target {
+			return r, true
+		}
+	}
+	return reportEntry{}, false
+}
+
+// TestE2ERestartSweepsDynamicReports: restarting a daemon over an
+// existing database removes every dynamic report and keeps every fixed
+// one; suppression is rebuilt from the fixed rows only, so a re-flagged
+// dynamic target writes fresh (spec: Startup sweep).
+func TestE2ERestartSweepsDynamicReports(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	dbPath := filepath.Join(t.TempDir(), "reports.db")
+
+	// Two targets overflow both rules: two dynamic (egress) and two
+	// fixed (sticky) reports, all written at 18:00:00.
+	d1 := startTestDaemon(t, clock, "unixgram", dbPath, mixedLifecycleRules)
+	for _, client := range []string{"203.0.113.7", "203.0.113.8"} {
+		sendAt(d1, "1760724000", client, "/big", 6000)
+		sendAt(d1, "1760724001", client, "/big", 6000)
+	}
+	d1.waitProcessed(t, 4)
+	if doc := d1.getReports(t, nil); len(doc.Reports) != 4 {
+		t.Fatalf("before restart: %+v, want 2 dynamic + 2 fixed", doc.Reports)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := d1.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	cancel()
+
+	// The restart sweeps the two dynamic rows before the live-report set
+	// is rebuilt; the two fixed rows survive untouched.
+	clock.Advance(10 * time.Minute) // 18:10
+	d2 := startTestDaemon(t, clock, "unixgram", dbPath, mixedLifecycleRules)
+	doc := d2.getReports(t, nil)
+	if len(doc.Reports) != 2 {
+		t.Fatalf("after restart: %+v, want the 2 fixed reports only", doc.Reports)
+	}
+	for _, client := range []string{"203.0.113.7/32", "203.0.113.8/32"} {
+		r, ok := reportEntryFor(doc, "sticky", client)
+		if !ok {
+			t.Fatalf("after restart: %+v, want the fixed report for %s kept", doc.Reports, client)
+		}
+		if r.Dynamic || r.CreatedAt != wallBase || r.UpdatedAt != wallBase || r.Sample.Path != "/big" {
+			t.Errorf("fixed report for %s = %+v, want the pre-restart write kept as-is", client, r)
+		}
+	}
+
+	// Suppression is rebuilt from the fixed rows only: the sticky rule
+	// stays frozen while the swept egress target re-flags fresh on
+	// renewed overflow (6000 + 6000 - 1000*1s = 11000 > 10000).
+	sendAt(d2, "1760724600", "203.0.113.7", "/big2", 6000)
+	d2.waitProcessed(t, 1)
+	clock.Advance(time.Second) // 18:10:01
+	sendAt(d2, "1760724601", "203.0.113.7", "/big2", 6000)
+	d2.waitProcessed(t, 2)
+
+	doc = d2.getReports(t, nil)
+	if len(doc.Reports) != 3 {
+		t.Fatalf("after re-flag: %+v, want 2 fixed + 1 fresh dynamic", doc.Reports)
+	}
+	r, ok := reportEntryFor(doc, "sticky", "203.0.113.7/32")
+	if !ok || r.UpdatedAt != wallBase || r.Sample.Path != "/big" {
+		t.Errorf("sticky report = %+v (ok %v), want it frozen at the pre-restart write (fixed rows suppress)", r, ok)
+	}
+	r, ok = reportEntryFor(doc, "egress", "203.0.113.7/32")
+	if !ok {
+		t.Fatalf("after re-flag: %+v, want the re-flagged egress report", doc.Reports)
+	}
+	if !r.Dynamic || r.CreatedAt != "2025-10-17T18:10:01Z" || r.UpdatedAt != "2025-10-17T18:10:01Z" {
+		t.Errorf("egress report = %+v, want a fresh 18:10:01 write (the swept row writes fresh)", r)
+	}
+	if r.Tracker.Value != 11000 || r.Tracker.Volume != 10000 {
+		t.Errorf("egress tracker = %+v, want value 11000 at volume 10000 (the restart-cold re-accumulation)", r.Tracker)
+	}
+	if _, ok := reportEntryFor(doc, "egress", "203.0.113.8/32"); ok {
+		t.Errorf("egress report for 203.0.113.8/32 = present, want swept and gone: %+v", doc.Reports)
+	}
+}
+
+// TestE2EStartupSweepLogsOneSummaryLine: the startup sweep reports
+// itself as one summary line carrying the count - its whole voice above
+// debug, nothing per-report (spec: Observability).
+func TestE2EStartupSweepLogsOneSummaryLine(t *testing.T) {
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: burst
+        tracker: {track: bandwidth, leak: 1, volume: 100}
+        actions: [{report: {reason: burst-overflow, penalty: limit-bandwidth, rate: 1MB}}]
+`
+	clock := newTestClock(mustTime(t, wallBase))
+	dbPath := filepath.Join(t.TempDir(), "reports.db")
+
+	// One overflowing event per target: two dynamic reports to sweep.
+	d1 := startTestDaemon(t, clock, "unixgram", dbPath, rules)
+	sendAt(d1, "1760724000", "203.0.113.7", "/big", 150)
+	sendAt(d1, "1760724000", "203.0.113.8", "/big", 150)
+	d1.waitProcessed(t, 2)
+	if doc := d1.getReports(t, nil); len(doc.Reports) != 2 {
+		t.Fatalf("before restart: %+v, want the 2 dynamic reports", doc.Reports)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := d1.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	cancel()
+
+	d2 := startTestDaemon(t, clock, "unixgram", dbPath, rules)
+
+	recs := d2.logs.withMessage("startup sweep: dynamic reports deleted")
+	if len(recs) != 1 {
+		t.Fatalf("startup sweep logs = %v, want exactly one summary line", recs)
+	}
+	if recs[0].Level != zerolog.InfoLevel {
+		t.Errorf("summary level = %v, want info (once per start, not steady-state noise)", recs[0].Level)
+	}
+	var n int
+	attrInto(t, recs[0], "count", &n)
+	if n != 2 {
+		t.Errorf("summary count = %d, want 2 (the swept dynamic reports)", n)
+	}
+
+	// Nothing per-report above debug: the startup's non-debug records
+	// are the summary and the daemon's startup announcements.
+	var msgs []string
+	for _, rec := range d2.logs.atAndAbove(zerolog.InfoLevel) {
+		msgs = append(msgs, rec.Message)
+	}
+	slices.Sort(msgs)
+	want := []string{"api started", "starting", "startup sweep: dynamic reports deleted", "syslog ingest started"}
+	if !slices.Equal(msgs, want) {
+		t.Errorf("non-debug startup records = %v, want %v", msgs, want)
 	}
 }
