@@ -9,9 +9,18 @@ moves.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No "demote" wording remains in splint; the compile comment and
+- [x] No "demote" wording remains in splint; the compile comment and
       the cycle test name say "lower"
-- [ ] No behavior change; the suite passes unchanged beyond the
+- [x] No behavior change; the suite passes unchanged beyond the
       renames
+
+## Comments
+
+Implemented on integration branch `integration/dynamic-reports`
+(commit `6a3875f`). The splint usage is compilation precedence -
+`firewall.Stance` resolution in the merge - not the glossary's
+Downgrade act, so "lower" is the plain word; "Downgrade" there would
+conflate concepts.
+Context: spec `../spec.md`.

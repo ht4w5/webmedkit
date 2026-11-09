@@ -12,11 +12,24 @@ waiter can ever hang.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A Delete during an in-flight write leaves the landed report
+- [x] A Delete during an in-flight write leaves the landed report
       standing: suppression intact, no duplicate write from a waiter
-- [ ] Every waiter is released when the write settles or fails; the
+- [x] Every waiter is released when the write settles or fails; the
       channel close is unconditional on every writer path
-- [ ] Settled pairs still leave the live set on Delete (re-arm
+- [x] Settled pairs still leave the live set on Delete (re-arm
       writing), unchanged
+
+## Comments
+
+Implemented on integration branch `integration/dynamic-reports`
+(commit `633ca09`). `Delete` now skips entries with a write in flight
+(the delete never saw their rows), and the downgrade failure path
+closes its channel unconditionally - the close is the writer's alone.
+The interleaving is pinned at the service seam:
+`TestServiceDeleteDuringAnInFlightWriteKeepsThePair` (red before the
+fix: the waiter re-wrote over the landed pair, 2 writes for 1 report).
+`TestServiceDeleteRearmsWriting` keeps the settled-pair contract.
+Context: spec `../spec.md`; Trigger suppression
+`.scratch/dynamic-reports/spec.md`.
