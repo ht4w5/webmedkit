@@ -55,10 +55,9 @@ target rung's threshold - checklist-silent, taken from user story 14.
 A downgrade onto a fixed rung is served as a fixed entry (dynamic
 marker gone, `expires_at` stamped from the write), so mixed ladders
 behave per-rung in both directions. Downgrade acts log at `debug`
-(checklist); dynamic deaths log at `debug` too where the row goes (the
-sweep's deletion) - checklist-silent, taken from the spec's
-Observability decision; the document-generation death stays unlogged
-because the row's deletion is the sweep's act and a per-document line
-would repeat.
+(checklist); dynamic deaths log at `debug` too where the row goes -
+checklist-silent, taken from the spec's Observability decision, at
+document generation as at sweep time - one line per death act, where
+the row goes, never one per document.
 Context: spec `../spec.md` (Implementation Decisions - Downgrade,
 Dynamic report liveness, Trigger suppression; User stories 13-18).

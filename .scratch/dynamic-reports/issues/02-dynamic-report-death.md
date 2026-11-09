@@ -49,10 +49,11 @@ Implemented on branch `ticket/02-dynamic-report-death` (behavior,
 validation and persistence in `e7dc58b`, report contract doc in
 `26ed934`), targeting integration branch `integration/dynamic-reports`.
 Death is value-based at document generation (a dead dynamic Report is
-absent and its live-set entry dies, so the next overflow writes within
-an event) and at sweep time (the dead row goes; `DeleteExpired` never
-eats dynamic rows - checklist-silent, taken from the spec's Persistence
-decision). `Rebuild` seeds suppression from fixed rows only: no Report
+absent and its row and live-set entry die with the act, so the next
+overflow writes a fresh Report with a fresh `created_at` within an
+event) and at sweep time (the dead row goes at either act; `DeleteExpired`
+never eats dynamic rows - checklist-silent, taken from the spec's
+Persistence decision). `Rebuild` seeds suppression from fixed rows only: no Report
 outlives the volatile tracker state, so ticket 05's startup sweep only
 deletes the rows. `grace` (03), Downgrade (04) and the startup sweep and
 rollback tests (05) are out of this ticket; the strict line is dead at

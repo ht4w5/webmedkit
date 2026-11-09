@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/persistence/sqlite"
 )
 
@@ -171,7 +172,8 @@ func TestE2EDynamicGraceMarginWidensTheDeathLine(t *testing.T) {
 
 // TestE2EDynamicReportReflagsWithinAnEvent: once the death has been
 // served, renewed overflow re-flags a fresh report within an event -
-// the very event that overflows writes it.
+// the very event that overflows writes it, at a fresh created_at (the
+// dead row went with the death act).
 func TestE2EDynamicReportReflagsWithinAnEvent(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", dynamicRules)
@@ -201,8 +203,78 @@ func TestE2EDynamicReportReflagsWithinAnEvent(t *testing.T) {
 	if r.Tracker.Value != 16000 {
 		t.Errorf("tracker value = %v, want 16000 (the accumulation as it stands)", r.Tracker.Value)
 	}
-	if r.CreatedAt != wallBase {
-		t.Errorf("created_at = %q, want %q (upsert identity over the still-stored row)", r.CreatedAt, wallBase)
+	if r.CreatedAt != "2025-10-17T18:00:02Z" {
+		t.Errorf("created_at = %q, want %q (a fresh report: the dead row's deletion is the death act)", r.CreatedAt, "2025-10-17T18:00:02Z")
+	}
+}
+
+// TestE2EDynamicDeathLoggedAtDebugLevel: a dynamic death act appears
+// only at debug log level (spec: Observability) - and once per act,
+// not once per document: the dead row's deletion is the act, so a
+// later document never repeats it.
+func TestE2EDynamicDeathLoggedAtDebugLevel(t *testing.T) {
+	// The act itself is a debug record, logged once across documents.
+	t.Run("record", func(t *testing.T) {
+		clock := newTestClock(mustTime(t, wallBase))
+		d := startTestDaemon(t, clock, "unixgram", ":memory:", dynamicRules)
+
+		sendAt(d, "1760724000", "203.0.113.7", "/releases/24.04.iso", 6000)
+		sendAt(d, "1760724001", "203.0.113.7", "/releases/24.04.iso", 6000)
+		d.waitProcessed(t, 2)
+
+		// 18:00:02: dead at the line - the death materializes at the
+		// first document and the next one repeats nothing.
+		clock.Advance(2 * time.Second)
+		if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+			t.Fatalf("reports at the death line = %+v, want none", doc.Reports)
+		}
+		if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+			t.Fatalf("reports at the second document = %+v, want none", doc.Reports)
+		}
+
+		deaths := d.logs.withMessage("dynamic report died")
+		if len(deaths) != 1 {
+			t.Fatalf("death logs = %v, want 1 (one per act, not one per document)", deaths)
+		}
+		if rec := deaths[0]; rec.Level != zerolog.DebugLevel {
+			t.Errorf("death level = %v, want debug (a death is steady state)", rec.Level)
+		}
+	})
+
+	// A configured level shows death acts at debug and silences them
+	// at info: they appear only at debug.
+	for _, tt := range []struct {
+		level domain.Level
+		want  bool
+	}{
+		{level: domain.LevelDebug, want: true},
+		{level: domain.LevelInfo, want: false},
+	} {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
+			buf := &syncBuffer{}
+			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", dynamicRules, nil, WithLogger(NewLogger(buf, tt.level)))
+
+			sendAt(d, "1760724000", "203.0.113.7", "/releases/24.04.iso", 6000)
+			sendAt(d, "1760724001", "203.0.113.7", "/releases/24.04.iso", 6000)
+			d.waitProcessed(t, 2)
+
+			clock.Advance(2 * time.Second)
+			if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+				t.Fatalf("reports at the death line = %+v, want none", doc.Reports)
+			}
+
+			line := ""
+			for _, l := range strings.Split(buf.String(), "\n") {
+				if strings.Contains(l, "dynamic report died") {
+					line = l
+					break
+				}
+			}
+			if (line != "") != tt.want {
+				t.Errorf("death lines at %s level: present = %v, want %v:\n%s", tt.level, line != "", tt.want, buf.String())
+			}
+		})
 	}
 }
 

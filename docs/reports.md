@@ -88,8 +88,9 @@ it when the writing report action declared a `grace` - the widening
 margin is a rules-side setting this document does not carry. There is
 no timer - the death is materialized
 lazily, at document generation (a dead dynamic report is simply absent
-from this document) and at sweep time (when its row goes), and the next
-overflow writes a fresh report at the accumulation's current stance.
+from this document) and at sweep time - the dead row goes at either
+act - and the next overflow writes a fresh report at the accumulation's
+current stance.
 Suppression follows the same aliveness in both modes: while a report is
 alive, Triggers write nothing and the rule's other actions keep
 running.

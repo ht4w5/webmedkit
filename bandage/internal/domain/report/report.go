@@ -269,15 +269,15 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 // acts are materialized here, at document generation (spec: Dynamic
 // report liveness): a dynamic report whose value has decayed to its
 // death line Downgrades to the highest rung still exceeded, and dies -
-// is never served and its live-set entry dies with it, so the next
-// overflow writes - when no rung remains exceeded.
+// is never served, its row and live-set entry deleted with the one
+// death act, so the next overflow writes a fresh report at a fresh
+// created_at - when no rung remains exceeded.
 func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
 	rows, err := s.repo.List(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.Report, 0, len(rows))
-	var dead []reportKey
 	for _, rec := range rows {
 		if !rec.Dynamic {
 			out = append(out, rec)
@@ -294,7 +294,12 @@ func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
 		// still exceeded; die when none remains.
 		st, ok := downgradeTarget(s.ladders.Stances(rec.Rule), rec.Tracker.Volume, value)
 		if !ok {
-			dead = append(dead, reportKey{rule: rec.Rule, target: rec.Target})
+			// The death materializes here, not merely as a filter: the
+			// row goes with the act, so the next overflow writes a fresh
+			// report (spec: Dynamic report liveness).
+			if _, err := s.settleDeath(ctx, rec); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		next, err := s.downgrade(ctx, rec, st, q.Now)
@@ -308,17 +313,6 @@ func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
 			continue
 		}
 		out = append(out, *next)
-	}
-	if len(dead) > 0 {
-		s.mu.Lock()
-		for _, key := range dead {
-			if e := s.live[key]; e != nil && e.inflight == nil {
-				delete(s.live, key)
-			}
-		}
-		s.mu.Unlock()
-		// The dead row's deletion is the sweep's act; logging the death
-		// here would repeat per document (spec: Observability).
 	}
 	return out, nil
 }
@@ -431,6 +425,57 @@ func (s *Service) downgrade(ctx context.Context, rec domain.Report, st Stance, n
 	return &next, nil
 }
 
+// settleDeath materializes the dead report's death: its row is deleted
+// and its live-set entry dropped through the single-writer protocol,
+// and the act logs at debug - once, where the row goes, never once per
+// document (spec: Observability). deleted is false when the row moved
+// since it was read: the newer stance stands and the next
+// materialization re-decides.
+func (s *Service) settleDeath(ctx context.Context, rec domain.Report) (bool, error) {
+	key := reportKey{rule: rec.Rule, target: rec.Target}
+	s.mu.Lock()
+	cur := s.live[key]
+	if cur != nil && cur.inflight != nil {
+		// A write for this key is landing: the death re-decides next round.
+		s.mu.Unlock()
+		return false, nil
+	}
+	if cur != nil && (cur.dynamic != rec.Dynamic || cur.volume != rec.Tracker.Volume || !cur.updatedAt.Equal(rec.UpdatedAt)) {
+		// The row moved since it was read: the newer stance stands.
+		s.mu.Unlock()
+		return false, nil
+	}
+	e := cur
+	created := false
+	if e == nil {
+		e = &liveEntry{}
+		s.live[key] = e
+		created = true
+	}
+	e.inflight = make(chan struct{})
+	s.mu.Unlock()
+
+	n, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := e.inflight
+	e.inflight = nil
+	close(ch)
+	if err != nil {
+		if s.live[key] == e && created {
+			delete(s.live, key)
+		}
+		return false, err
+	}
+	if s.live[key] == e {
+		delete(s.live, key)
+	}
+	s.logger.Log(domain.LevelDebug, "dynamic report died", map[string]any{
+		"rule": rec.Rule, "target": rec.Target,
+	})
+	return n > 0, nil
+}
+
 // Delete removes reports matching the query and returns the number of deleted
 // rows (Repository.Delete). The deleted pairs leave the live set: re-arms writing.
 func (s *Service) Delete(ctx context.Context, q Query) (int, error) {
@@ -479,14 +524,13 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 			}
 			continue
 		}
-		m, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
+		deleted, err := s.settleDeath(ctx, rec)
 		if err != nil {
 			return n, err
 		}
-		n += m
-		s.logger.Log(domain.LevelDebug, "dynamic report died", map[string]any{
-			"rule": rec.Rule, "target": rec.Target,
-		})
+		if deleted {
+			n++
+		}
 	}
 	s.mu.Lock()
 	for key, e := range s.live {

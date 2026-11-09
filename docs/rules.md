@@ -429,7 +429,8 @@ all - only deletion or the daemon's startup sweep end it.
 Dynamic death is lazy: nothing runs between events and no timer exists
 - the death materializes at document generation (a dead dynamic report
 is simply absent from `GET /api/reports`, withdrawing its enforcement
-at the consumer's next sync) and at sweep time (when its row goes).
+at the consumer's next sync) and at sweep time - the dead row goes at
+either act.
 The next overflow writes a fresh report at the accumulation's current
 stance. On a ladder a dynamic report **Downgrades** instead of
 vanishing at the top rung's line - see
