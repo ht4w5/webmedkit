@@ -73,13 +73,15 @@ _Avoid_: fire, hit
 
 **Trigger**:
 A match that ran a report action; when it writes, its event becomes the
-report's sample and its wall-clock time stamps the report. While the
-report for (rule, Target) is alive, further Triggers write nothing (the
-rule's other actions still run) - except one from a higher escalation,
-which overrides the report in place: reason, penalty, sample and expiry
-move to the higher rung's. A Trigger never empties the tracker; a failed
-write is not a Trigger outcome: the next matching event retries the
-report.
+report's sample and its wall-clock time stamps the report. The report is
+alive until expiry, Underflow of its recorded volume, or deletion;
+while it is alive for (rule, Target), further Triggers write nothing
+(the rule's other actions still run) - except one from a higher
+escalation, which overrides the report in place: reason, penalty, sample
+and expiry move to the higher rung's, and the report adopts that rung's
+lifecycle. A Trigger never empties the tracker and never Downgrades a
+report; a failed write is not a Trigger outcome: the next matching event
+retries the report.
 _Avoid_: firing, hit
 
 ### Trackers
@@ -99,6 +101,12 @@ Unqualified "record" means this, never a Report.
 When a tracker's accumulated value exceeds a volume: the rule's
 volume, or an escalation's threshold.
 _Avoid_: breach
+
+**Underflow**:
+When a tracker's accumulated value decays to a live dynamic report's
+death line - its recorded volume less its Grace margin. The strict
+mirror of Overflow; the report dies at it.
+_Avoid_: underflow death, decay death, leak-out
 
 **Escalation**:
 A rung on one tracker's ladder: a volume threshold in the tracker's
@@ -121,10 +129,34 @@ _Avoid_: capped drop, drop, expiry
 
 **Report**:
 The document recording that a rule matched for a target, carrying its
-tracker reading, sample, and penalty, alive until expiry or deletion.
-Deleting a Report withdraws the enforcement derived from it at the
-enforcing consumer's next sync.
+tracker reading, sample, and penalty, alive until expiry, Underflow of
+its recorded volume, or deletion. Deleting a Report withdraws the
+enforcement derived from it at the enforcing consumer's next sync.
 _Avoid_: finding, record, ban
+
+**Dynamic report**:
+A report bound to the tracker value that justified it rather than to a
+clock: alive while the value stays above the death line of its recorded
+volume, dead at Underflow. Written by a report action without a `ttl`;
+once dead it is absent from the served document, withdrawing its
+enforcement at the consumer's next sync.
+_Avoid_: live report, value-bound report
+
+**Grace**:
+A duration on a dynamic report action widening the report's death line
+below its recorded volume, so a brief pause in otherwise sustained
+accumulation does not withdraw enforcement. Mutually exclusive with
+`ttl`.
+_Avoid_: grace period, tolerance
+
+**Downgrade**:
+A dynamic report restating itself to the highest rung of its escalation
+ladder still exceeded as the tracker value decays: reason and Penalty
+move to that rung's with a fresh update time while the Sample and
+`created_at` stay, and the stance adopts the rung's lifecycle. Never
+written by a Trigger - the inverse of its no-downgrade-from-Triggers
+rule.
+_Avoid_: demotion, decay rewrite
 
 **Reason**:
 The machine-readable trigger code a report carries into downstream ban
