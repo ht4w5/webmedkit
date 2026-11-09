@@ -112,12 +112,6 @@ _Avoid_: tier, stage, level
 The aggregated source prefix that a tracker keys on and a report is about.
 _Avoid_: key, addr, client
 
-**Volume method**:
-A replay tracker's tolerated volume as a function of file size -
-`constant`, `clamped-linear`, `inverse-square`, or `step` - in tolerated
-download equivalents. Only replay configures one.
-_Avoid_: threshold formula, scaling curve
-
 **Eviction**:
 Tracker state removed because the tracker cache entry cap is reached;
 that target's tracker starts over empty.
