@@ -1059,7 +1059,7 @@ func TestUpdateCycleMergePolicyWithExclusions(t *testing.T) {
 		wantSkipped int
 	}{
 		{
-			name:    "an exclusion inside both Targets does not demote the narrower report's stance",
+			name:    "an exclusion inside both Targets does not lower the narrower report's stance",
 			exclude: []string{"203.0.113.7/32"},
 			reports: []reportSpec{
 				{target: "203.0.113.0/24", action: domain.PenaltyDrop},

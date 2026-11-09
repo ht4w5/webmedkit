@@ -37,7 +37,7 @@ func Compile(doc Document, p Policy) ([]firewall.BanRule, []Skip) {
 
 // entry is one report record's merge contribution. The residuals
 // resolve against the unsplit Target's specificity, so an exclusion
-// can never demote a report's stance.
+// can never lower a report's stance.
 type entry struct {
 	target    netip.Prefix
 	residuals []netip.Prefix
