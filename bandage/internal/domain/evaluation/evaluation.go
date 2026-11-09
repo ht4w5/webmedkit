@@ -385,6 +385,7 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		Sample:    *m.event, // the Event whole (ADR 0021), never a projection
 		Penalty:   &penalty,
 		Dynamic:   dynamic,
+		Margin:    action.Margin, // the writing action's grace margin (spec: Report action grammar)
 	}
 	return s.reports.Trigger(ctx, rec, len(m.rule.Escalations) > 0)
 }

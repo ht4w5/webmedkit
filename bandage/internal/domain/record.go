@@ -55,9 +55,10 @@ func (r Record) ValueAt(leak float64, at int64) float64 {
 	return r.Value
 }
 
-// Underflow reports whether the record's value has decayed to volume at
-// at (unix seconds) - dead at value <= volume, the strict mirror of
-// Overflow (spec: Dynamic report liveness).
-func (r Record) Underflow(volume, leak float64, at int64) bool {
-	return r.ValueAt(leak, at) <= volume
+// Underflow reports whether the record's value has decayed to the
+// death line at at (unix seconds) - dead at value <= line, the strict
+// mirror of Overflow (spec: Dynamic report liveness). The line is the
+// report's recorded volume minus its grace margin.
+func (r Record) Underflow(line, leak float64, at int64) bool {
+	return r.ValueAt(leak, at) <= line
 }

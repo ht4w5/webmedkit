@@ -152,6 +152,7 @@ type body struct {
 	Sample  domain.Event          `json:"sample"`
 	Penalty *domain.Penalty       `json:"penalty,omitempty"`
 	Dynamic bool                  `json:"dynamic,omitempty"`
+	Margin  float64               `json:"margin,omitempty"`
 }
 
 func (r *ReportRepository) Close() error {
@@ -176,6 +177,7 @@ func (r *ReportRepository) Upsert(ctx context.Context, rec domain.Report) error 
 		Sample:  rec.Sample,
 		Penalty: rec.Penalty,
 		Dynamic: rec.Dynamic,
+		Margin:  rec.Margin,
 	})
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert: %w", err)
@@ -239,6 +241,7 @@ func (r *ReportRepository) List(ctx context.Context, q report.Query) ([]domain.R
 		rec.Sample = b.Sample
 		rec.Penalty = b.Penalty
 		rec.Dynamic = b.Dynamic
+		rec.Margin = b.Margin
 		rec.CreatedAt = time.Unix(0, createdNS).UTC()
 		rec.UpdatedAt = time.Unix(0, updatedNS).UTC()
 		if b.Dynamic {

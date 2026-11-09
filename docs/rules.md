@@ -328,7 +328,7 @@ report's Target - the whole prefix, not each host inside it.
 every recommendation can be audited before deploying:
 
 ```
-    action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000
+    action report reason=bandage.iso-egress-overflow ttl=168h0m0s grace=none penalty=limit-bandwidth rate=1000000
 ```
 
 Load refuses a rules file where:
@@ -513,8 +513,8 @@ rungs carry every threshold) and its `ttl` from the top rung:
     filter: any
     tracker: bandwidth leak=1000000 ttl=11h6m40s
     rung at=50000000 jump target=inspect
-    rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000
-    rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s penalty=drop
+    rung at=5000000000 report reason=bandage.iso-egress-throttle ttl=24h0m0s grace=none penalty=limit-bandwidth rate=1000000
+    rung at=40000000000 report reason=bandage.iso-egress-ban ttl=168h0m0s grace=none penalty=drop
 ```
 
 ## Rule counters

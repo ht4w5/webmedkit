@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 	"github.com/HT4w5/webmedkit/internal/identity"
@@ -88,17 +89,22 @@ type actionDescriber struct {
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	ttl := a.TTL.String()
-	if a.TTL == 0 {
-		// The lifecycle of every report action prints (spec: Two
-		// lifecycle modes): a dynamic report has no ttl.
-		ttl = "none"
-	}
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.prefix, a.Reason), ttl, a.Penalty.Action)
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s grace=%s penalty=%s",
+		domain.NamespacedReason(d.prefix, a.Reason), lifecycleSlot(a.TTL), lifecycleSlot(a.Grace), a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}
 	return nil
+}
+
+// lifecycleSlot renders one report lifecycle slot for the plan: the
+// duration, or "none" for the absent one (spec: Load validation
+// additions - the lifecycle of every report action prints).
+func lifecycleSlot(d time.Duration) string {
+	if d == 0 {
+		return "none"
+	}
+	return d.String()
 }
 
 func (d actionDescriber) VisitLog(a *domain.LogAction) error {

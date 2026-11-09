@@ -40,6 +40,12 @@ type Report struct {
 	// value behind it, not to a ttl (spec: Two lifecycle modes). A
 	// report action without ttl writes one.
 	Dynamic bool
+	// Margin is the writing action's grace margin (leak x grace,
+	// compiled at rule build); the death line is Tracker.Volume minus
+	// this margin - the strict boundary the value must stay above.
+	// Zero means no grace: the strict line at Tracker.Volume. It is
+	// record shape, not report-document shape.
+	Margin float64
 }
 
 // NamespacedReason composes a Reason's namespaced form (GLOSSARY): prefix, dot,
