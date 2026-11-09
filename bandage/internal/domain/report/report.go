@@ -79,14 +79,19 @@ type Stance struct {
 	// Penalty is the rung's advisory enforcement stance (ADR 0010).
 	Penalty domain.Penalty
 	// TTL is the rung's policy: a fixed rung's ttl, stamped from the
-	// downgrade write; zero means a dynamic stance - alive while the
-	// decayed value stays strictly above At minus Margin.
+	// downgrade write; zero means a dynamic stance (Dynamic) - alive
+	// while the decayed value stays strictly above At minus Margin.
 	TTL time.Duration
 	// Margin is the rung's grace margin (leak x grace); the dynamic
 	// stance's death line is At minus Margin. Zero for fixed stances
 	// (ttl and grace are mutually exclusive).
 	Margin float64
 }
+
+// Dynamic reports the stance's mode: a fixed rung carries its ttl, a
+// dynamic rung none - the policy is always the writing action's (spec:
+// Two lifecycle modes).
+func (st Stance) Dynamic() bool { return st.TTL == 0 }
 
 // Ladder resolves the report stances of one rule's ladder, lowest rung
 // first (spec: Downgrade). Rungs without a report action carry no
@@ -165,9 +170,43 @@ func NewService(repo Repository, trackers TrackerLookup, ladders Ladder, logger 
 func (s *Service) alive(ctx context.Context, rule string, e *liveEntry, now time.Time) bool {
 	if e.dynamic {
 		rec := s.trackers.Get(ctx, rule, e.key)
-		return !rec.Underflow(e.volume-e.margin, e.leak, now.Unix())
+		return !rec.Underflow(deathLine(e.volume, e.margin), e.leak, now.Unix())
 	}
 	return e.expiresAt.After(now)
+}
+
+// deathLine is a report's death line: its recorded volume less its
+// grace margin, the strict boundary the decayed value must stay above
+// (GLOSSARY: Underflow).
+func deathLine(volume, margin float64) float64 {
+	return volume - margin
+}
+
+// settleEntry lands rec's shape on the entry and releases the writers
+// waiting on its in-flight channel; runs under s.mu. The entry's key
+// is the (ns, key) pair's key half - the writing tracker's cache key;
+// ns is the rule, already named by the entry's reportKey.
+func settleEntry(e *liveEntry, rec domain.Report) {
+	e.dynamic = rec.Dynamic
+	e.expiresAt = rec.ExpiresAt
+	e.volume = rec.Tracker.Volume
+	e.margin = rec.Margin
+	e.leak = rec.Tracker.Leak
+	_, e.key = rec.WritingKey()
+	e.updatedAt = rec.UpdatedAt
+	ch := e.inflight
+	e.inflight = nil
+	close(ch)
+}
+
+// settledRow is the row's identity as the entry settles it - the
+// version a settling act re-checks against the entry the next write
+// lands (its stale-row guard). Trigger knows the stored row by its
+// live entry, never by a repository read.
+func settledRow(key reportKey, e *liveEntry) domain.Report {
+	rec := domain.Report{Rule: key.rule, Target: key.target, Dynamic: e.dynamic, UpdatedAt: e.updatedAt}
+	rec.Tracker.Volume = e.volume
+	return rec
 }
 
 // Trigger records the report for (rule, target). A failed write is not a Trigger
@@ -190,9 +229,23 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 				return fmt.Errorf("trigger report: %w", ctx.Err())
 			}
 		}
-		if ok && s.alive(ctx, key.rule, cur, rec.UpdatedAt) && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
+		alive := ok && s.alive(ctx, key.rule, cur, rec.UpdatedAt)
+		if alive && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
 			s.mu.Unlock()
 			return nil
+		}
+		if ok && !alive && cur.dynamic {
+			// The stored dynamic report is dead at write time: settle its
+			// death before writing, so this write lands a fresh report at a
+			// fresh created_at (spec: Dynamic report liveness) instead of an
+			// upsert over the dead row freezing its identity. settleDeath
+			// keeps its stale-row protections: a row that moved since this
+			// decision stands and the round re-decides against it.
+			s.mu.Unlock()
+			if _, err := s.settleDeath(ctx, settledRow(key, cur)); err != nil {
+				return fmt.Errorf("trigger report: %w", err)
+			}
+			continue
 		}
 		prev = cur
 		e = &liveEntry{inflight: make(chan struct{})}
@@ -217,24 +270,9 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 		return fmt.Errorf("trigger report: %w", err)
 	}
 	s.mu.Lock()
-	e.dynamic = rec.Dynamic
-	e.expiresAt = rec.ExpiresAt
-	e.volume = rec.Tracker.Volume
-	e.margin = rec.Margin
-	e.leak = rec.Tracker.Leak
-	e.key = writingKey(rec)
-	e.updatedAt = rec.UpdatedAt
-	ch := e.inflight
-	e.inflight = nil
-	close(ch)
+	settleEntry(e, rec)
 	s.mu.Unlock()
 	return nil
-}
-
-// writingKey derives the tracker-cache key of the report's reading.
-func writingKey(rec domain.Report) string {
-	_, key := rec.WritingKey()
-	return key
 }
 
 // Rebuild derives the live-report set from the report table at now and
@@ -269,56 +307,27 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 // acts are materialized here, at document generation (spec: Dynamic
 // report liveness): a dynamic report whose value has decayed to its
 // death line Downgrades to the highest rung still exceeded, and dies -
-// is never served and its live-set entry dies with it, so the next
-// overflow writes - when no rung remains exceeded.
+// is never served, its row and live-set entry deleted with the one
+// death act, so the next overflow writes a fresh report at a fresh
+// created_at - when no rung remains exceeded.
 func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
 	rows, err := s.repo.List(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.Report, 0, len(rows))
-	var dead []reportKey
 	for _, rec := range rows {
 		if !rec.Dynamic {
 			out = append(out, rec)
 			continue
 		}
-		value := s.decayed(ctx, rec, q.Now.Unix())
-		if value > rec.Tracker.Volume-rec.Margin {
-			out = append(out, rec)
-			continue
-		}
-		// The death line is crossed - the margin guards the downgrade
-		// line too, so stances do not flap between rungs at the
-		// boundary (spec: Downgrade). Downgrade while a lower rung is
-		// still exceeded; die when none remains.
-		st, ok := downgradeTarget(s.ladders.Stances(rec.Rule), rec.Tracker.Volume, value)
-		if !ok {
-			dead = append(dead, reportKey{rule: rec.Rule, target: rec.Target})
-			continue
-		}
-		next, err := s.downgrade(ctx, rec, st, q.Now)
+		serve, _, err := s.materialize(ctx, rec, q.Now)
 		if err != nil {
 			return nil, err
 		}
-		if next == nil {
-			// The row moved since it was read: the newer stance stands
-			// and is re-materialized on the next document.
-			out = append(out, rec)
-			continue
+		if serve != nil {
+			out = append(out, *serve)
 		}
-		out = append(out, *next)
-	}
-	if len(dead) > 0 {
-		s.mu.Lock()
-		for _, key := range dead {
-			if e := s.live[key]; e != nil && e.inflight == nil {
-				delete(s.live, key)
-			}
-		}
-		s.mu.Unlock()
-		// The dead row's deletion is the sweep's act; logging the death
-		// here would repeat per document (spec: Observability).
 	}
 	return out, nil
 }
@@ -339,7 +348,7 @@ func downgradeTarget(stances []Stance, volume, value float64) (Stance, bool) {
 	var best Stance
 	found := false
 	for _, st := range stances {
-		if st.At >= volume || value <= st.At-st.Margin {
+		if st.At >= volume || value <= deathLine(st.At, st.Margin) {
 			continue
 		}
 		if !found || st.At > best.At {
@@ -360,7 +369,7 @@ func restated(rec domain.Report, st Stance, now time.Time) domain.Report {
 	next.Tracker.Volume = st.At
 	next.UpdatedAt = now
 	next.Margin = st.Margin
-	next.Dynamic = st.TTL == 0
+	next.Dynamic = st.Dynamic()
 	if next.Dynamic {
 		next.ExpiresAt = time.Time{}
 	} else {
@@ -414,21 +423,106 @@ func (s *Service) downgrade(ctx context.Context, rec domain.Report, st Stance, n
 		return nil, fmt.Errorf("downgrade report: %w", err)
 	}
 	s.mu.Lock()
-	e.dynamic = next.Dynamic
-	e.expiresAt = next.ExpiresAt
-	e.volume = next.Tracker.Volume
-	e.margin = next.Margin
-	e.leak = next.Tracker.Leak
-	e.key = writingKey(next)
-	e.updatedAt = next.UpdatedAt
-	ch := e.inflight
-	e.inflight = nil
-	close(ch)
+	settleEntry(e, next)
 	s.mu.Unlock()
 	s.logger.Log(domain.LevelDebug, "report downgraded", map[string]any{
 		"rule": rec.Rule, "target": rec.Target, "from": rec.Reason, "to": next.Reason,
 	})
 	return &next, nil
+}
+
+// materialize settles one dynamic row's decay at now - the shared
+// lifecycle-act shape behind document generation and the sweep (spec:
+// Dynamic report liveness). The row stands while its decayed value is
+// strictly above its death line; it Downgrades to the highest rung
+// still exceeded; and it dies - the row deleted, the live-set entry
+// dropped, one debug line - when no rung remains exceeded. serve is
+// the report standing this round: the row as read while it stands or
+// while its restatement was skipped, nil once dead. deleted reports
+// the death's row deletion.
+func (s *Service) materialize(ctx context.Context, rec domain.Report, now time.Time) (serve *domain.Report, deleted bool, err error) {
+	value := s.decayed(ctx, rec, now.Unix())
+	if value > deathLine(rec.Tracker.Volume, rec.Margin) {
+		return &rec, false, nil
+	}
+	// The death line is crossed - the margin guards the downgrade line
+	// too, so stances do not flap between rungs at the boundary (spec:
+	// Downgrade). Downgrade while a lower rung is still exceeded; die
+	// when none remains.
+	st, ok := downgradeTarget(s.ladders.Stances(rec.Rule), rec.Tracker.Volume, value)
+	if !ok {
+		// The death materializes as an act, not a filter: the row goes,
+		// so the next overflow writes a fresh report (spec: Dynamic
+		// report liveness).
+		deleted, err = s.settleDeath(ctx, rec)
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, deleted, nil
+	}
+	next, err := s.downgrade(ctx, rec, st, now)
+	if err != nil {
+		return nil, false, err
+	}
+	if next == nil {
+		// The row moved since it was read: the newer stance stands and
+		// is re-materialized on the next round.
+		return &rec, false, nil
+	}
+	return next, false, nil
+}
+
+// settleDeath materializes the dead report's death: its row is deleted
+// and its live-set entry dropped through the single-writer protocol,
+// and the act logs at debug - once, where the row goes, never once per
+// document (spec: Observability). rec carries the row identity the
+// death was decided against - read from the repository at
+// materialization, or settled on the live entry at write time. deleted
+// is false when the row moved since it was read: the newer stance
+// stands and the next materialization re-decides.
+func (s *Service) settleDeath(ctx context.Context, rec domain.Report) (bool, error) {
+	key := reportKey{rule: rec.Rule, target: rec.Target}
+	s.mu.Lock()
+	cur := s.live[key]
+	if cur != nil && cur.inflight != nil {
+		// A write for this key is landing: the death re-decides next round.
+		s.mu.Unlock()
+		return false, nil
+	}
+	if cur != nil && (cur.dynamic != rec.Dynamic || cur.volume != rec.Tracker.Volume || !cur.updatedAt.Equal(rec.UpdatedAt)) {
+		// The row moved since it was read: the newer stance stands.
+		s.mu.Unlock()
+		return false, nil
+	}
+	e := cur
+	created := false
+	if e == nil {
+		e = &liveEntry{}
+		s.live[key] = e
+		created = true
+	}
+	e.inflight = make(chan struct{})
+	s.mu.Unlock()
+
+	n, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := e.inflight
+	e.inflight = nil
+	close(ch)
+	if err != nil {
+		if s.live[key] == e && created {
+			delete(s.live, key)
+		}
+		return false, err
+	}
+	if s.live[key] == e {
+		delete(s.live, key)
+	}
+	s.logger.Log(domain.LevelDebug, "dynamic report died", map[string]any{
+		"rule": rec.Rule, "target": rec.Target,
+	})
+	return n > 0, nil
 }
 
 // Delete removes reports matching the query and returns the number of deleted
@@ -469,24 +563,13 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 		if !rec.Dynamic {
 			continue
 		}
-		value := s.decayed(ctx, rec, now.Unix())
-		if value > rec.Tracker.Volume-rec.Margin {
-			continue
-		}
-		if st, ok := downgradeTarget(s.ladders.Stances(rec.Rule), rec.Tracker.Volume, value); ok {
-			if _, err := s.downgrade(ctx, rec, st, now); err != nil {
-				return n, err
-			}
-			continue
-		}
-		m, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
+		_, deleted, err := s.materialize(ctx, rec, now)
 		if err != nil {
 			return n, err
 		}
-		n += m
-		s.logger.Log(domain.LevelDebug, "dynamic report died", map[string]any{
-			"rule": rec.Rule, "target": rec.Target,
-		})
+		if deleted {
+			n++
+		}
 	}
 	s.mu.Lock()
 	for key, e := range s.live {
@@ -495,7 +578,7 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 		}
 		if e.dynamic {
 			rec := s.trackers.Get(ctx, key.rule, e.key)
-			if !rec.Underflow(e.volume-e.margin, e.leak, now.Unix()) {
+			if !rec.Underflow(deathLine(e.volume, e.margin), e.leak, now.Unix()) {
 				continue
 			}
 		} else if e.expiresAt.After(now) {

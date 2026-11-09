@@ -429,9 +429,12 @@ all - only deletion or the daemon's startup sweep end it.
 Dynamic death is lazy: nothing runs between events and no timer exists
 - the death materializes at document generation (a dead dynamic report
 is simply absent from `GET /api/reports`, withdrawing its enforcement
-at the consumer's next sync) and at sweep time (when its row goes).
+at the consumer's next sync), at sweep time, and at the Trigger write
+that finds the dead row (the death settles before the write) - the
+dead row goes at every act.
 The next overflow writes a fresh report at the accumulation's current
-stance. On a ladder a dynamic report **Downgrades** instead of
+stance, its `created_at` fresh even with no document or sweep in
+between. On a ladder a dynamic report **Downgrades** instead of
 vanishing at the top rung's line - see
 [Escalation ladders](#escalation-ladders) below.
 
@@ -553,7 +556,7 @@ How it behaves:
   The grace margin guards the downgrade line too, so stances do not
   flap between rungs at the boundary; the report dies at Underflow when
   no rung remains exceeded. Fixed stances never decay-interact - no
-  Downgrade, no underflow death - and fixed and dynamic rungs mix
+  Downgrade, no Underflow - and fixed and dynamic rungs mix
   freely on one ladder. A Downgrade is decay's act, never a Trigger's
   (the suppression above narrows to no downgrade from Triggers).
 - `log` actions on any rung log the same rule, Target, Event and

@@ -37,7 +37,7 @@ chains:
 
 // TestE2EDynamicBanDowngradesToTheThrottleRung: as the value decays to
 // the ban stance's death line with the throttle rung still exceeded,
-// the report demotes to the throttle rung's stance - carrying the
+// the report downgrades to the throttle rung's stance - carrying the
 // lower rung's reason and Penalty over the climb event's Sample -
 // with created_at frozen and updated_at moved.
 func TestE2EDynamicBanDowngradesToTheThrottleRung(t *testing.T) {
@@ -66,7 +66,7 @@ func TestE2EDynamicBanDowngradesToTheThrottleRung(t *testing.T) {
 	}
 
 	// 18:00:50: the value decays to 150 - the ban stance's line is
-	// crossed and the throttle rung is still exceeded: demote.
+	// crossed and the throttle rung is still exceeded: downgrade.
 	clock.Advance(time.Second)
 	doc = d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
@@ -93,7 +93,7 @@ func TestE2EDynamicBanDowngradesToTheThrottleRung(t *testing.T) {
 	if r.Tracker.Value != 200 || r.Tracker.Leak != 1 || r.Tracker.Volume != 50 {
 		t.Errorf("tracker = %+v, want value 200 at the throttle rung's threshold 50", r.Tracker)
 	}
-	// The Sample backing the demoted stance is the climb event, which
+	// The Sample backing the downgraded stance is the climb event, which
 	// crossed every lower rung.
 	checkSample(t, r.Sample, sampleEntry{
 		Time: "2025-10-17T18:00:00Z", RemoteAddr: "203.0.113.7", Method: "GET",
@@ -120,7 +120,7 @@ chains:
 `
 
 // TestE2EDynamicDowngradeChainsAndDiesBelowTheLowestRung: the report
-// demotes rung by rung as the value decays - created_at frozen across
+// downgrades rung by rung as the value decays - created_at frozen across
 // every downgrade, updated_at moving - and dies when the value decays
 // below the lowest rung minus the stance's margin.
 func TestE2EDynamicDowngradeChainsAndDiesBelowTheLowestRung(t *testing.T) {
@@ -130,7 +130,7 @@ func TestE2EDynamicDowngradeChainsAndDiesBelowTheLowestRung(t *testing.T) {
 	sendAt(d, "1760724000", "203.0.113.7", "/big", 160)
 	d.waitProcessed(t, 1)
 
-	// 18:00:10: value 150 - the ban stance's line, demote to squeeze.
+	// 18:00:10: value 150 - the ban stance's line, downgrade to squeeze.
 	clock.Advance(10 * time.Second)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.squeeze" {
@@ -148,7 +148,7 @@ func TestE2EDynamicDowngradeChainsAndDiesBelowTheLowestRung(t *testing.T) {
 		t.Errorf("tracker volume = %v, want the squeeze rung's threshold 100", r.Tracker.Volume)
 	}
 
-	// 18:01:00: value 100 - the squeeze stance's line, demote to
+	// 18:01:00: value 100 - the squeeze stance's line, downgrade to
 	// throttle. created_at stays frozen across the second downgrade.
 	clock.Advance(50 * time.Second)
 	doc = d.getReports(t, nil)
@@ -180,7 +180,7 @@ func TestE2EDynamicDowngradeChainsAndDiesBelowTheLowestRung(t *testing.T) {
 }
 
 // TestE2EFixedStancesIgnoreDecay: a fixed stance never decay-interacts -
-// no Downgrade, no underflow death - in single volume rules and ladder
+// no Downgrade, no Underflow - in single volume rules and ladder
 // rungs alike (spec: Downgrade).
 func TestE2EFixedStancesIgnoreDecay(t *testing.T) {
 	// fixedSingleRules is the single-volume fixed form: a ttl-bounded
@@ -274,7 +274,7 @@ chains:
 // TestE2EDynamicDowngradeMarginGuardsTheBoundary: the margin guards
 // the downgrade line too, so stances do not flap between rungs at the
 // boundary - the ban stance stands inside its margin band below the
-// rung's threshold, and once demoted the stance stays put until the
+// rung's threshold, and once downgraded the stance stays put until the
 // value climbs back above the top rung (no re-promotion from a bump
 // inside the band).
 func TestE2EDynamicDowngradeMarginGuardsTheBoundary(t *testing.T) {
@@ -292,7 +292,7 @@ func TestE2EDynamicDowngradeMarginGuardsTheBoundary(t *testing.T) {
 	}
 
 	// 18:01:10: value 150 - 20 = 130 - the widened downgrade line,
-	// strict: demote to throttle.
+	// strict: downgrade to throttle.
 	clock.Advance(time.Second)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.throttle" {
@@ -310,7 +310,7 @@ func TestE2EDynamicDowngradeMarginGuardsTheBoundary(t *testing.T) {
 	}
 	r := doc.Reports[0]
 	if r.Reason != "bandage.throttle" || r.UpdatedAt != "2025-10-17T18:01:10Z" {
-		t.Errorf("report = %+v, want the demoted stance frozen at the downgrade write (no boundary flap)", r)
+		t.Errorf("report = %+v, want the downgraded stance frozen at the downgrade write (no boundary flap)", r)
 	}
 	checkSample(t, r.Sample, sampleEntry{
 		Time: "2025-10-17T18:00:00Z", RemoteAddr: "203.0.113.7", Method: "GET",
@@ -344,16 +344,16 @@ func TestE2EDynamicDowngradeMarginGuardsTheBoundary(t *testing.T) {
 	})
 }
 
-// demote drives one downgrade at the daemon seam: the climb overflows
+// downgrade drives one Downgrade at the daemon seam: the climb overflows
 // both rungs of downgradeLadderRules, then the decay to the ban
-// stance's line demotes the report at the next document.
-func demote(t *testing.T, clock *testClock, d *testDaemon) {
+// stance's line downgrades the report at the next document.
+func downgrade(t *testing.T, clock *testClock, d *testDaemon) {
 	t.Helper()
 	sendAt(d, "1760724000", "203.0.113.7", "/big", 200)
 	d.waitProcessed(t, 1)
 	clock.Advance(50 * time.Second) // 18:00:50: value 150 - the ban line
 	if doc := d.getReports(t, nil); len(doc.Reports) != 1 || doc.Reports[0].Reason != "bandage.throttle" {
-		t.Fatalf("reports at 150 = %+v, want the demoted throttle stance", doc.Reports)
+		t.Fatalf("reports at 150 = %+v, want the downgraded throttle stance", doc.Reports)
 	}
 }
 
@@ -365,18 +365,18 @@ func TestE2EDowngradeLoggedAtDebugLevel(t *testing.T) {
 	t.Run("record", func(t *testing.T) {
 		clock := newTestClock(mustTime(t, wallBase))
 		d := startTestDaemon(t, clock, "unixgram", ":memory:", downgradeLadderRules)
-		demote(t, clock, d)
+		downgrade(t, clock, d)
 
 		downgrades := d.logs.withMessage("report downgraded")
 		if len(downgrades) != 1 {
 			t.Fatalf("downgrade logs = %v, want 1 (logged per act)", downgrades)
 		}
 		if rec := downgrades[0]; rec.Level != zerolog.DebugLevel {
-			t.Errorf("downgrade level = %v, want debug (demote is steady state)", rec.Level)
+			t.Errorf("downgrade level = %v, want debug (a Downgrade is steady state)", rec.Level)
 		}
 	})
 
-	// A configured level shows demote acts at debug and silences them
+	// A configured level shows downgrade acts at debug and silences them
 	// at info: they appear only at debug.
 	for _, tt := range []struct {
 		level domain.Level
@@ -389,7 +389,7 @@ func TestE2EDowngradeLoggedAtDebugLevel(t *testing.T) {
 			clock := newTestClock(mustTime(t, wallBase))
 			buf := &syncBuffer{}
 			d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", downgradeLadderRules, nil, WithLogger(NewLogger(buf, tt.level)))
-			demote(t, clock, d)
+			downgrade(t, clock, d)
 
 			line := ""
 			for _, l := range strings.Split(buf.String(), "\n") {
@@ -399,7 +399,7 @@ func TestE2EDowngradeLoggedAtDebugLevel(t *testing.T) {
 				}
 			}
 			if (line != "") != tt.want {
-				t.Errorf("demote lines at %s level: present = %v, want %v:\n%s", tt.level, line != "", tt.want, buf.String())
+				t.Errorf("downgrade lines at %s level: present = %v, want %v:\n%s", tt.level, line != "", tt.want, buf.String())
 			}
 		})
 	}
@@ -436,7 +436,7 @@ func TestE2EDynamicDowngradeOntoFixedRungStampsTheTTL(t *testing.T) {
 		t.Fatalf("reports = %+v, want the dynamic ban stance", doc.Reports)
 	}
 
-	// 18:01:10: value 130 - the ban stance's widened line: demote onto
+	// 18:01:10: value 130 - the ban stance's widened line: downgrade onto
 	// the fixed throttle rung, whose 1h ttl runs from this write.
 	clock.Advance(70 * time.Second)
 	doc := d.getReports(t, nil)

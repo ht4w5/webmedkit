@@ -29,6 +29,8 @@ behavior.
 - [x] No stale references to volume methods anywhere in docs,
       glossary, or config examples.
 
+## Comments
+
 Implemented on branch `ticket/06-adr-and-docs-consistency` (lifecycle
 ADR 0031 and the amendments to ADR 0002/0008/0013 in `f1d956b`,
 glossary in `6dc1c65`, rules/report docs in `6eb1a2d`), targeting

@@ -88,6 +88,10 @@ type actionDescriber struct {
 	prefix string // the effective reason prefix: the namespace of the report reason (ADR 0026)
 }
 
+// VisitReport prints both lifecycle slots on every report line -
+// grace=none beside a written ttl is the one-policy-per-action audit,
+// not a missing-slot bug (spec: Load validation additions - the
+// lifecycle of every report action prints).
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
 	fmt.Fprintf(d.b, "report reason=%s ttl=%s grace=%s penalty=%s",
 		domain.NamespacedReason(d.prefix, a.Reason), lifecycleSlot(a.TTL), lifecycleSlot(a.Grace), a.Penalty.Action)

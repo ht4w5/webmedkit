@@ -88,8 +88,11 @@ it when the writing report action declared a `grace` - the widening
 margin is a rules-side setting this document does not carry. There is
 no timer - the death is materialized
 lazily, at document generation (a dead dynamic report is simply absent
-from this document) and at sweep time (when its row goes), and the next
-overflow writes a fresh report at the accumulation's current stance.
+from this document), at sweep time, and at the Trigger write that
+finds the row dead (the death settles before the write) - the dead
+row goes at every act - and the next overflow writes a fresh report at
+the accumulation's current stance, its `created_at` fresh even with no
+document or sweep in between.
 Suppression follows the same aliveness in both modes: while a report is
 alive, Triggers write nothing and the rule's other actions keep
 running.
@@ -134,7 +137,9 @@ overriding the last. The tracker's record is never emptied by a Trigger
 ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)), so
 the reading describes the accumulation as it stands. `created_at` is
 fixed at the row's first insert and survives a fresh write over a
-still-stored row (expired but not yet swept).
+still-stored row (a fixed row expired but not yet swept) - a dynamic
+row a Trigger finds dead goes at the write itself, so the re-flagged
+report is a fresh row.
 
 ### Timestamps
 

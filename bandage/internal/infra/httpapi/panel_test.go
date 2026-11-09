@@ -548,8 +548,8 @@ func TestReviewTableCarriesPprofTableSkin(t *testing.T) {
 }
 
 // The Reports page carries the report review table - rule, target,
-// tracker reading, updated - with its existing affordances: live
-// reports fetched from the machine API's /api/reports, click-to-expand
+// tracker reading, updated, expiry - with its existing affordances:
+// live reports fetched from the machine API's /api/reports, click-to-expand
 // detail rows, and a per-row Delete that deletes exactly the reviewed
 // Report by rule and target via DELETE /api/reports.
 func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
@@ -558,7 +558,7 @@ func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
 	if !strings.Contains(page, `id="report-rows"`) {
 		t.Errorf("GET /reports body lacks the review table's row slot, body:\n%s", page)
 	}
-	for _, want := range []string{"Rule", "Target", "Tracker reading", "Updated", "Delete"} {
+	for _, want := range []string{"Rule", "Target", "Tracker reading", "Updated", "Expiry", "Delete"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("GET /reports body lacks the %q review-table column, body:\n%s", want, page)
 		}
@@ -574,6 +574,27 @@ func TestReportsPageReviewTableWithDeleteAndDetail(t *testing.T) {
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("common.js lacks the review table's %q affordance, body:\n%s", want, js)
+		}
+	}
+}
+
+// Every review row shows its report's expiry beside the updated time -
+// the fixed entry's scheduled death, and the dynamic entry's null
+// expiry rendered as a clear "never" - so the panel shows it, not just
+// the expandable detail's raw JSON (story 29).
+func TestReportsPageRowsShowExpiryWithNeverForDynamicEntries(t *testing.T) {
+	srv := apiTestServer(nil)
+	page := apiRequest(t, srv, http.MethodGet, "/reports").Body.String()
+	if !strings.Contains(page, `<th>Expiry</th>`) {
+		t.Errorf("GET /reports body lacks the review table's Expiry column, body:\n%s", page)
+	}
+	js := apiRequest(t, srv, http.MethodGet, "/common.js").Body.String()
+	for _, want := range []string{
+		"report.expires_at", // the fixed entry's scheduled death renders
+		`"never"`,           // the dynamic entry's null expiry reads as never
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("common.js does not render the report row's expiry via %s, body:\n%s", want, js)
 		}
 	}
 }
