@@ -182,6 +182,23 @@ func deathLine(volume, margin float64) float64 {
 	return volume - margin
 }
 
+// writeInFlight reports whether a write for this key is still in
+// flight. It is the one skip discipline the delete family shares
+// (spec: Trigger suppression): a pair with a write in flight is not
+// the delete's to drop - its write lands after the delete and its
+// report stands, suppressing normally.
+func (e *liveEntry) writeInFlight() bool { return e.inflight != nil }
+
+// closeInflight releases the writers waiting on the entry's in-flight
+// channel. The close is the writer's alone - exactly once, settled or
+// failed - so a waiter can never hang on an orphaned entry; runs under
+// s.mu.
+func (e *liveEntry) closeInflight() {
+	ch := e.inflight
+	e.inflight = nil
+	close(ch)
+}
+
 // settleEntry lands rec's shape on the entry and releases the writers
 // waiting on its in-flight channel; runs under s.mu. The entry's key
 // is the (ns, key) pair's key half - the writing tracker's cache key;
@@ -194,9 +211,7 @@ func settleEntry(e *liveEntry, rec domain.Report) {
 	e.leak = rec.Tracker.Leak
 	_, e.key = rec.WritingKey()
 	e.updatedAt = rec.UpdatedAt
-	ch := e.inflight
-	e.inflight = nil
-	close(ch)
+	e.closeInflight()
 }
 
 // settledRow is the row's identity as the entry settles it - the
@@ -263,9 +278,7 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 				delete(s.live, key)
 			}
 		}
-		ch := e.inflight
-		e.inflight = nil
-		close(ch)
+		e.closeInflight()
 		s.mu.Unlock()
 		return fmt.Errorf("trigger report: %w", err)
 	}
@@ -414,11 +427,7 @@ func (s *Service) downgrade(ctx context.Context, rec domain.Report, st Stance, n
 		if s.live[key] == e && created {
 			delete(s.live, key)
 		}
-		// The channel is the writer's to close - exactly once, settled or
-		// failed - so a waiter can never hang on an orphaned entry.
-		ch := e.inflight
-		e.inflight = nil
-		close(ch)
+		e.closeInflight()
 		s.mu.Unlock()
 		return nil, fmt.Errorf("downgrade report: %w", err)
 	}
@@ -507,9 +516,7 @@ func (s *Service) settleDeath(ctx context.Context, rec domain.Report) (bool, err
 	n, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := e.inflight
-	e.inflight = nil
-	close(ch)
+	e.closeInflight()
 	if err != nil {
 		if s.live[key] == e && created {
 			delete(s.live, key)
@@ -537,7 +544,7 @@ func (s *Service) Delete(ctx context.Context, q Query) (int, error) {
 	}
 	s.mu.Lock()
 	for key, e := range s.live {
-		if e.inflight == nil && q.Matches(key.rule, key.target) {
+		if !e.writeInFlight() && q.Matches(key.rule, key.target) {
 			delete(s.live, key)
 		}
 	}
@@ -576,7 +583,7 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 	}
 	s.mu.Lock()
 	for key, e := range s.live {
-		if e.inflight != nil {
+		if e.writeInFlight() {
 			continue
 		}
 		if e.dynamic {
@@ -604,7 +611,7 @@ func (s *Service) DeleteDynamic(ctx context.Context) (int, error) {
 	}
 	s.mu.Lock()
 	for key, e := range s.live {
-		if e.dynamic && e.inflight == nil {
+		if e.dynamic && !e.writeInFlight() {
 			delete(s.live, key)
 		}
 	}
