@@ -28,12 +28,8 @@ type rawRules struct {
 	Version *int `yaml:"version"`
 	// ReasonPrefix is the optional report-namespace prefix; its node is
 	// validated in buildReasonPrefix.
-	ReasonPrefix yaml.Node `yaml:"reason_prefix"`
-	// Enrichment is the removed top-level enrichment block: its mere
-	// presence is a load error naming the migration to enrich actions
-	// (ADR 0028); the node is kept only to detect that presence.
-	Enrichment yaml.Node  `yaml:"enrichment"`
-	Chains     []rawChain `yaml:"chains"`
+	ReasonPrefix yaml.Node  `yaml:"reason_prefix"`
+	Chains       []rawChain `yaml:"chains"`
 }
 
 type rawChain struct {
@@ -152,9 +148,6 @@ func ParseRules(data []byte) (Rules, error) {
 	if err != nil {
 		return Rules{}, err
 	}
-	if err := rejectRemovedEnrichmentBlock(&raw.Enrichment); err != nil {
-		return Rules{}, err
-	}
 	if len(raw.Chains) == 0 {
 		return Rules{}, errors.New("rules: chains: at least one chain required")
 	}
@@ -199,30 +192,6 @@ func buildReasonPrefix(node *yaml.Node) (string, error) {
 		return "", fmt.Errorf("rules: reason_prefix: %q is not a valid slug (want %s)", node.Value, reasonRe.String())
 	}
 	return node.Value, nil
-}
-
-// rejectRemovedEnrichmentBlock fails load on any presence of the old
-// top-level enrichment block - an empty or null block included - with
-// the pointed error naming the migration to enrich actions (ADR 0028):
-// the block and its filter are gone wholly, with no replacement
-// predicate.
-func rejectRemovedEnrichmentBlock(node *yaml.Node) error {
-	if !keyWritten(node) {
-		return nil
-	}
-	return errors.New("rules: enrichment: removed - write enrich actions in your rules instead (see docs/rules.md)")
-}
-
-// rejectRemovedVolumeMethod fails load on any presence of a removed
-// volume-method block (constant, clamped-linear, inverse-square, step) -
-// an empty block included - with the pointed error naming the removal:
-// replay's volume is a plain scalar in download equivalents (spec:
-// Volume-method removal).
-func rejectRemovedVolumeMethod(id string, node *yaml.Node) error {
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
-	return fmt.Errorf("rules: rule %q: tracker.volume: volume methods removed - write a plain scalar volume (see docs/rules.md)", id)
 }
 
 func buildChain(raw *rawChain, seen map[string]bool) (domain.Chain, error) {
@@ -280,11 +249,6 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	rule.FilterSource = flt
 
 	if raw.Tracker != nil {
-		// Any volume-method block fails load naming the removal (spec:
-		// Volume-method removal), before the kind and ladder checks.
-		if err := rejectRemovedVolumeMethod(id, &raw.Tracker.Volume); err != nil {
-			return domain.Rule{}, err
-		}
 		var (
 			cfg *domain.TrackerConfig
 			err error

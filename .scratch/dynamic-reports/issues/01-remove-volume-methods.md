@@ -37,3 +37,11 @@ unchanged; `escalations[].at: {method: ...}` keeps its existing
 volume-method block).
 Context: spec `../spec.md` (Implementation Decisions - Volume-method
 removal; Further Notes - work order).
+
+Review follow-up (on `integration/dynamic-reports`): the pointed
+removed-syntax checks are gone - `rejectRemovedVolumeMethod`, and the
+same-class `rejectRemovedEnrichmentBlock`, both deleted (no checks for
+removed rule syntax). A volume-method block still fails load, through
+the ordinary quantity validation (a mapping is not a quantity); the
+checklist's "error naming the removal" records the original delivery,
+amended at review.

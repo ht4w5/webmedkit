@@ -59,3 +59,8 @@ Context: spec `../spec.md` (Implementation/Testing Decisions), ADR
 0028, GLOSSARY (Sampling rule).
 
 ## Comments
+Review follow-up (dynamic-reports review): the pointed migration check
+for the top-level `enrichment` block is gone (no checks for removed
+rule syntax); the strict decoder refuses the unknown key, so the old
+shape still fails load. Checklist line 2's "pointed migration error"
+records the original delivery, amended at review.

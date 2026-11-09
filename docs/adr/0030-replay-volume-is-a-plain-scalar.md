@@ -10,14 +10,15 @@ every overflow and lifecycle decision reads - varying per event. The
 methods and their computation seam are gone: replay's `volume` is a
 plain scalar in download equivalents and the reading's volume is
 constant per rule. A volume-method block anywhere in a rules file
-fails load with an error naming the removal - a breaking rules-format
-change, accepted pre-release. The ladder `at` quantity language is
-unchanged.
+fails load through the ordinary quantity validation (a mapping is not
+a quantity) - no dedicated check is kept for removed syntax - a
+breaking rules-format change, accepted pre-release. The ladder `at`
+quantity language is unchanged.
 
 Considered: keeping the blocks with a deprecation path (warn and fall
 back to the scalar), and keeping `constant` as a block spelling for
-compatibility. Rejected: the format is pre-release, so a pointed
-`bandage -t` error migrates every rules file in one step, and a
+compatibility. Rejected: the format is pre-release, so a
+`bandage -t` load failure migrates every rules file in one step, and a
 half-supported method block is worse than its absence - the plain
 scalar already is the constant method.
 

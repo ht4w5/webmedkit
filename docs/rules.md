@@ -591,9 +591,7 @@ without the response-size fields - replay is blind and the event adds
 nothing to the tracker.
 
 Replay's `volume` is a plain scalar in those download equivalents
-(`2` means two full downloads of the path, whatever its size): the
-volume methods are removed, and a volume-method block fails load
-naming the removal
+(`2` means two full downloads of the path, whatever its size)
 ([ADR 0030](adr/0030-replay-volume-is-a-plain-scalar.md)).
 
 The shipped ladder's `bandage -t` output shows every rung with its

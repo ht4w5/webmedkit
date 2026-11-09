@@ -1940,53 +1940,6 @@ chains:
 	}
 }
 
-// wantVolumeMethodRemovedErr is the pinned removal-error substring: any
-// volume-method block - constant, clamped-linear, inverse-square or step -
-// fails load naming the removal; replay's volume is a plain scalar in
-// download equivalents (spec: Volume-method removal).
-const wantVolumeMethodRemovedErr = "tracker.volume: volume methods removed - write a plain scalar volume (see docs/rules.md)"
-
-// TestParseRulesVolumeMethodsRemoved: a volume-method block anywhere in a
-// rules file fails load naming the removal - a breaking rules-format
-// change, accepted pre-release (spec: Volume-method removal).
-func TestParseRulesVolumeMethodsRemoved(t *testing.T) {
-	tests := []struct {
-		name    string
-		tracker string
-		ladder  bool
-	}{
-		{name: "constant block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: constant, value: 5}"},
-		{name: "clamped-linear block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: clamped-linear, intercept: 5, slope: -1, min: 2, max: 5}"},
-		{name: "inverse-square block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: inverse-square, base: 1, pivot: 1GB}"},
-		{name: "step block on replay", tracker: "track: replay\n          leak: 0.1\n          volume: {method: step, threshold: 1GB, volume_low: 2, volume_high: 5}"},
-		{name: "block on rate", tracker: "track: rate\n          leak: 1\n          volume: {method: constant, value: 2}"},
-		{name: "block on bandwidth", tracker: "track: bandwidth\n          leak: 1MB\n          volume: {method: step, threshold: 1GB, volume_low: 1, volume_high: 2}"},
-		{name: "block beside a ladder", tracker: "track: replay\n          leak: 1\n          volume: {method: constant, value: 5}", ladder: true},
-		{name: "empty block", tracker: "track: replay\n          leak: 0.1\n          volume: {}"},
-		{name: "block without a method key", tracker: "track: replay\n          leak: 0.1\n          volume: {value: 2}"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rules := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker:\n          " + tt.tracker + "\n"
-			if tt.ladder {
-				rules += "        escalations:\n          - at: 5\n            actions: [stop]\n          - at: 10\n            actions: [stop]\n"
-			} else {
-				rules += "        actions: [{report: {reason: x, ttl: 1h, penalty: drop}}]"
-			}
-			_, err := ParseRules([]byte(rules))
-			if err == nil {
-				t.Fatalf("ParseRules succeeded, want error containing %q", wantVolumeMethodRemovedErr)
-			}
-			if !strings.Contains(err.Error(), wantVolumeMethodRemovedErr) {
-				t.Errorf("error %q does not contain %q", err, wantVolumeMethodRemovedErr)
-			}
-			if !strings.Contains(err.Error(), `rule "r"`) {
-				t.Errorf("error %q does not name the rule", err)
-			}
-		})
-	}
-}
-
 // TestParseRulesReplayVolumeScalar: replay's volume is a plain scalar in
 // download equivalents - one constant tolerance per rule (spec:
 // Volume-method removal).
