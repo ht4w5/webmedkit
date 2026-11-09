@@ -28,8 +28,9 @@ do not change the document's shape.
 
 ## Report entry
 
-One report entry per (rule, target). `penalty` is the last key of the
-entry, so future additive fields append after it.
+One report entry per (rule, target). `penalty` is the last key a fixed
+entry carries; additive fields append after it (`dynamic` below is
+one), so future additive fields land there too.
 
 | field | type | meaning |
 |---|---|---|
@@ -39,10 +40,11 @@ entry, so future additive fields append after it.
 | `target` | string | the aggregated source prefix the report is about, e.g. `203.0.113.7/32` |
 | `created_at` | string | when the report entry was first written, RFC 3339 UTC |
 | `updated_at` | string | when the report entry was last written; it moves on an override (below) and stays frozen otherwise ([ADR 0013](adr/0013-escalation-ladders-in-place-escalation.md)) |
-| `expires_at` | string | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it |
+| `expires_at` | string or null | when the report dies: `updated_at` plus the `ttl` of the report action that wrote it; `null` on a dynamic entry (below) - no scheduled withdrawal |
 | `tracker` | object | the tracker reading that justified the report (below) |
 | `sample` | object | the event that justified the report's current stance (below) |
 | `penalty` | object | the advisory enforcement stance (below); present on every canonical report entry |
+| `dynamic` | boolean | `true` exactly on a dynamic entry (below); absent on a fixed one |
 
 The `tracker` reading:
 
@@ -51,7 +53,7 @@ The `tracker` reading:
 | `track` | string | tracker kind: `rate`, `bandwidth`, or `replay`; empty `""` and a zeroed reading when the rule is tracker-less |
 | `value` | number | the accumulated quantity that overflowed `volume` (requests, response-payload bytes, or download equivalents - the tracker kind's quantity) |
 | `leak` | number | the per-second decay applied to `value` |
-| `volume` | number | the overflow threshold `value` exceeded |
+| `volume` | number | the overflow threshold `value` exceeded; also the death line of a dynamic entry (below) |
 
 The `sample` is the whole event that justified the report's current
 stance - never a curated subset of its fields. Absent observations
@@ -73,6 +75,20 @@ read empty.
 | `size_bytes` | number | the estimated total size of `path` in bytes; `0` when unknown |
 
 ### Lifecycle
+
+A report action with a `ttl` writes a **fixed** report; the paragraphs
+below describe it. A report action without a `ttl` writes a **dynamic**
+report - the entry carries `"dynamic": true` and `"expires_at": null`.
+Its life is bound to the tracker value that justified it: the report is
+alive while that value is strictly above the `volume` recorded in its
+`tracker` reading, and it dies at **Underflow**, the moment the value
+decays to the line. There is no timer - the death is materialized
+lazily, at document generation (a dead dynamic report is simply absent
+from this document) and at sweep time (when its row goes), and the next
+overflow writes a fresh report at the accumulation's current stance.
+Suppression follows the same aliveness in both modes: while a report is
+alive, Triggers write nothing and the rule's other actions keep
+running.
 
 One report lives per (rule, target). A Trigger writes it when no report
 for the pair is alive. While one is alive, a Trigger at or below the
@@ -104,7 +120,8 @@ still-stored row (expired but not yet swept).
 Every timestamp in the document is an RFC 3339 UTC string (a `Z`
 suffix), at second precision: sub-second components are truncated, not
 rounded. `generated_at` is the request time; `created_at`, `updated_at`
-and `expires_at` are wall-clock write times.
+and `expires_at` are wall-clock write times - except a dynamic entry's
+`expires_at`, which is `null`, not a timestamp.
 
 ### The reason
 

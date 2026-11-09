@@ -16,7 +16,8 @@ import (
 type Query struct {
 	Rule   string
 	Target string
-	// Now bounds expiry: rows with expires_at <= Now are never returned.
+	// Now bounds expiry: fixed rows with expires_at <= Now are never
+	// returned (dynamic rows are bounded by their tracker value).
 	Now time.Time
 }
 
@@ -33,19 +34,38 @@ type Repository interface {
 	// Upsert inserts or overwrites the report for (rule, target); created_at
 	// stays fixed at the row's first insert.
 	Upsert(ctx context.Context, rec domain.Report) error
-	// List returns matching, unexpired reports sorted by created_at descending.
+	// List returns matching, live reports sorted by created_at descending:
+	// unexpired fixed reports plus every dynamic report (spec: Persistence).
 	List(ctx context.Context, q Query) ([]domain.Report, error)
 	// Delete removes reports matching the query and returns the deleted row count.
 	// Rule or Target must be set (ErrUnfiltered otherwise); rows match regardless of expiry.
 	Delete(ctx context.Context, q Query) (int, error)
-	// DeleteExpired deletes rows whose expires_at has passed and returns the number of deleted rows.
+	// DeleteExpired deletes fixed rows whose expires_at has passed and
+	// returns the number of deleted rows; dynamic rows die by value,
+	// never by time (spec: Persistence).
 	DeleteExpired(ctx context.Context, now time.Time) (int, error)
 }
+
+// TrackerLookup reads tracker state: the liveness seam dynamic reports
+// die against (spec: Dynamic report liveness). Absent and expired
+// records read as the zero record - no accumulation, dead.
+type TrackerLookup interface {
+	Get(ctx context.Context, ns, key string) domain.Record
+}
+
+// NopTrackerLookup reads no tracker state: every record reads empty.
+// It is the TrackerLookup for callers with no dynamic reports (fixed
+// reports never consult it), passed explicitly - nothing silently
+// substitutes for a missing dependency.
+type NopTrackerLookup struct{}
+
+func (NopTrackerLookup) Get(context.Context, string, string) domain.Record { return domain.Record{} }
 
 // Service is the one report lifecycle module: Trigger upserts one report per (rule, target)
 // and escalates it in place - only a strictly higher ladder rung overrides a live report; every other Trigger writes nothing (ADR 0013).
 type Service struct {
-	repo Repository
+	repo     Repository
+	trackers TrackerLookup
 
 	mu   sync.Mutex
 	live map[reportKey]*liveEntry
@@ -57,18 +77,36 @@ type reportKey struct {
 	target string
 }
 
-// liveEntry is one (rule, target)'s suppression state: settled expiry decides
-// aliveness at Trigger time; volume is the recorded threshold an override must stand strictly above.
+// liveEntry is one (rule, target)'s suppression state. Aliveness is
+// mode-aware (spec: Trigger suppression): fixed entries die at their
+// settled expiry, dynamic entries when the tracker record behind them
+// underflows the recorded volume - the threshold an override must
+// stand strictly above either way.
 type liveEntry struct {
-	expiresAt time.Time
-	volume    float64
+	dynamic   bool
+	expiresAt time.Time // fixed entries: the settled expiry
+	volume    float64   // recorded threshold an override must stand strictly above
+	leak      float64   // dynamic entries: the reading's decay rate
+	key       string    // dynamic entries: the writing tracker key (ns is the rule)
 	// inflight is non-nil only while this key's write is in flight; closed under
 	// s.mu once settled (kept on success, rolled back to the prior entry on failure).
 	inflight chan struct{}
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo, live: make(map[reportKey]*liveEntry)}
+func NewService(repo Repository, trackers TrackerLookup) *Service {
+	return &Service{repo: repo, trackers: trackers, live: make(map[reportKey]*liveEntry)}
+}
+
+// alive reports whether the entry's report is alive at now: fixed
+// entries by their expiry (unchanged), dynamic entries by value-based
+// liveness against the tracker record of their writing key (spec:
+// Trigger suppression).
+func (s *Service) alive(ctx context.Context, rule string, e *liveEntry, now time.Time) bool {
+	if e.dynamic {
+		rec := s.trackers.Get(ctx, rule, e.key)
+		return !rec.Underflow(e.volume, e.leak, now.Unix())
+	}
+	return e.expiresAt.After(now)
 }
 
 // Trigger records the report for (rule, target). A failed write is not a Trigger
@@ -91,7 +129,7 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 				return fmt.Errorf("trigger report: %w", ctx.Err())
 			}
 		}
-		if ok && cur.expiresAt.After(rec.UpdatedAt) && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
+		if ok && s.alive(ctx, key.rule, cur, rec.UpdatedAt) && (!allowOverride || rec.Tracker.Volume <= cur.volume) {
 			s.mu.Unlock()
 			return nil
 		}
@@ -118,8 +156,11 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 		return fmt.Errorf("trigger report: %w", err)
 	}
 	s.mu.Lock()
+	e.dynamic = rec.Dynamic
 	e.expiresAt = rec.ExpiresAt
 	e.volume = rec.Tracker.Volume
+	e.leak = rec.Tracker.Leak
+	e.key = writingKey(rec)
 	ch := e.inflight
 	e.inflight = nil
 	close(ch)
@@ -127,8 +168,17 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 	return nil
 }
 
+// writingKey derives the tracker-cache key of the report's reading.
+func writingKey(rec domain.Report) string {
+	_, key := rec.WritingKey()
+	return key
+}
+
 // Rebuild derives the live-report set from the report table at now and
-// supplants the set, keeping in-flight entries; runs under s.mu (no interleaving).
+// supplants the set, keeping in-flight entries; runs under s.mu (no
+// interleaving). Only fixed rows seed the set: a dynamic report cannot
+// justify suppression across a restart, where the volatile tracker
+// state behind it starts empty (spec: Startup sweep).
 func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,6 +188,9 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 	}
 	live := make(map[reportKey]*liveEntry, len(rows))
 	for _, rec := range rows {
+		if rec.Dynamic {
+			continue
+		}
 		live[reportKey{rule: rec.Rule, target: rec.Target}] = &liveEntry{expiresAt: rec.ExpiresAt, volume: rec.Tracker.Volume}
 	}
 	for key, e := range s.live {
@@ -149,9 +202,37 @@ func (s *Service) Rebuild(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// List returns matching, unexpired reports (Repository.List).
+// List returns matching, alive reports (Repository.List). A dynamic
+// report whose tracker value has underflowed is dead at document
+// generation: it is never served, and its live-set entry dies with it,
+// so the next overflow writes (spec: Dynamic report liveness).
 func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
-	return s.repo.List(ctx, q)
+	rows, err := s.repo.List(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Report, 0, len(rows))
+	var dead []reportKey
+	for _, rec := range rows {
+		if rec.Dynamic {
+			ns, key := rec.WritingKey()
+			if s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume, rec.Tracker.Leak, q.Now.Unix()) {
+				dead = append(dead, reportKey{rule: rec.Rule, target: rec.Target})
+				continue
+			}
+		}
+		out = append(out, rec)
+	}
+	if len(dead) > 0 {
+		s.mu.Lock()
+		for _, key := range dead {
+			if e := s.live[key]; e != nil && e.inflight == nil {
+				delete(s.live, key)
+			}
+		}
+		s.mu.Unlock()
+	}
+	return out, nil
 }
 
 // Delete removes reports matching the query and returns the number of deleted
@@ -171,18 +252,48 @@ func (s *Service) Delete(ctx context.Context, q Query) (int, error) {
 	return n, nil
 }
 
-// DeleteExpired deletes rows whose expires_at has passed and returns the number
-// of deleted rows (Repository.DeleteExpired). Swept reports leave the live set.
+// DeleteExpired deletes the reports whose life has ended at now and
+// returns the number of deleted rows: fixed rows past their expiry
+// (Repository.DeleteExpired) and dynamic rows whose tracker value has
+// underflowed - the lazy death materialized at sweep time (spec:
+// Dynamic report liveness). Swept reports leave the live set.
 func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error) {
 	n, err := s.repo.DeleteExpired(ctx, now)
 	if err != nil {
 		return n, err
 	}
+	rows, err := s.repo.List(ctx, Query{Now: now})
+	if err != nil {
+		return n, err
+	}
+	for _, rec := range rows {
+		if !rec.Dynamic {
+			continue
+		}
+		ns, key := rec.WritingKey()
+		if !s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume, rec.Tracker.Leak, now.Unix()) {
+			continue
+		}
+		m, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
+		if err != nil {
+			return n, err
+		}
+		n += m
+	}
 	s.mu.Lock()
 	for key, e := range s.live {
-		if !e.expiresAt.After(now) {
-			delete(s.live, key)
+		if e.inflight != nil {
+			continue
 		}
+		if e.dynamic {
+			rec := s.trackers.Get(ctx, key.rule, e.key)
+			if !rec.Underflow(e.volume, e.leak, now.Unix()) {
+				continue
+			}
+		} else if e.expiresAt.After(now) {
+			continue
+		}
+		delete(s.live, key)
 	}
 	s.mu.Unlock()
 	return n, nil

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -173,7 +174,7 @@ func TestTargetOnlyQueriesDoNotFullScan(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"list", `SELECT rule, target, created_at, updated_at, expires_at, body FROM reports WHERE expires_at > ? AND target = ?`, []any{0, ""}},
+		{"list", `SELECT rule, target, created_at, updated_at, expires_at, body FROM reports WHERE (expires_at > ? OR dynamic = 1) AND target = ?`, []any{0, ""}},
 		{"delete", `DELETE FROM reports WHERE target = ?`, []any{""}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -610,5 +611,192 @@ func TestUpsertPreservesCreatedAtOnUpdate(t *testing.T) {
 	}
 	if p := got[0].Penalty; p == nil || p.Action != domain.PenaltyDrop {
 		t.Errorf("penalty = %+v, want the update's drop", got[0].Penalty)
+	}
+}
+
+// --- dynamic reports (spec: Persistence) ---
+
+// dynamicReport builds a dynamic report over base: no scheduled expiry
+// (the 0 sentinel), the flag carried in the body.
+func dynamicReport(base time.Time) domain.Report {
+	return domain.Report{
+		Rule: "dyn", Chain: "c", Reason: "why", Target: "203.0.113.7/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: time.Time{}, Dynamic: true,
+		Tracker: domain.TrackerReading{Track: "bandwidth", Value: 11000, Leak: 1000, Volume: 10000},
+	}
+}
+
+// TestDynamicRowsServeRegardlessOfExpiry: a dynamic row stores the 0
+// sentinel in expires_at and the flag in its body, and the live-rows
+// query serves it at any clock while an expired fixed row never serves.
+func TestDynamicRowsServeRegardlessOfExpiry(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	dyn := dynamicReport(base)
+	fixed := domain.Report{
+		Rule: "fix", Chain: "c", Reason: "why", Target: "203.0.113.8/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+	}
+	for _, rec := range []domain.Report{dyn, fixed} {
+		if err := repo.Upsert(ctx, rec); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	// Well past the fixed row's expiry only the dynamic row serves,
+	// carrying its flag and a zero (document-null) expiry.
+	got, err := repo.List(ctx, report.Query{Now: base.Add(24 * time.Hour)})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want only the dynamic row", got)
+	}
+	rec := got[0]
+	if !rec.Dynamic {
+		t.Errorf("dynamic = false, want the flag round-tripped")
+	}
+	if !rec.ExpiresAt.IsZero() {
+		t.Errorf("expires_at = %v, want zero (the sentinel reads back absent)", rec.ExpiresAt)
+	}
+	if rec.Tracker.Value != 11000 {
+		t.Errorf("tracker = %+v, want the stored reading", rec.Tracker)
+	}
+
+	// The sentinel is a column value, the flag is in the body.
+	var expiresNS int64
+	if err := repo.read.QueryRow(`SELECT expires_at FROM reports WHERE rule = ?`, dyn.Rule).Scan(&expiresNS); err != nil {
+		t.Fatalf("read expires_at: %v", err)
+	}
+	if expiresNS != 0 {
+		t.Errorf("expires_at column = %d, want the 0 sentinel", expiresNS)
+	}
+	var rawBody string
+	if err := repo.read.QueryRow(`SELECT body FROM reports WHERE rule = ?`, dyn.Rule).Scan(&rawBody); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(rawBody, `"dynamic":true`) {
+		t.Errorf("body = %s, want the dynamic flag persisted", rawBody)
+	}
+}
+
+// TestDeleteExpiredKeepsDynamicRows: the expiry sweep deletes expired
+// fixed rows only - a dynamic row's 0 sentinel must never be eaten.
+func TestDeleteExpiredKeepsDynamicRows(t *testing.T) {
+	repo := openTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+	dyn := dynamicReport(base)
+	expired := domain.Report{
+		Rule: "fix", Chain: "c", Reason: "why", Target: "203.0.113.8/32",
+		CreatedAt: base, UpdatedAt: base, ExpiresAt: base.Add(time.Hour),
+	}
+	for _, rec := range []domain.Report{dyn, expired} {
+		if err := repo.Upsert(ctx, rec); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	n, err := repo.DeleteExpired(ctx, base.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteExpired: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("DeleteExpired = %d, want 1 (the expired fixed row only)", n)
+	}
+	got, err := repo.List(ctx, report.Query{Now: base.Add(24 * time.Hour)})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || !got[0].Dynamic {
+		t.Errorf("rows = %+v, want the dynamic row kept", got)
+	}
+}
+
+// TestOldFormatDatabaseOpensAndServesAfterUpgrade: a pre-upgrade database
+// (no dynamic column) opens with the column added by one guarded ALTER at
+// open; its rows are fixed reports by construction and keep serving, and
+// dynamic rows work over the upgraded table.
+func TestOldFormatDatabaseOpensAndServesAfterUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports.db")
+	ctx := context.Background()
+	base := time.Date(2025, 10, 17, 18, 0, 0, 0, time.UTC)
+
+	// The pre-upgrade schema and rows, hand-written: no current code
+	// path emits the old shape (spec: Persistence, "old rows are fixed
+	// reports by construction").
+	const oldSchema = `
+CREATE TABLE reports (
+	rule       TEXT    NOT NULL,
+	target     TEXT    NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	body       TEXT    NOT NULL,
+	PRIMARY KEY (rule, target)
+);
+CREATE INDEX idx_reports_rule ON reports (rule);
+CREATE INDEX idx_reports_target ON reports (target);
+CREATE INDEX idx_reports_expires_at ON reports (expires_at);`
+	const oldBody = `{"chain":"c","reason":"why","tracker":{"track":"bandwidth","value":11000,"leak":1000,"volume":10000},"sample":{"time":"2025-10-17T18:00:00Z","path":"/releases/24.04.iso","status":200},"penalty":{"action":"limit-bandwidth","rate":1000000}}`
+	db, err := sql.Open(driverName, path)
+	if err != nil {
+		t.Fatalf("open old-format database: %v", err)
+	}
+	if _, err := db.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	for _, row := range []struct {
+		rule, target string
+		expiresNS    int64
+	}{
+		{"r-live", "203.0.113.7/32", base.Add(time.Hour).UnixNano()},
+		{"r-gone", "203.0.113.8/32", base.Add(-time.Hour).UnixNano()},
+	} {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body) VALUES (?, ?, ?, ?, ?, ?)`,
+			row.rule, row.target, base.UnixNano(), base.UnixNano(), row.expiresNS, oldBody,
+		); err != nil {
+			t.Fatalf("insert old-format row: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old-format database: %v", err)
+	}
+
+	repo, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open over the old-format database: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
+
+	// The old rows serve as fixed reports: the default is exact.
+	got, err := repo.List(ctx, report.Query{Now: base})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Rule != "r-live" || got[0].Dynamic {
+		t.Errorf("rows = %+v, want the one live old-format row as a fixed report", got)
+	}
+
+	// New-format rows work over the upgraded table.
+	dyn := dynamicReport(base)
+	if err := repo.Upsert(ctx, dyn); err != nil {
+		t.Fatalf("Upsert over the upgraded table: %v", err)
+	}
+	n, err := repo.DeleteExpired(ctx, base.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteExpired: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("DeleteExpired = %d, want 2 (both old-format rows expired by then; the dynamic row is never eaten)", n)
+	}
+	got, err = repo.List(ctx, report.Query{Now: base.Add(24 * time.Hour)})
+	if err != nil {
+		t.Fatalf("List after upgrade: %v", err)
+	}
+	if len(got) != 1 || !got[0].Dynamic {
+		t.Errorf("rows = %+v, want the dynamic row over the upgraded table", got)
 	}
 }

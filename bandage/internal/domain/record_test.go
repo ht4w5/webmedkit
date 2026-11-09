@@ -105,3 +105,59 @@ func TestRecordAccumulate(t *testing.T) {
 		})
 	}
 }
+
+// TestRecordValueAt: the record's value at a later instant decays by
+// leak per second without mutating the record - the Accumulate math
+// between events (spec: Dynamic report liveness).
+func TestRecordValueAt(t *testing.T) {
+	rec := Record{Value: 11000, LastUpdate: 100}
+	for _, tt := range []struct {
+		name string
+		leak float64
+		at   int64
+		want float64
+	}{
+		{"no elapsed time holds the value", 1000, 100, 11000},
+		{"one second decays by one leak", 1000, 101, 10000},
+		{"linear in the gap", 1000, 106, 5000},
+		{"floored at zero", 1000, 112, 0},
+		{"an earlier instant does not undecay", 1000, 90, 11000},
+		{"zero leak never decays", 0, 100000, 11000},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rec.ValueAt(tt.leak, tt.at); got != tt.want {
+				t.Errorf("ValueAt(%v, %d) = %v, want %v", tt.leak, tt.at, got, tt.want)
+			}
+		})
+	}
+	if rec.Value != 11000 || rec.LastUpdate != 100 {
+		t.Errorf("record mutated: %+v", rec)
+	}
+	if got := (Record{}).ValueAt(1000, 100); got != 0 {
+		t.Errorf("empty record ValueAt = %v, want 0", got)
+	}
+}
+
+// TestRecordUnderflow: the record has underflowed once its value decays
+// to volume - dead at value <= volume, the strict mirror of Overflow
+// (spec: Dynamic report liveness).
+func TestRecordUnderflow(t *testing.T) {
+	rec := Record{Value: 11000, LastUpdate: 100}
+	for _, tt := range []struct {
+		name string
+		vol  float64
+		at   int64
+		want bool
+	}{
+		{"strictly above is alive", 10000, 100, false},
+		{"decayed to the volume underflows", 10000, 101, true},
+		{"below the volume underflows", 10000, 102, true},
+		{"a higher line underflows sooner", 11000, 100, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rec.Underflow(tt.vol, 1000, tt.at); got != tt.want {
+				t.Errorf("Underflow(%v, 1000, %d) = %v, want %v", tt.vol, tt.at, got, tt.want)
+			}
+		})
+	}
+}

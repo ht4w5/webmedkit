@@ -88,7 +88,13 @@ type actionDescriber struct {
 }
 
 func (d actionDescriber) VisitReport(a *domain.ReportAction) error {
-	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.prefix, a.Reason), a.TTL, a.Penalty.Action)
+	ttl := a.TTL.String()
+	if a.TTL == 0 {
+		// The lifecycle of every report action prints (spec: Two
+		// lifecycle modes): a dynamic report has no ttl.
+		ttl = "none"
+	}
+	fmt.Fprintf(d.b, "report reason=%s ttl=%s penalty=%s", domain.NamespacedReason(d.prefix, a.Reason), ttl, a.Penalty.Action)
 	if a.Penalty.Rate != nil {
 		fmt.Fprintf(d.b, " rate=%d", *a.Penalty.Rate)
 	}

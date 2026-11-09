@@ -78,9 +78,12 @@ type rawTargetPrefix struct {
 	IPv6 *int `yaml:"ipv6"`
 }
 
+// rawReportAction is the report action's block; ttl is a yaml.Node so
+// presence is validated - absent ttl means a dynamic report (spec: Two
+// lifecycle modes), a written key must carry a duration.
 type rawReportAction struct {
 	Reason  string    `yaml:"reason"`
-	TTL     string    `yaml:"ttl"`
+	TTL     yaml.Node `yaml:"ttl"`
 	Penalty string    `yaml:"penalty"`
 	Rate    yaml.Node `yaml:"rate"`
 }
@@ -321,7 +324,33 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 		// tracker-less writes.
 		rule.Actions = append(rule.Actions, action)
 	}
+	if err := validateReportLifecycles(rule); err != nil {
+		return domain.Rule{}, err
+	}
 	return rule, nil
+}
+
+// validateReportLifecycles refuses a report action without ttl wherever
+// no tracker value can ever kill it: a tracker-less rule or a zero-leak
+// tracker can never underflow, so the report would be unbounded (spec:
+// Load validation additions). Errors name the rule and the action's
+// reason.
+func validateReportLifecycles(rule domain.Rule) error {
+	for _, actions := range rule.ActionLists() {
+		for _, action := range actions {
+			a := action.Report
+			if a == nil || a.TTL != 0 {
+				continue
+			}
+			switch {
+			case rule.Tracker == nil:
+				return fmt.Errorf("rules: rule %q: action report %q: report.ttl: required - a dynamic report lives and dies with its tracker value, and this rule has no tracker", rule.ID, a.Reason)
+			case rule.Tracker.Leak <= 0:
+				return fmt.Errorf("rules: rule %q: action report %q: report.ttl: required - a dynamic report lives and dies with its tracker value, and a zero-leak tracker can never underflow", rule.ID, a.Reason)
+			}
+		}
+	}
+	return nil
 }
 
 // parseCounter parses the rule's optional counter flag: true enables
@@ -579,7 +608,10 @@ func parseEnrichCounter(id string, node *yaml.Node) (bool, error) {
 	return on, nil
 }
 
-// parseReportAction parses `- report: {reason, ttl, penalty, rate}`.
+// parseReportAction parses `- report: {reason, ttl, penalty, rate}`:
+// ttl is optional - an absent ttl declares a dynamic report (spec: Two
+// lifecycle modes), whose liveness validateReportLifecycles checks
+// against the rule's tracker.
 func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)
@@ -602,9 +634,13 @@ func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: reason: %q is not a valid slug (want %s)",
 			id, raw.Reason, reasonRe.String())
 	}
-	ttl, err := parseTTL(raw.TTL)
-	if err != nil {
-		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.ttl: %w", id, err)
+	var ttl time.Duration
+	if keyWritten(&raw.TTL) {
+		var err error
+		ttl, err = parseTTL(raw.TTL.Value)
+		if err != nil {
+			return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.ttl: %w", id, err)
+		}
 	}
 	penalty, err := parsePenalty(id, &raw, hasRate)
 	if err != nil {
