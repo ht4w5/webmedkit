@@ -49,6 +49,15 @@ type ReportAction struct {
 	// value stays above its recorded volume (spec: Two lifecycle
 	// modes). Load accepts it only where tracker liveness can kill it.
 	TTL time.Duration
+	// Grace is the authored grace on a dynamic report: load refuses it
+	// beside ttl (spec: Report action grammar). Zero means no grace:
+	// the strict death line at the recorded volume.
+	Grace time.Duration
+	// Margin is the compiled grace - leak x grace in the tracker's
+	// quantity - set at rule build, zero when grace is absent. The
+	// death line is the recorded volume minus this margin (spec:
+	// Report action grammar).
+	Margin float64
 	// Penalty is the advisory enforcement stance the report recommends
 	// for the target (ADR 0010).
 	Penalty Penalty

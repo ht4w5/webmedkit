@@ -47,6 +47,21 @@ chains:
             actions: [{report: {reason: ban, penalty: drop}}]
 `
 
+// dynamicGraceRules is the single-volume dynamic form with grace: the
+// report's death line widens from volume 10000 to volume - leak x
+// grace = 10000 - 1000*3s = 7000.
+const dynamicGraceRules = `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: egress
+        tracker: {track: bandwidth, leak: 1000, volume: 10000}
+        actions:
+          - report: {reason: egress-overflow, grace: 3s, penalty: limit-bandwidth, rate: 1MB}
+          - log: "debug,MARK:OVERFLOW"
+`
+
 // sendAt sends one 6000-byte line at the wall-aligned unix second t.
 func sendAt(d *testDaemon, t, client, path string, sent int64) {
 	d.send(nginxLine(t, client, "GET", path, 200, sent))
@@ -118,6 +133,35 @@ func TestE2EDynamicReportDiesAtTheStrictBoundary(t *testing.T) {
 	clock.Advance(time.Second)
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
 		t.Fatalf("reports at 10000 = %+v, want none (dead at value <= volume)", doc.Reports)
+	}
+}
+
+// TestE2EDynamicGraceMarginWidensTheDeathLine: grace widens the death
+// line to volume - leak x grace, so a brief pause below the volume no
+// longer flaps the report away - the report survives in the margin
+// band and dies only at the widened line (spec: Report action
+// grammar, Dynamic report liveness).
+func TestE2EDynamicGraceMarginWidensTheDeathLine(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", dynamicGraceRules)
+
+	sendAt(d, "1760724000", "203.0.113.7", "/releases/24.04.iso", 6000)
+	sendAt(d, "1760724001", "203.0.113.7", "/releases/24.04.iso", 6000)
+	d.waitProcessed(t, 2)
+
+	// 18:00:04: the value decays to 8000 - below the volume (the strict
+	// line would have killed it at 18:00:02), above the widened line
+	// 7000 - the report survives the pause.
+	clock.Advance(4 * time.Second)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 1 {
+		t.Fatalf("reports at 8000 = %+v, want 1 (above volume - leak x grace)", doc.Reports)
+	}
+
+	// 18:00:05: the value decays to exactly 7000 = volume - margin -
+	// dead at the widened line, still strict.
+	clock.Advance(time.Second)
+	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
+		t.Fatalf("reports at 7000 = %+v, want none (dead at value <= volume - margin)", doc.Reports)
 	}
 }
 

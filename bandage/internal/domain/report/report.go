@@ -86,6 +86,7 @@ type liveEntry struct {
 	dynamic   bool
 	expiresAt time.Time // fixed entries: the settled expiry
 	volume    float64   // recorded threshold an override must stand strictly above
+	margin    float64   // the writing action's grace margin: the death line is volume - margin
 	leak      float64   // dynamic entries: the reading's decay rate
 	key       string    // dynamic entries: the writing tracker key (ns is the rule)
 	// inflight is non-nil only while this key's write is in flight; closed under
@@ -104,7 +105,7 @@ func NewService(repo Repository, trackers TrackerLookup) *Service {
 func (s *Service) alive(ctx context.Context, rule string, e *liveEntry, now time.Time) bool {
 	if e.dynamic {
 		rec := s.trackers.Get(ctx, rule, e.key)
-		return !rec.Underflow(e.volume, e.leak, now.Unix())
+		return !rec.Underflow(e.volume-e.margin, e.leak, now.Unix())
 	}
 	return e.expiresAt.After(now)
 }
@@ -159,6 +160,7 @@ func (s *Service) Trigger(ctx context.Context, rec domain.Report, allowOverride 
 	e.dynamic = rec.Dynamic
 	e.expiresAt = rec.ExpiresAt
 	e.volume = rec.Tracker.Volume
+	e.margin = rec.Margin
 	e.leak = rec.Tracker.Leak
 	e.key = writingKey(rec)
 	ch := e.inflight
@@ -216,7 +218,7 @@ func (s *Service) List(ctx context.Context, q Query) ([]domain.Report, error) {
 	for _, rec := range rows {
 		if rec.Dynamic {
 			ns, key := rec.WritingKey()
-			if s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume, rec.Tracker.Leak, q.Now.Unix()) {
+			if s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume-rec.Margin, rec.Tracker.Leak, q.Now.Unix()) {
 				dead = append(dead, reportKey{rule: rec.Rule, target: rec.Target})
 				continue
 			}
@@ -271,7 +273,7 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 			continue
 		}
 		ns, key := rec.WritingKey()
-		if !s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume, rec.Tracker.Leak, now.Unix()) {
+		if !s.trackers.Get(ctx, ns, key).Underflow(rec.Tracker.Volume-rec.Margin, rec.Tracker.Leak, now.Unix()) {
 			continue
 		}
 		m, err := s.repo.Delete(ctx, Query{Rule: rec.Rule, Target: rec.Target})
@@ -287,7 +289,7 @@ func (s *Service) DeleteExpired(ctx context.Context, now time.Time) (int, error)
 		}
 		if e.dynamic {
 			rec := s.trackers.Get(ctx, key.rule, e.key)
-			if !rec.Underflow(e.volume, e.leak, now.Unix()) {
+			if !rec.Underflow(e.volume-e.margin, e.leak, now.Unix()) {
 				continue
 			}
 		} else if e.expiresAt.After(now) {

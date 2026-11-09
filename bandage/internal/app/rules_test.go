@@ -1100,6 +1100,49 @@ chains:
 			wantErr: `rule "r": action report: report.ttl`,
 		},
 		{
+			name: "report grace beside ttl rejected",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: x, ttl: 1h, grace: 30m, penalty: limit-req-rate, rate: 200}}]
+`,
+			wantErr: `rule "r": action report: report.grace: not allowed with report.ttl`,
+		},
+		{
+			name: "rung report grace validated like a rule's",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1}
+        escalations:
+          - at: 5
+            actions: [{report: {reason: x, grace: one hour, penalty: drop}}]
+          - at: 10
+            actions: [stop]
+`,
+			wantErr: `rule "r": action report: report.grace`,
+		},
+		{
+			name: "written empty grace refused as a typo",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: x, grace: "", penalty: limit-req-rate, rate: 200}}]
+`,
+			wantErr: `rule "r": action report: report.grace: required`,
+		},
+		{
 			name: "rung report penalty validated like a rule's",
 			yaml: `
 version: 0
@@ -1264,8 +1307,8 @@ func TestPlanReasonsFollowThePassedBuild(t *testing.T) {
 		t.Fatalf("Test error: %v", err)
 	}
 	for _, want := range []string{
-		"action report reason=bandage-canary.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
-		"action report reason=bandage-canary.api-rate-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
+		"action report reason=bandage-canary.iso-egress-overflow ttl=168h0m0s grace=none penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage-canary.api-rate-overflow ttl=24h0m0s grace=none penalty=limit-req-rate rate=200",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
@@ -1297,7 +1340,7 @@ chains:
 `,
 			want: []string{
 				"reason prefix: bandage-canary",
-				"action report reason=bandage-canary.iso-egress-overflow ttl=1h0m0s penalty=drop",
+				"action report reason=bandage-canary.iso-egress-overflow ttl=1h0m0s grace=none penalty=drop",
 			},
 		},
 		{
@@ -1313,7 +1356,7 @@ chains:
 `,
 			want: []string{
 				"reason prefix: acme-prod",
-				"action report reason=acme-prod.iso-egress-overflow ttl=1h0m0s penalty=drop",
+				"action report reason=acme-prod.iso-egress-overflow ttl=1h0m0s grace=none penalty=drop",
 			},
 		},
 		{
@@ -1394,11 +1437,11 @@ func TestPrintsValidatedPlan(t *testing.T) {
 		"rule sustained-iso-egress",
 		"filter: any",
 		"tracker: bandwidth leak=1000000 volume=100000000000 ttl=27h46m40s",
-		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s grace=none penalty=limit-bandwidth rate=1000000",
 		"chain api",
 		"rule bursty-api",
 		"tracker: rate leak=10 volume=100 ttl=10s",
-		"action report reason=bandage.api-rate-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
+		"action report reason=bandage.api-rate-overflow ttl=24h0m0s grace=none penalty=limit-req-rate rate=200",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
@@ -1425,7 +1468,7 @@ chains:
         filter: any
         actions: [{report: {reason: iso-egress-overflow, ttl: 1h, penalty: drop}}]
 `,
-			want: "action report reason=bandage.iso-egress-overflow ttl=1h0m0s penalty=drop",
+			want: "action report reason=bandage.iso-egress-overflow ttl=1h0m0s grace=none penalty=drop",
 		},
 		{
 			name: "dotted reason code refused quoting the authored value",
@@ -1508,12 +1551,12 @@ func TestShowsActionsInPlan(t *testing.T) {
 		"rule route-downloads",
 		"action log level=debug message=\"ROUTE:\"",
 		"action jump target=download-abuse",
-		"action report reason=bandage.ua-trip ttl=24h0m0s penalty=drop",
+		"action report reason=bandage.ua-trip ttl=24h0m0s grace=none penalty=drop",
 		"action stop",
 		"chain download-abuse",
 		"rule sustained-iso-egress",
 		"action goto target=sink",
-		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s penalty=limit-bandwidth rate=1000000",
+		"action report reason=bandage.iso-egress-overflow ttl=168h0m0s grace=none penalty=limit-bandwidth rate=1000000",
 		"action stop",
 	} {
 		if !strings.Contains(plan, want) {
@@ -2221,8 +2264,8 @@ func TestShowsEscalationRungsInPlan(t *testing.T) {
 	for _, want := range []string{
 		"tracker: bandwidth leak=1000000 ttl=11h6m40s",
 		"rung at=50000000 jump target=inspect",
-		"rung at=5000000000 report reason=bandage.iso-throttle ttl=24h0m0s penalty=limit-bandwidth rate=1000000",
-		`rung at=40000000000 log level=debug message="MARK:TOP", report reason=bandage.iso-ban ttl=168h0m0s penalty=drop`,
+		"rung at=5000000000 report reason=bandage.iso-throttle ttl=24h0m0s grace=none penalty=limit-bandwidth rate=1000000",
+		`rung at=40000000000 log level=debug message="MARK:TOP", report reason=bandage.iso-ban ttl=168h0m0s grace=none penalty=drop`,
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)
@@ -2349,9 +2392,11 @@ chains:
 	}
 }
 
-// TestShowsReportLifecyclesInPlan: the --test plan prints the lifecycle
-// of every report action - the fixed report's ttl, ttl=none for a
-// dynamic one (spec: Load validation additions).
+// TestShowsReportLifecyclesInPlan: the --test plan prints the
+// lifecycle of every report action - the fixed report's ttl,
+// ttl=none for a dynamic one, and grace= beside ttl= on every
+// report line (spec: Load validation additions, Report action
+// grammar).
 func TestShowsReportLifecyclesInPlan(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "bandage.yml")
@@ -2366,6 +2411,9 @@ chains:
       - id: dyn
         tracker: {track: rate, leak: 1, volume: 10}
         actions: [{report: {reason: dyn-overflow, penalty: limit-req-rate, rate: 200}}]
+      - id: graced
+        tracker: {track: rate, leak: 1, volume: 10}
+        actions: [{report: {reason: graced-overflow, grace: 1d, penalty: limit-req-rate, rate: 200}}]
       - id: fixed
         tracker: {track: rate, leak: 1, volume: 10}
         actions: [{report: {reason: fixed-overflow, ttl: 24h, penalty: limit-req-rate, rate: 200}}]
@@ -2386,10 +2434,11 @@ chains:
 		t.Fatalf("Test error: %v", err)
 	}
 	for _, want := range []string{
-		"action report reason=bandage.dyn-overflow ttl=none penalty=limit-req-rate rate=200",
-		"action report reason=bandage.fixed-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
-		"rung at=10000000 report reason=bandage.throttle ttl=none penalty=limit-bandwidth rate=1000000",
-		"rung at=100000000 report reason=bandage.ban ttl=168h0m0s penalty=drop",
+		"action report reason=bandage.dyn-overflow ttl=none grace=none penalty=limit-req-rate rate=200",
+		"action report reason=bandage.graced-overflow ttl=none grace=24h0m0s penalty=limit-req-rate rate=200",
+		"action report reason=bandage.fixed-overflow ttl=24h0m0s grace=none penalty=limit-req-rate rate=200",
+		"rung at=10000000 report reason=bandage.throttle ttl=none grace=none penalty=limit-bandwidth rate=1000000",
+		"rung at=100000000 report reason=bandage.ban ttl=168h0m0s grace=none penalty=drop",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan does not contain %q:\n%s", want, plan)

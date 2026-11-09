@@ -78,12 +78,14 @@ type rawTargetPrefix struct {
 	IPv6 *int `yaml:"ipv6"`
 }
 
-// rawReportAction is the report action's block; ttl is a yaml.Node so
-// presence is validated - absent ttl means a dynamic report (spec: Two
-// lifecycle modes), a written key must carry a duration.
+// rawReportAction is the report action's block; ttl and grace are
+// yaml.Nodes so presence is validated - absent ttl means a dynamic
+// report (spec: Two lifecycle modes), a written key must carry a
+// duration.
 type rawReportAction struct {
 	Reason  string    `yaml:"reason"`
 	TTL     yaml.Node `yaml:"ttl"`
+	Grace   yaml.Node `yaml:"grace"`
 	Penalty string    `yaml:"penalty"`
 	Rate    yaml.Node `yaml:"rate"`
 }
@@ -327,7 +329,22 @@ func buildRule(chainName string, raw *rawRule, seen map[string]bool) (domain.Rul
 	if err := validateReportLifecycles(rule); err != nil {
 		return domain.Rule{}, err
 	}
+	compileGraceMargins(&rule)
 	return rule, nil
+}
+
+// compileGraceMargins compiles every report action's grace to its
+// margin: leak x grace in the tracker's quantity (spec: Report action
+// grammar - at rule build, grace compiles to a margin). The death line
+// is the recorded volume minus this margin.
+func compileGraceMargins(rule *domain.Rule) {
+	for _, actions := range rule.ActionLists() {
+		for _, action := range actions {
+			if a := action.Report; a != nil && a.Grace != 0 {
+				a.Margin = a.Grace.Seconds() * rule.Tracker.Leak
+			}
+		}
+	}
 }
 
 // validateReportLifecycles refuses a report action without ttl wherever
@@ -608,10 +625,12 @@ func parseEnrichCounter(id string, node *yaml.Node) (bool, error) {
 	return on, nil
 }
 
-// parseReportAction parses `- report: {reason, ttl, penalty, rate}`:
-// ttl is optional - an absent ttl declares a dynamic report (spec: Two
-// lifecycle modes), whose liveness validateReportLifecycles checks
-// against the rule's tracker.
+// parseReportAction parses `- report: {reason, ttl, grace, penalty,
+// rate}`: ttl and grace are optional and mutually exclusive - an
+// absent ttl declares a dynamic report (spec: Two lifecycle modes),
+// whose liveness validateReportLifecycles checks against the rule's
+// tracker, and whose grace widens its death line (spec: Report action
+// grammar).
 func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)
@@ -620,7 +639,7 @@ func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	hasRate := false
 	for i := 0; i < len(val.Content); i += 2 {
 		switch key := val.Content[i].Value; key {
-		case "reason", "ttl", "penalty":
+		case "reason", "ttl", "grace", "penalty":
 		case "rate":
 			hasRate = true
 		default:
@@ -637,16 +656,29 @@ func parseReportAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	var ttl time.Duration
 	if keyWritten(&raw.TTL) {
 		var err error
-		ttl, err = parseTTL(raw.TTL.Value)
+		ttl, err = parseDuration(raw.TTL.Value)
 		if err != nil {
 			return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.ttl: %w", id, err)
 		}
+	}
+	var grace time.Duration
+	if keyWritten(&raw.Grace) {
+		var err error
+		grace, err = parseDuration(raw.Grace.Value)
+		if err != nil {
+			return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.grace: %w", id, err)
+		}
+	}
+	if ttl != 0 && grace != 0 {
+		// One lifecycle policy per report action: ttl and grace are
+		// mutually exclusive (spec: Report action grammar).
+		return domain.Action{}, fmt.Errorf("rules: rule %q: action report: report.grace: not allowed with report.ttl", id)
 	}
 	penalty, err := parsePenalty(id, &raw, hasRate)
 	if err != nil {
 		return domain.Action{}, err
 	}
-	return domain.Action{Report: &domain.ReportAction{Reason: raw.Reason, TTL: ttl, Penalty: penalty}}, nil
+	return domain.Action{Report: &domain.ReportAction{Reason: raw.Reason, TTL: ttl, Grace: grace, Penalty: penalty}}, nil
 }
 
 // penaltyWant names the closed penalty vocabulary for error messages,
@@ -747,9 +779,10 @@ func parseLogAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	return domain.Action{Log: &domain.LogAction{Level: level, Message: args[1]}}, nil
 }
 
-// parseTTL parses a report ttl: Go duration strings plus "d" for days
-// (7d, 24h, 30m). It must be positive.
-func parseTTL(s string) (time.Duration, error) {
+// parseDuration parses a report lifecycle duration (ttl, grace): Go
+// duration strings plus "d" for days (7d, 24h, 30m). It must be
+// positive.
+func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, errors.New("required")
 	}
