@@ -65,27 +65,6 @@ func (l *captureLogger) Log(_ domain.Level, _ string, fields map[string]any) {
 	l.records = append(l.records, fields)
 }
 
-// constVolume is a VolumeMethod double: one tolerated volume regardless of
-// size.
-type constVolume float64
-
-func (v constVolume) Volume(float64) float64 { return float64(v) }
-func (v constVolume) String() string         { return "constant" }
-
-// stepVolume is a VolumeMethod double: low below threshold bytes, high
-// from it. The real volume methods have their own tests in track.
-type stepVolume struct {
-	threshold, low, high float64
-}
-
-func (v stepVolume) Volume(size float64) float64 {
-	if size >= v.threshold {
-		return v.high
-	}
-	return v.low
-}
-func (v stepVolume) String() string { return "step" }
-
 // harness assembles a service around one replay rule and exposes the
 // stubs' recorded state.
 type harness struct {
@@ -343,57 +322,54 @@ func TestReplayDecayAndOverflow(t *testing.T) {
 	}
 }
 
-// The volume at trigger time is the volume method's output for that event's
-// estimated file size.
-func TestReplayReadingCarriesVolumeMethodOutput(t *testing.T) {
-	cfg := &domain.TrackerConfig{
-		Kind:         domain.TrackReplay,
-		Leak:         0,
-		VolumeMethod: stepVolume{threshold: 1000, low: 2, high: 5},
-	}
+// The reading's volume is the rule's plain scalar - constant per rule,
+// whatever the event's estimated file size (spec: Volume-method removal).
+func TestReplayReadingVolumeConstantPerRule(t *testing.T) {
+	cfg := &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0, Volume: 2}
 	h := newHarness(t, cfg)
 
-	// A big file tolerates 5 equivalents; the sixth full download overflows.
-	for i := 0; i < 6; i++ {
-		h.evaluate(t, event(int64(100+i), "/big.iso", 2000, 2000))
+	// A small file and a big one hold the same tolerance: the third full
+	// download of each overflows (3 > 2), and both readings carry the
+	// rule's volume.
+	h.evaluate(t, event(100, "/small.iso", 100, 100))
+	h.evaluate(t, event(101, "/small.iso", 100, 100))
+	h.evaluate(t, event(102, "/small.iso", 100, 100))
+	h.evaluate(t, event(103, "/big.iso", 2000, 2000))
+	h.evaluate(t, event(104, "/big.iso", 2000, 2000))
+	h.evaluate(t, event(105, "/big.iso", 2000, 2000))
+	if len(h.sink.upserts) != 2 {
+		t.Fatalf("upserts = %+v, want 2", h.sink.upserts)
 	}
-	if len(h.sink.upserts) != 1 {
-		t.Fatalf("upserts = %+v, want 1", h.sink.upserts)
-	}
-	want := domain.TrackerReading{Track: "replay", Value: 6, Volume: 5}
-	if got := h.sink.upserts[0].Tracker; got != want {
-		t.Errorf("tracker reading = %+v, want %+v", got, want)
+	want := domain.TrackerReading{Track: "replay", Value: 3, Leak: 0, Volume: 2}
+	for i, rec := range h.sink.upserts {
+		if rec.Tracker != want {
+			t.Errorf("reading %d = %+v, want %+v", i, rec.Tracker, want)
+		}
 	}
 }
 
-// The cache-entry TTL is volume/leak of the current volume-method output,
+// The cache-entry TTL is volume/leak of the rule's constant volume,
 // re-derived per event; leak 0 falls back to the default TTL.
 func TestReplayTTLDerivedPerEvent(t *testing.T) {
-	cfg := &domain.TrackerConfig{
-		Kind:         domain.TrackReplay,
-		Leak:         0.5,
-		VolumeMethod: stepVolume{threshold: 1000, low: 2, high: 5},
-	}
+	cfg := &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0.5, Volume: 2}
 	h := newHarness(t, cfg)
 
-	h.evaluate(t, event(100, "/a", 100, 100))   // small: volume 2 -> TTL 2/0.5 = 4s
-	h.evaluate(t, event(101, "/a", 2000, 2000)) // estimate moved big: volume 5 -> TTL 10s
+	// Every event carries the same TTL whatever the estimated size: the
+	// volume is constant per rule (spec: Volume-method removal).
+	h.evaluate(t, event(100, "/a", 100, 100))
+	h.evaluate(t, event(101, "/a", 2000, 2000))
 
 	if len(h.cch.updates) != 2 {
 		t.Fatalf("updates = %+v, want 2", h.cch.updates)
 	}
-	if got := h.cch.updates[0].ttl; got != 4*time.Second {
-		t.Errorf("first TTL = %v, want 4s (volume 2 / leak 0.5)", got)
-	}
-	if got := h.cch.updates[1].ttl; got != 10*time.Second {
-		t.Errorf("second TTL = %v, want 10s (volume 5 / leak 0.5)", got)
+	for i, u := range h.cch.updates {
+		if u.ttl != 4*time.Second {
+			t.Errorf("update %d TTL = %v, want 4s (volume 2 / leak 0.5)", i, u.ttl)
+		}
 	}
 
 	// leak 0: the default TTL.
-	cfg0 := &domain.TrackerConfig{
-		Kind:         domain.TrackReplay,
-		VolumeMethod: constVolume(3),
-	}
+	cfg0 := &domain.TrackerConfig{Kind: domain.TrackReplay, Volume: 3}
 	h0 := newHarness(t, cfg0)
 	h0.evaluate(t, event(100, "/a", 100, 100))
 	if got := h0.cch.updates[0].ttl; got != domain.DefaultTTL {

@@ -18,14 +18,6 @@ const (
 	TrackReplay TrackKind = "replay"
 )
 
-// VolumeMethod computes a tracker's tolerated volume (download
-// equivalents) from the estimated file size; only replay configures one.
-type VolumeMethod interface {
-	Volume(sizeBytes float64) float64
-	// String renders the method for the --test plan.
-	String() string
-}
-
 // TrackerConfig is a rule's leaky-bucket tracker: explicit leak and
 // volume with the cache-entry TTL derived as volume/leak.
 type TrackerConfig struct {
@@ -34,9 +26,6 @@ type TrackerConfig struct {
 	// Volume is the constant volume: requests (rate), bytes (bandwidth),
 	// or tolerated download equivalents (plain scalar replay).
 	Volume float64
-	// VolumeMethod computes the replay volume from the estimated file
-	// size instead of Volume; nil otherwise.
-	VolumeMethod VolumeMethod
 	// TTL is the cache-entry TTL derived at build (volume/leak); replay
 	// derives it per event and leaves this zero.
 	TTL time.Duration
@@ -44,20 +33,8 @@ type TrackerConfig struct {
 	TargetPrefix TargetPrefix
 }
 
-// VolumeFor returns the tolerated volume for an estimated file size in
-// bytes: the volume method's output when configured, Volume otherwise.
-func (c *TrackerConfig) VolumeFor(sizeBytes float64) float64 {
-	if c.VolumeMethod != nil {
-		return c.VolumeMethod.Volume(sizeBytes)
-	}
-	return c.Volume
-}
-
-// VolumeDesc renders the volume configuration for the --test plan.
+// VolumeDesc renders the volume for the --test plan.
 func (c *TrackerConfig) VolumeDesc() string {
-	if c.VolumeMethod != nil {
-		return c.VolumeMethod.String()
-	}
 	return strconv.FormatFloat(c.Volume, 'f', -1, 64)
 }
 

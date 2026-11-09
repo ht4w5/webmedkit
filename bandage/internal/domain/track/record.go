@@ -1,5 +1,5 @@
 // Package track holds leaky-bucket tracker configuration math: quantity
-// parsing, replay volume methods and tracker cache statistics.
+// parsing and tracker cache statistics.
 package track
 
 import (
