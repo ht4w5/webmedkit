@@ -27,6 +27,8 @@ removal. Land as its own commit in the change.
 - [x] All existing tests pass; method-specific tests are deleted and
       scalar replay behavior is covered instead.
 
+## Comments
+
 Implemented on branch `ticket/01-remove-volume-methods` (removal in
 `a641e5c`, docs/ADR 0030 in `3e2d2a6`), targeting integration branch
 `integration/dynamic-reports`. The ladder `at` quantity language is

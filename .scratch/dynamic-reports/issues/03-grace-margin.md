@@ -24,6 +24,8 @@ load error. The validated plan prints `grace=` beside `ttl=`. Absent
       below the volume but above the widened line (clock advance),
       assert the Report survives; cross the line, assert death.
 
+## Comments
+
 Implemented on branch `ticket/03-grace-margin` (behavior, validation
 and plan in `7dac5ad`), targeting integration branch
 `integration/dynamic-reports`. Grace compiles at rule build to a margin

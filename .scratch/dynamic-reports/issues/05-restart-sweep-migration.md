@@ -31,6 +31,8 @@ is re-flagged.
       re-assemble over the same database, assert the document) and the
       persistence seam respectively.
 
+## Comments
+
 Implemented on branch `ticket/05-restart-sweep-migration` (sweep in
 `ed9b358`, persistence-seam migration/rollback pins in `b96247b`,
 durable-reports ADR amendment in `c447611`), targeting integration

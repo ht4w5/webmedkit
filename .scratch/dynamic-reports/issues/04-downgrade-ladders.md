@@ -36,6 +36,8 @@ inverse.
       with a dynamic rung and a fixed rung, clock-driven decay asserted
       through the served document.
 
+## Comments
+
 Implemented on branch `ticket/04-downgrade-ladders` (behavior and
 daemon-seam tests in `642798c`, the ladder ADR narrowing in `2f20dc1`),
 targeting integration branch `integration/dynamic-reports`. The

@@ -45,6 +45,8 @@ rule and on a zero-leak Tracker.
       injected, assert the document); validation rides the loader/plan
       seam.
 
+## Comments
+
 Implemented on branch `ticket/02-dynamic-report-death` (behavior,
 validation and persistence in `e7dc58b`, report contract doc in
 `26ed934`), targeting integration branch `integration/dynamic-reports`.
