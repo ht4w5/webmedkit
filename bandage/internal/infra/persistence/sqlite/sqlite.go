@@ -301,3 +301,17 @@ func (r *ReportRepository) DeleteExpired(ctx context.Context, now time.Time) (in
 	}
 	return int(n), nil
 }
+
+// DeleteDynamic deletes every dynamic row and returns the count - the
+// startup sweep (spec: Startup sweep); fixed rows are never touched.
+func (r *ReportRepository) DeleteDynamic(ctx context.Context) (int, error) {
+	res, err := r.write.ExecContext(ctx, `DELETE FROM reports WHERE dynamic = 1`)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: delete dynamic: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: delete dynamic: %w", err)
+	}
+	return int(n), nil
+}
