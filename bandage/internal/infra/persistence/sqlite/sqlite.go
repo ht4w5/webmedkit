@@ -37,11 +37,12 @@ type ReportRepository struct {
 // upsertSQL inserts the row or refreshes the mutable columns on conflict;
 // created_at is excluded from the UPDATE set, so it survives without a pre-read.
 const upsertSQL = `
-INSERT INTO reports (rule, target, created_at, updated_at, expires_at, body)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO reports (rule, target, created_at, updated_at, expires_at, dynamic, body)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (rule, target) DO UPDATE SET
 	updated_at = excluded.updated_at,
 	expires_at = excluded.expires_at,
+	dynamic    = excluded.dynamic,
 	body       = excluded.body`
 
 // Open opens (creating if needed) the report database at path and ensures the
@@ -67,6 +68,10 @@ func Open(path string) (*ReportRepository, error) {
 	if _, err := write.Exec(schema); err != nil {
 		write.Close()
 		return nil, fmt.Errorf("sqlite: schema: %w", err)
+	}
+	if err := ensureDynamicColumn(write); err != nil {
+		write.Close()
+		return nil, err
 	}
 	read := write
 	if !isMemory(path) {
@@ -107,6 +112,7 @@ CREATE TABLE IF NOT EXISTS reports (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	expires_at INTEGER NOT NULL,
+	dynamic    INTEGER NOT NULL DEFAULT 0,
 	body       TEXT    NOT NULL,
 	PRIMARY KEY (rule, target)
 );
@@ -115,15 +121,37 @@ CREATE INDEX IF NOT EXISTS idx_reports_target ON reports (target);
 CREATE INDEX IF NOT EXISTS idx_reports_expires_at ON reports (expires_at);
 `
 
+// ensureDynamicColumn adds the dynamic column to a pre-upgrade table
+// with one guarded ALTER TABLE at open: the schema is create-if-not-
+// exists only (no migration runner), and old rows are fixed reports by
+// construction, so the 0 default is exact, not a guess (spec:
+// Persistence).
+func ensureDynamicColumn(db *sql.DB) error {
+	var present int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('reports') WHERE name = 'dynamic'`).Scan(&present); err != nil {
+		return fmt.Errorf("sqlite: schema: %w", err)
+	}
+	if present > 0 {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE reports ADD COLUMN dynamic INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("sqlite: schema: add dynamic column: %w", err)
+	}
+	return nil
+}
+
 // body is the JSON record body: everything but the indexed columns.
 // Sample carries the Event whole, rendered by the same wire form as
 // the report document's sample (one wire form for serve and store).
+// Dynamic flags the dynamic report (spec: Persistence); the indexed
+// dynamic column is the query lever, the body flag is the record's own.
 type body struct {
 	Chain   string                `json:"chain"`
 	Reason  string                `json:"reason"`
 	Tracker domain.TrackerReading `json:"tracker"`
 	Sample  domain.Event          `json:"sample"`
 	Penalty *domain.Penalty       `json:"penalty,omitempty"`
+	Dynamic bool                  `json:"dynamic,omitempty"`
 }
 
 func (r *ReportRepository) Close() error {
@@ -138,6 +166,8 @@ func (r *ReportRepository) Close() error {
 
 // Upsert inserts or overwrites the report for (rule, target) in one prepared
 // statement; created_at is fixed at first insert by the statement, no pre-read.
+// A dynamic report stores the 0 sentinel in expires_at (its NOT NULL cannot
+// be relaxed in place, spec: Persistence).
 func (r *ReportRepository) Upsert(ctx context.Context, rec domain.Report) error {
 	rawBody, err := json.Marshal(body{
 		Chain:   rec.Chain,
@@ -145,13 +175,18 @@ func (r *ReportRepository) Upsert(ctx context.Context, rec domain.Report) error 
 		Tracker: rec.Tracker,
 		Sample:  rec.Sample,
 		Penalty: rec.Penalty,
+		Dynamic: rec.Dynamic,
 	})
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert: %w", err)
 	}
+	expiresNS := rec.ExpiresAt.UnixNano()
+	if rec.Dynamic {
+		expiresNS = 0
+	}
 	_, err = r.upsert.ExecContext(ctx,
 		rec.Rule, rec.Target,
-		rec.CreatedAt.UnixNano(), rec.UpdatedAt.UnixNano(), rec.ExpiresAt.UnixNano(),
+		rec.CreatedAt.UnixNano(), rec.UpdatedAt.UnixNano(), expiresNS, rec.Dynamic,
 		string(rawBody))
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert: %w", err)
@@ -159,10 +194,12 @@ func (r *ReportRepository) Upsert(ctx context.Context, rec domain.Report) error 
 	return nil
 }
 
-// List returns matching, unexpired reports sorted by created_at descending
-// (ties by rule, target), on the read path's own connections (ADR 0009).
+// List returns matching, live reports sorted by created_at descending
+// (ties by rule, target), on the read path's own connections (ADR 0009):
+// unexpired fixed rows plus every dynamic row (spec: Persistence - a
+// dynamic row's 0 sentinel must not read as expired).
 func (r *ReportRepository) List(ctx context.Context, q report.Query) ([]domain.Report, error) {
-	query := `SELECT rule, target, created_at, updated_at, expires_at, body FROM reports WHERE expires_at > ?`
+	query := `SELECT rule, target, created_at, updated_at, expires_at, body FROM reports WHERE (expires_at > ? OR dynamic = 1)`
 	args := []any{q.Now.UnixNano()}
 	if q.Rule != "" {
 		query += ` AND rule = ?`
@@ -201,9 +238,15 @@ func (r *ReportRepository) List(ctx context.Context, q report.Query) ([]domain.R
 		rec.Tracker = b.Tracker
 		rec.Sample = b.Sample
 		rec.Penalty = b.Penalty
+		rec.Dynamic = b.Dynamic
 		rec.CreatedAt = time.Unix(0, createdNS).UTC()
 		rec.UpdatedAt = time.Unix(0, updatedNS).UTC()
-		rec.ExpiresAt = time.Unix(0, expiresNS).UTC()
+		if b.Dynamic {
+			// The sentinel reads back as the absent expiry.
+			rec.ExpiresAt = time.Time{}
+		} else {
+			rec.ExpiresAt = time.Unix(0, expiresNS).UTC()
+		}
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
@@ -243,9 +286,12 @@ func (r *ReportRepository) Delete(ctx context.Context, q report.Query) (int, err
 	return int(n), nil
 }
 
-// DeleteExpired deletes rows whose expires_at has passed.
+// DeleteExpired deletes fixed rows whose expires_at has passed and
+// returns the count; dynamic rows carry the 0 sentinel and die by
+// value, never by time - the sweep must not eat them (spec:
+// Persistence).
 func (r *ReportRepository) DeleteExpired(ctx context.Context, now time.Time) (int, error) {
-	res, err := r.write.ExecContext(ctx, `DELETE FROM reports WHERE expires_at <= ?`, now.UnixNano())
+	res, err := r.write.ExecContext(ctx, `DELETE FROM reports WHERE expires_at <= ? AND dynamic = 0`, now.UnixNano())
 	if err != nil {
 		return 0, fmt.Errorf("sqlite: delete expired: %w", err)
 	}

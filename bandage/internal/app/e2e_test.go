@@ -427,6 +427,9 @@ type reportEntry struct {
 	} `json:"tracker"`
 	Sample  sampleEntry   `json:"sample"`
 	Penalty *penaltyEntry `json:"penalty"`
+	// Dynamic is the additive lifecycle marker: present (true) exactly
+	// on dynamic entries (spec: Report document).
+	Dynamic bool `json:"dynamic"`
 }
 
 type reportDoc struct {

@@ -388,7 +388,7 @@ chains:
 			wantErr: "ttl",
 		},
 		{
-			name: "missing ttl rejected",
+			name: "missing ttl on a tracked rule accepted as a dynamic report",
 			yaml: `
 version: 0
 chains:
@@ -398,7 +398,6 @@ chains:
         tracker: {track: rate, leak: 1, volume: 2}
         actions: [{report: {reason: x, penalty: limit-req-rate, rate: 200}}]
 `,
-			wantErr: "ttl",
 		},
 		{
 			name: "malformed ttl rejected",
@@ -2231,5 +2230,169 @@ func TestShowsEscalationRungsInPlan(t *testing.T) {
 	}
 	if strings.Contains(plan, "tracker: bandwidth leak=1000000 volume=") {
 		t.Errorf("ladder tracker line still prints volume:\n%s", plan)
+	}
+}
+
+// Report lifecycle validation (spec: Load validation additions): a
+// report action without ttl declares a dynamic report and needs the
+// tracker liveness to die by - a tracker-less rule or a zero-leak
+// tracker can never underflow - and every refusal names the rule and
+// the report action's reason.
+func TestRefusesDynamicReportsWithoutLiveness(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		wantErrs []string // empty: accepted
+	}{
+		{
+			name: "ttl-less report on a tracked rule accepted",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: x, penalty: limit-req-rate, rate: 200}}]
+`,
+		},
+		{
+			name: "ttl-less report on a tracker-less rule refused",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        actions: [{report: {reason: x, penalty: drop}}]
+`,
+			wantErrs: []string{`rule "r"`, `action report "x"`, "report.ttl", "no tracker"},
+		},
+		{
+			name: "ttl-less report on a zero-leak tracker refused",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 0, volume: 2}
+        actions: [{report: {reason: x, penalty: limit-req-rate, rate: 200}}]
+`,
+			wantErrs: []string{`rule "r"`, `action report "x"`, "report.ttl", "zero-leak"},
+		},
+		{
+			name: "ttl-less rung report on a zero-leak ladder refused",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: ladder
+        tracker: {track: bandwidth, leak: 0}
+        escalations:
+          - at: 50
+            actions: [{report: {reason: throttle, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+          - at: 150
+            actions: [{report: {reason: ban, penalty: drop}}]
+`,
+			wantErrs: []string{`rule "ladder"`, `action report "ban"`, "zero-leak"},
+		},
+		{
+			name: "ttl-less rung report on a leaking ladder accepted",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: ladder
+        tracker: {track: bandwidth, leak: 1}
+        escalations:
+          - at: 50
+            actions: [{report: {reason: throttle, penalty: limit-bandwidth, rate: 1MB}}]
+          - at: 150
+            actions: [{report: {reason: ban, penalty: drop}}]
+`,
+		},
+		{
+			name: "written empty ttl refused as a typo",
+			yaml: `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: r
+        tracker: {track: rate, leak: 1, volume: 2}
+        actions: [{report: {reason: x, ttl: "", penalty: limit-req-rate, rate: 200}}]
+`,
+			wantErrs: []string{`rule "r"`, "report.ttl", "required"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseRules([]byte(tt.yaml))
+			if len(tt.wantErrs) == 0 {
+				if err != nil {
+					t.Fatalf("ParseRules error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("ParseRules succeeded, want the report action refused")
+			}
+			for _, want := range tt.wantErrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestShowsReportLifecyclesInPlan: the --test plan prints the lifecycle
+// of every report action - the fixed report's ttl, ttl=none for a
+// dynamic one (spec: Load validation additions).
+func TestShowsReportLifecyclesInPlan(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bandage.yml")
+	rulesPath := filepath.Join(dir, "rules.yml")
+	if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rules := `version: 0
+chains:
+  - name: main
+    rules:
+      - id: dyn
+        tracker: {track: rate, leak: 1, volume: 10}
+        actions: [{report: {reason: dyn-overflow, penalty: limit-req-rate, rate: 200}}]
+      - id: fixed
+        tracker: {track: rate, leak: 1, volume: 10}
+        actions: [{report: {reason: fixed-overflow, ttl: 24h, penalty: limit-req-rate, rate: 200}}]
+      - id: ladder
+        tracker: {track: bandwidth, leak: 1MB/s}
+        escalations:
+          - at: 10MB
+            actions: [{report: {reason: throttle, penalty: limit-bandwidth, rate: 1MB}}]
+          - at: 100MB
+            actions: [{report: {reason: ban, ttl: 7d, penalty: drop}}]
+`
+	if err := os.WriteFile(rulesPath, []byte(rules), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
+	if err != nil {
+		t.Fatalf("Test error: %v", err)
+	}
+	for _, want := range []string{
+		"action report reason=bandage.dyn-overflow ttl=none penalty=limit-req-rate rate=200",
+		"action report reason=bandage.fixed-overflow ttl=24h0m0s penalty=limit-req-rate rate=200",
+		"rung at=10000000 report reason=bandage.throttle ttl=none penalty=limit-bandwidth rate=1000000",
+		"rung at=100000000 report reason=bandage.ban ttl=168h0m0s penalty=drop",
+	} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("plan does not contain %q:\n%s", want, plan)
+		}
 	}
 }

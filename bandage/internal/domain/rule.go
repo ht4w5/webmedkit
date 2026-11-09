@@ -44,7 +44,10 @@ func (c *TrackerConfig) VolumeDesc() string {
 type ReportAction struct {
 	// Reason is the machine-readable slug feeding downstream ban rules.
 	Reason string
-	// TTL is the report's expiry since the trigger wall-clock time.
+	// TTL is the report's expiry since the trigger wall-clock time;
+	// zero means no ttl: a dynamic report, alive while the tracker
+	// value stays above its recorded volume (spec: Two lifecycle
+	// modes). Load accepts it only where tracker liveness can kill it.
 	TTL time.Duration
 	// Penalty is the advisory enforcement stance the report recommends
 	// for the target (ADR 0010).

@@ -365,6 +365,14 @@ func matchKey(cfg *domain.TrackerConfig, event *domain.Event) string {
 func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.ReportAction) error {
 	now := s.now()
 	penalty := action.Penalty // the stance of the rules loaded at write time
+	// A report action without ttl writes a dynamic report: no scheduled
+	// expiry, alive while the tracker value stays above the recorded
+	// volume (spec: Two lifecycle modes).
+	dynamic := action.TTL == 0
+	expires := now.Add(action.TTL)
+	if dynamic {
+		expires = time.Time{}
+	}
 	rec := domain.Report{
 		Rule:      m.rule.ID,
 		Chain:     m.chain.Name,
@@ -372,10 +380,11 @@ func (s *Service) trigger(ctx context.Context, m matchContext, action *domain.Re
 		Target:    m.target(),
 		CreatedAt: now,
 		UpdatedAt: now,
-		ExpiresAt: now.Add(action.TTL),
+		ExpiresAt: expires,
 		Tracker:   m.reading,
 		Sample:    *m.event, // the Event whole (ADR 0021), never a projection
 		Penalty:   &penalty,
+		Dynamic:   dynamic,
 	}
 	return s.reports.Trigger(ctx, rec, len(m.rule.Escalations) > 0)
 }

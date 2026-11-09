@@ -65,6 +65,58 @@ func TestReportMarshalJSON(t *testing.T) {
 	}
 }
 
+// TestReportMarshalJSONDynamicEntry pins the dynamic entry shape (spec:
+// Report document): "dynamic": true appends after "penalty" and
+// "expires_at" renders as null - the second pinned example beside the
+// canonical one, whose bytes must not move.
+func TestReportMarshalJSONDynamicEntry(t *testing.T) {
+	rec := Report{
+		Rule:      "sustained-iso-egress",
+		Chain:     "download-abuse",
+		Reason:    "iso-egress-overflow",
+		Target:    "203.0.113.0/24",
+		CreatedAt: time.Date(2025, 10, 17, 10, 2, 11, 0, time.UTC),
+		UpdatedAt: time.Date(2025, 10, 17, 18, 29, 40, 500, time.UTC), // sub-second truncated in document
+		ExpiresAt: time.Time{},                                        // dynamic: no scheduled withdrawal
+		Tracker: TrackerReading{
+			Track:  "bandwidth",
+			Value:  102400000,
+			Leak:   1000000,
+			Volume: 100000000,
+		},
+		Sample: Event{
+			Time:       time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // sub-second truncated in document
+			RemoteAddr: netip.MustParseAddr("203.0.113.7"),
+			Method:     "GET",
+			Path:       "/releases/24.04.iso",
+			Status:     200,
+			SentBytes:  123456,
+		},
+		Penalty: &Penalty{Action: PenaltyLimitBandwidth, Rate: int64Ptr(1000000)},
+		Dynamic: true,
+	}
+	got, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	want := `{
+		"rule": "sustained-iso-egress",
+		"chain": "download-abuse",
+		"reason": "iso-egress-overflow",
+		"target": "203.0.113.0/24",
+		"created_at": "2025-10-17T10:02:11Z",
+		"updated_at": "2025-10-17T18:29:40Z",
+		"expires_at": null,
+		"tracker": {"track": "bandwidth", "value": 102400000, "leak": 1000000, "volume": 100000000},
+		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "", "status": 200, "sent_bytes": 123456, "content_length": 0, "content_range_total": 0, "size_bytes": 0},
+		"penalty": {"action": "limit-bandwidth", "rate": 1000000},
+		"dynamic": true
+	}`
+	if compact(string(got)) != compact(want) {
+		t.Errorf("Marshal = %s\nwant %s", got, compact(want))
+	}
+}
+
 // TestSampleRoundTrip checks the sample's JSON form - the one wire
 // form behind the served document and the persisted body (the sqlite
 // adapter round-trips the sample through it): the contract's keys come
