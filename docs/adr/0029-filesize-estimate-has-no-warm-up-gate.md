@@ -24,3 +24,7 @@ blend in - accepted, with the increment cap at 1 absorbing the residual
 skew (ADR 0019). Rollout ordering is unchanged: an un-upgraded emitter
 leaves the estimate unknown, but one observation after the upgrade now
 suffices instead of several.
+
+Superseded by ADR 0032: the question is moot - there is no estimate to
+warm up. Each response's served size is known at parse time, so a
+path's first download counts at full weight immediately.

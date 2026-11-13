@@ -32,3 +32,11 @@ persisted before the change read back with zeroed renamed and added
 fields (zero means absent - no dual-read). Recorded because the sample's completeness is
 a stance a future reader will be tempted to "optimize" back into a
 projection.
+
+Amended by ADR 0032: the whole-event stance stands; the Event simply
+carries two fewer fields. `content_length` and `content_range_total` -
+the response-size observations this decision named - leave the Event
+with the learning pipeline, so the sample and the log action's `event`
+attribute lose the two keys while `size_bytes` stays, now the served
+Filesize. Stored documents carrying the removed keys read back as
+before: unknown keys are tolerated by construction.
