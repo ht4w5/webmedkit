@@ -204,17 +204,22 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	ev.SentBytes = sent
 
 	// clen is optional (absent, null, "" = no size information); when present
-	// it must be a non-negative integer, strict like sent - malformed drops the line.
+	// it must be a non-negative integer, strict like sent - malformed drops the
+	// line. It is parse-time state feeding the Filesize derivation below, not
+	// Event state.
+	var contentLength int64
 	if raw = fields.Clen; raw.present && !isNull(raw) {
-		if ev.ContentLength, err = parseContentLength(raw); err != nil {
+		if contentLength, err = parseContentLength(raw); err != nil {
 			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
 		}
 	}
 
 	// crange is optional and lenient: "bytes <a>-<b>/<total>" and "bytes
-	// */<total>" yield the total; anything else yields 0 and never drops the line.
+	// */<total>" yield the total; anything else yields 0 and never drops the
+	// line. Like clen, it only feeds the derivation below.
+	var contentRangeTotal int64
 	if raw = fields.Crange; raw.present && !isNull(raw) {
-		ev.ContentRangeTotal = parseContentRangeTotal(raw)
+		contentRangeTotal = parseContentRangeTotal(raw)
 	}
 
 	// The Filesize is the size as served with this response (GLOSSARY:
@@ -224,10 +229,10 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	// status gating beyond the 206 rule; an unusable or absent source
 	// stays unknown (zero means unknown, ADR 0024).
 	switch {
-	case ev.Status == 206 && ev.ContentRangeTotal > 0:
-		ev.SizeBytes = ev.ContentRangeTotal
-	case ev.Status != 206 && ev.ContentLength > 0:
-		ev.SizeBytes = ev.ContentLength
+	case ev.Status == 206 && contentRangeTotal > 0:
+		ev.SizeBytes = contentRangeTotal
+	case ev.Status != 206 && contentLength > 0:
+		ev.SizeBytes = contentLength
 	}
 
 	// agent is optional; when present it must be a string (null = absent).

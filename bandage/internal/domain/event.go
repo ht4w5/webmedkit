@@ -36,13 +36,6 @@ type Event struct {
 	// SentBytes renders under its contract key "sent_bytes", the
 	// response payload bytes sent.
 	SentBytes int64 `json:"sent_bytes"`
-	// ContentLength is the response's Content-Length as the server
-	// reported it; 0 means absent or unusable (the wire form renders
-	// the same zero-means-absent convention).
-	ContentLength int64 `json:"content_length"`
-	// ContentRangeTotal is the file's total size extracted from the
-	// response's Content-Range; 0 means absent or unusable.
-	ContentRangeTotal int64 `json:"content_range_total"`
 	// SizeBytes renders under its contract key "size_bytes", the
 	// Filesize: the file's size as served with this response (GLOSSARY:
 	// Filesize) - the Content-Range total on a 206, the Content-Length
