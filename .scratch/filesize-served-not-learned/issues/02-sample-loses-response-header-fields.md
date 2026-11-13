@@ -14,14 +14,14 @@ enrichment is the fields' last consumer)
 
 **Status:** ready-for-agent
 
-- [ ] The Event carries no Content-Length or Content-Range total
+- [x] The Event carries no Content-Length or Content-Range total
       fields; the sample wire form renders only the remaining keys
-- [ ] The canonical report example and its reproduction pins show the
+- [x] The canonical report example and its reproduction pins show the
       smaller sample and pass
-- [ ] The consumer-side sample mirror matches the contract key for key
-- [ ] Stored-sample goldens and the bench corpus reflect the smaller
+- [x] The consumer-side sample mirror matches the contract key for key
+- [x] Stored-sample goldens and the bench corpus reflect the smaller
       sample
-- [ ] `size_bytes` survives with the served-size meaning
-- [ ] A stored document carrying the removed keys still parses
+- [x] `size_bytes` survives with the served-size meaning
+- [x] A stored document carrying the removed keys still parses
 
 ## Comments
