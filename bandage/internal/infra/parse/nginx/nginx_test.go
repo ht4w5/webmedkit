@@ -39,12 +39,6 @@ func TestParseFieldMapping(t *testing.T) {
 	if ev.SentBytes != 123456 {
 		t.Errorf("SentBytes = %d, want 123456", ev.SentBytes)
 	}
-	if ev.ContentLength != 234567 {
-		t.Errorf("ContentLength = %d, want 234567", ev.ContentLength)
-	}
-	if ev.ContentRangeTotal != 345678 {
-		t.Errorf("ContentRangeTotal = %d, want 345678", ev.ContentRangeTotal)
-	}
 	if ev.Agent != "Wget/1.21" {
 		t.Errorf("Agent = %q, want %q", ev.Agent, "Wget/1.21")
 	}
@@ -177,12 +171,6 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 	if ev.SentBytes != 123456 {
 		t.Errorf("SentBytes = %d, want 123456", ev.SentBytes)
 	}
-	if ev.ContentLength != 234567 {
-		t.Errorf("ContentLength = %d, want 234567", ev.ContentLength)
-	}
-	if ev.ContentRangeTotal != 234567 {
-		t.Errorf("ContentRangeTotal = %d, want 234567 (the total the shipped crange carries)", ev.ContentRangeTotal)
-	}
 	if ev.SizeBytes != 234567 {
 		t.Errorf("SizeBytes = %d, want 234567 (the served size: the Content-Length on a non-206)", ev.SizeBytes)
 	}
@@ -191,8 +179,9 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 	}
 }
 
-// TestParseContentLengthField pins the clen mapping: quoted integer string
-// ("" = header not sent); absent, empty and zero all mean "no size information".
+// TestParseContentLengthField pins the clen mapping into the served
+// size: quoted integer string ("" = header not sent); absent, empty and
+// zero all mean "no size information".
 func TestParseContentLengthField(t *testing.T) {
 	tests := []struct {
 		name string
@@ -217,15 +206,16 @@ func TestParseContentLengthField(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse error: %v", err)
 			}
-			if ev.ContentLength != tt.want {
-				t.Errorf("ContentLength = %d, want %d", ev.ContentLength, tt.want)
+			if ev.SizeBytes != tt.want {
+				t.Errorf("SizeBytes = %d, want %d", ev.SizeBytes, tt.want)
 			}
 		})
 	}
 }
 
-// TestParseContentRangeField pins the crange mapping: the extracted total.
-// Every row below must parse - unusual values yield 0, never a dropped line.
+// TestParseContentRangeField pins the crange mapping into the served
+// size (the only size source on a 206): the extracted total. Every row
+// below must parse - unusual values yield no size, never a dropped line.
 func TestParseContentRangeField(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -264,8 +254,8 @@ func TestParseContentRangeField(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse error (unusual Content-Range values must never drop the line): %v", err)
 			}
-			if ev.ContentRangeTotal != tt.want {
-				t.Errorf("ContentRangeTotal = %d, want %d", ev.ContentRangeTotal, tt.want)
+			if ev.SizeBytes != tt.want {
+				t.Errorf("SizeBytes = %d, want %d", ev.SizeBytes, tt.want)
 			}
 		})
 	}
@@ -278,12 +268,6 @@ func TestParseOldFluxLineUnchanged(t *testing.T) {
 	ev, err := New().Parse([]byte(line))
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
-	}
-	if ev.ContentLength != 0 {
-		t.Errorf("ContentLength = %d, want 0 (old flux lines carry no response length)", ev.ContentLength)
-	}
-	if ev.ContentRangeTotal != 0 {
-		t.Errorf("ContentRangeTotal = %d, want 0 (old flux lines carry no response range)", ev.ContentRangeTotal)
 	}
 	if ev.SizeBytes != domain.FilesizeUnknown {
 		t.Errorf("SizeBytes = %d, want %d (old flux lines read as unknown sizes)", ev.SizeBytes, domain.FilesizeUnknown)

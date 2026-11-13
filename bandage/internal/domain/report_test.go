@@ -28,19 +28,17 @@ func TestReportMarshalJSON(t *testing.T) {
 			Volume: 100000000,
 		},
 		// The whole Event is the sample (ADR 0021): every field set
-		// here renders in the document, the content observations under
-		// the zero-means-absent convention (ticket 02).
+		// here renders in the document - the served size under the
+		// zero-means-unknown convention (ADR 0024).
 		Sample: Event{
-			Time:              time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // sub-second truncated in document
-			RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
-			Method:            "GET",
-			Path:              "/releases/24.04.iso",
-			Agent:             "Wget/1.21",
-			Status:            200,
-			SentBytes:         123456,
-			ContentLength:     123456,
-			ContentRangeTotal: 1234567890,
-			SizeBytes:         1234567890,
+			Time:       time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // sub-second truncated in document
+			RemoteAddr: netip.MustParseAddr("203.0.113.7"),
+			Method:     "GET",
+			Path:       "/releases/24.04.iso",
+			Agent:      "Wget/1.21",
+			Status:     200,
+			SentBytes:  123456,
+			SizeBytes:  1234567890,
 		},
 		Penalty: &Penalty{Action: PenaltyLimitBandwidth, Rate: int64Ptr(1000000)},
 	}
@@ -57,7 +55,7 @@ func TestReportMarshalJSON(t *testing.T) {
 		"updated_at": "2025-10-17T18:29:40Z",
 		"expires_at": "2025-10-24T18:29:40Z",
 		"tracker": {"track": "bandwidth", "value": 102400000, "leak": 1000000, "volume": 100000000},
-		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent_bytes": 123456, "content_length": 123456, "content_range_total": 1234567890, "size_bytes": 1234567890},
+		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "Wget/1.21", "status": 200, "sent_bytes": 123456, "size_bytes": 1234567890},
 		"penalty": {"action": "limit-bandwidth", "rate": 1000000}
 	}`
 	if compact(string(got)) != compact(want) {
@@ -108,7 +106,7 @@ func TestReportMarshalJSONDynamicEntry(t *testing.T) {
 		"updated_at": "2025-10-17T18:29:40Z",
 		"expires_at": null,
 		"tracker": {"track": "bandwidth", "value": 102400000, "leak": 1000000, "volume": 100000000},
-		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "", "status": 200, "sent_bytes": 123456, "content_length": 0, "content_range_total": 0, "size_bytes": 0},
+		"sample": {"time": "2025-10-17T18:29:40Z", "remote_addr": "203.0.113.7", "method": "GET", "path": "/releases/24.04.iso", "agent": "", "status": 200, "sent_bytes": 123456, "size_bytes": 0},
 		"penalty": {"action": "limit-bandwidth", "rate": 1000000},
 		"dynamic": true
 	}`
@@ -132,18 +130,16 @@ func TestSampleRoundTrip(t *testing.T) {
 		{
 			name: "a fully populated sample carries the whole Event",
 			orig: Event{
-				Time:              time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // truncated to the second on the wire
-				RemoteAddr:        netip.MustParseAddr("203.0.113.7"),
-				Method:            "GET",
-				Path:              "/releases/24.04.iso",
-				Agent:             "Wget/1.21",
-				Status:            206,
-				SentBytes:         6000,
-				ContentLength:     6000,
-				ContentRangeTotal: 3000000,
-				SizeBytes:         3000000,
+				Time:       time.Date(2025, 10, 17, 18, 29, 40, 500000000, time.UTC), // truncated to the second on the wire
+				RemoteAddr: netip.MustParseAddr("203.0.113.7"),
+				Method:     "GET",
+				Path:       "/releases/24.04.iso",
+				Agent:      "Wget/1.21",
+				Status:     206,
+				SentBytes:  6000,
+				SizeBytes:  3000000,
 			},
-			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":206,"sent_bytes":6000,"content_length":6000,"content_range_total":3000000,"size_bytes":3000000}`,
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"203.0.113.7","method":"GET","path":"/releases/24.04.iso","agent":"Wget/1.21","status":206,"sent_bytes":6000,"size_bytes":3000000}`,
 		},
 		{
 			name: "absent observations render as zeroes",
@@ -155,7 +151,7 @@ func TestSampleRoundTrip(t *testing.T) {
 				SentBytes: 123456,
 				SizeBytes: FilesizeUnknown, // absent: zero on the wire and back
 			},
-			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"","method":"","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":123456,"content_length":0,"content_range_total":0,"size_bytes":0}`,
+			want: `{"time":"2025-10-17T18:29:40Z","remote_addr":"","method":"","path":"/releases/24.04.iso","agent":"Wget/1.21","status":200,"sent_bytes":123456,"size_bytes":0}`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -244,8 +240,6 @@ func checkSample(t *testing.T, got, want Event) {
 		{"agent", got.Agent, want.Agent},
 		{"status", got.Status, want.Status},
 		{"sent_bytes", got.SentBytes, want.SentBytes},
-		{"content_length", got.ContentLength, want.ContentLength},
-		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
 		{"size_bytes", got.SizeBytes, want.SizeBytes},
 	} {
 		if f.got != f.want {

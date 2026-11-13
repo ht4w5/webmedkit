@@ -171,16 +171,14 @@ func (ec eventContent) event() domain.Event {
 		size = ec.clen
 	}
 	return domain.Event{
-		Time:              time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
-		RemoteAddr:        netip.MustParseAddr(ec.client),
-		Method:            ec.method,
-		Path:              ec.path,
-		Agent:             ec.agent,
-		Status:            ec.status,
-		SentBytes:         ec.sent,
-		ContentLength:     ec.clen,
-		ContentRangeTotal: ec.crange,
-		SizeBytes:         size,
+		Time:       time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
+		RemoteAddr: netip.MustParseAddr(ec.client),
+		Method:     ec.method,
+		Path:       ec.path,
+		Agent:      ec.agent,
+		Status:     ec.status,
+		SentBytes:  ec.sent,
+		SizeBytes:  size,
 	}
 }
 

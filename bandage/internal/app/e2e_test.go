@@ -385,16 +385,14 @@ type penaltyEntry struct {
 // sampleEntry mirrors the report entry's nested sample object: the
 // contract's whole sample in its wire shape.
 type sampleEntry struct {
-	Time              string `json:"time"`
-	RemoteAddr        string `json:"remote_addr"`
-	Method            string `json:"method"`
-	Path              string `json:"path"`
-	Agent             string `json:"agent"`
-	Status            int    `json:"status"`
-	SentBytes         int64  `json:"sent_bytes"`
-	ContentLength     int64  `json:"content_length"`
-	ContentRangeTotal int64  `json:"content_range_total"`
-	SizeBytes         int64  `json:"size_bytes"`
+	Time       string `json:"time"`
+	RemoteAddr string `json:"remote_addr"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Agent      string `json:"agent"`
+	Status     int    `json:"status"`
+	SentBytes  int64  `json:"sent_bytes"`
+	SizeBytes  int64  `json:"size_bytes"`
 }
 
 // checkSample reports every sample field that differs from want as
@@ -413,8 +411,6 @@ func checkSample(t *testing.T, got, want sampleEntry) {
 		{"agent", got.Agent, want.Agent},
 		{"status", got.Status, want.Status},
 		{"sent_bytes", got.SentBytes, want.SentBytes},
-		{"content_length", got.ContentLength, want.ContentLength},
-		{"content_range_total", got.ContentRangeTotal, want.ContentRangeTotal},
 		{"size_bytes", got.SizeBytes, want.SizeBytes},
 	} {
 		if f.got != f.want {
@@ -2214,8 +2210,7 @@ chains:
 		// second precision (ADR 0021 couples the Event to the report
 		// contract's wire shape).
 		Time: eventTime1At, RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big",
-		Status: 200, SentBytes: 150, ContentLength: 150, ContentRangeTotal: 9000,
-		SizeBytes: 150,
+		Status: 200, SentBytes: 150, SizeBytes: 150,
 	}
 	checkLog := func(msg string, level zerolog.Level, wantRule, wantTarget string, wantTracker domain.TrackerReading) {
 		t.Helper()
@@ -2238,7 +2233,7 @@ chains:
 		// The logged event renders in the Event's wire form - the
 		// deliberate Event-to-wire coupling ADR 0021 records - so the
 		// record carries the contract's whole sample: the client address,
-		// method and content observations included (ticket 02).
+		// method and served size included.
 		checkSample(t, ev, wantEvent)
 		var tracker domain.TrackerReading
 		attrInto(t, rec, "tracker", &tracker)
