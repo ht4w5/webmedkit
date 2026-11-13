@@ -15,10 +15,9 @@ version: 0
 # name the deployment instead of the binary.
 # reason_prefix: my-deployment
 
-# Enrichment is demand-driven: it runs only where a rule's action list
-# asks for it with an `enrich` action (see docs/rules.md) - the old
-# top-level `enrichment` block is gone and fails load naming the
-# migration.
+# The `enrich` action is reserved plumbing: it stays valid rules
+# syntax, but no enrichment types are registered today - every enrich
+# action fails load naming its type (see docs/rules.md).
 
 chains:
   # The entry chain: the front door, one filter-less jump rule per
@@ -114,26 +113,12 @@ chains:
                   penalty: drop
 
   # The handoff target: per-path replay inspection of suspect targets.
+  # The replay rule reads the Filesize as served directly - the size
+  # each response carried (docs/rules.md) - and counts each transfer's
+  # true fraction of a download; a response without usable size
+  # information keeps replay blind for it.
   - name: inspect
     rules:
-      # The documented composition (docs/rules.md): a tracker-less
-      # enrich rule ahead of the consuming replay rule. It runs the
-      # Filesize enrichment where its filter says - the demand domain -
-      # and feeds the replay rule below; without it, replay stays
-      # blind because nothing enriches the path. An enrich
-      # action may carry its own counter: true (default false):
-      # enabling it counts that (rule, enrichment) pair's Enrichment
-      # counter - the pair's runs (total), the subset that fed the
-      # enrichment's learned state (observed) and the subset that
-      # produced a non-default derived value (enriched) - shown on
-      # /api/stats, the Web Panel's Stats page and /metrics.
-      # Uncomment the key to watch this pair.
-      - id: enrich-iso-size
-        filter: 'path suffix ".iso"'
-        actions:
-          - enrich:
-              type: filesize
-              # counter: true
       - id: iso-replay-inspect
         filter: 'path suffix ".iso"'
         tracker:

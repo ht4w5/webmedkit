@@ -144,7 +144,7 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 		return domain.Event{}, fmt.Errorf("parse nginx json: %w", legacyLineError(line, err))
 	}
 
-	ev := domain.Event{SizeBytes: domain.FilesizeUnknown}
+	ev := domain.Event{}
 
 	raw, err := require(fields.Time, "time")
 	if err != nil {
@@ -215,6 +215,19 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	// */<total>" yield the total; anything else yields 0 and never drops the line.
 	if raw = fields.Crange; raw.present && !isNull(raw) {
 		ev.ContentRangeTotal = parseContentRangeTotal(raw)
+	}
+
+	// The Filesize is the size as served with this response (GLOSSARY:
+	// Filesize): a 206 takes its Content-Range total only - its partial
+	// Content-Length would masquerade as a file size - any other
+	// response its Content-Length when greater than zero. No method or
+	// status gating beyond the 206 rule; an unusable or absent source
+	// stays unknown (zero means unknown, ADR 0024).
+	switch {
+	case ev.Status == 206 && ev.ContentRangeTotal > 0:
+		ev.SizeBytes = ev.ContentRangeTotal
+	case ev.Status != 206 && ev.ContentLength > 0:
+		ev.SizeBytes = ev.ContentLength
 	}
 
 	// agent is optional; when present it must be a string (null = absent).

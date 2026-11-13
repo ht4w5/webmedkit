@@ -218,30 +218,31 @@ func TestParseRulesCounterFlag(t *testing.T) {
 	}
 }
 
-// TestParseRulesEnrichActionCounterFlag: the enrich action's counter
-// key enables the (rule, enrichment) pair's Enrichment counter
-// (GLOSSARY: Enrichment counter); it defaults to false, so upgrading
-// adds no noise until asked for.
-func TestParseRulesEnrichActionCounterFlag(t *testing.T) {
+// TestParseRulesEnrichActionCounterKeyShape: with the kind vocabulary
+// empty the enrich action's counter key keeps its documented shape
+// (GLOSSARY: Enrichment counter) - a well-formed block rides the
+// vocabulary refusal naming its type, a written non-boolean fails load
+// naming the key.
+func TestParseRulesEnrichActionCounterKeyShape(t *testing.T) {
 	tests := []struct {
-		name  string
-		extra string
-		want  bool
+		name    string
+		extra   string
+		wantErr string
 	}{
-		{"omitted defaults to false", "", false},
-		{"true enables the Enrichment counter", ", counter: true", true},
-		{"false keeps the Enrichment counter off", ", counter: false", false},
+		{"omitted rides the vocabulary refusal", "", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"true rides the vocabulary refusal", ", counter: true", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"false rides the vocabulary refusal", ", counter: false", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"a written non-boolean names the key", `, counter: "true"`, "action enrich: counter: must be true or false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize" + tt.extra + "}}]\n"
-			doc, err := ParseRules([]byte(yaml))
-			if err != nil {
-				t.Fatalf("ParseRules error: %v", err)
+			_, err := ParseRules([]byte(yaml))
+			if err == nil {
+				t.Fatalf("ParseRules succeeded, want error containing %q", tt.wantErr)
 			}
-			got := doc.Chains[0].Rules[0].Actions[0].Enrich.Counter
-			if got != tt.want {
-				t.Errorf("enrich counter = %v, want %v", got, tt.want)
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tt.wantErr)
 			}
 		})
 	}
@@ -521,17 +522,20 @@ chains:
 		{name: "log wrong arg count rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: debug}]\n", wantErr: "level,message"},
 		{name: "log bad level rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{log: \"verbose,x\"}]\n", wantErr: "level"},
 
-		// The enrich action: one enrichment kind by type, no per-action
-		// configuration (ADR 0028).
-		{name: "enrich accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize}}]\n"},
-		{name: "enrich accepted in rung actions", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1}\n        escalations:\n          - at: 5\n            actions: [{enrich: {type: filesize}}]\n          - at: 10\n            actions: [{enrich: {type: filesize}}, stop]\n"},
+		// The enrich action: reserved plumbing with an empty kind
+		// vocabulary (ADR 0028) - the shape stays valid rules syntax, but
+		// every enrich action fails load naming its type and stating that
+		// no enrichment types are available.
+		{name: "enrich fails load with no enrichment types", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize}}]\n", wantErr: `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich in rung actions fails load too", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        tracker: {track: rate, leak: 1}\n        escalations:\n          - at: 5\n            actions: [{enrich: {type: filesize}}]\n          - at: 10\n            actions: [{enrich: {type: filesize}}, stop]\n", wantErr: `unknown enrichment type "filesize" (no enrichment types are available)`},
 		{name: "enrich without options rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [enrich]\n", wantErr: "enrich"},
 		{name: "enrich without type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {}}]\n", wantErr: `action enrich: type: required`},
 		{name: "enrich null type rejected", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: null}}]\n", wantErr: `action enrich: type: required`},
 		// The Enrichment counter's counter key: optional (default false),
-		// strictly boolean when written (GLOSSARY: Enrichment counter).
-		{name: "enrich counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n"},
-		{name: "enrich false counter accepted", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: false}}]\n"},
+		// strictly boolean when written (GLOSSARY: Enrichment counter) -
+		// a well-formed key rides the vocabulary refusal.
+		{name: "enrich counter rides the vocabulary refusal", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: true}}]\n", wantErr: `no enrichment types are available`},
+		{name: "enrich false counter rides the vocabulary refusal", yaml: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: false}}]\n", wantErr: `no enrichment types are available`},
 
 		// The goto/jump chain graph: a chain named main (the entry
 		// chain), no dispatch targeting main, unique chain names,
@@ -1865,38 +1869,36 @@ chains:
 	}
 }
 
-// TestShowsEnrichActionInPlan: the plan shows each enrich action in its
-// rule's action list - type always, counter=true when the counter is
-// enabled - and prints no enrichment filter line (the gate is gone with
-// the pre-evaluation enrichment path, ADR 0028).
+// TestShowsEnrichActionInPlan: the plan keeps showing each enrich
+// action inline in its rule's action list - type always, counter=true
+// when the counter is enabled - like every other action, and prints no
+// enrichment filter line (the gate is gone with the pre-evaluation
+// enrichment path, ADR 0028). The plan contract stays stable for the
+// kinds that return (story 15); while the kind vocabulary is empty the
+// loader can build no enrich action, so the contract is pinned on
+// rules built in code.
 func TestShowsEnrichActionInPlan(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "bandage.yml")
-	rulesPath := filepath.Join(dir, "rules.yml")
-	if err := os.WriteFile(cfgPath, []byte(validConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rulesPath, []byte(`version: 0
-chains:
-  - name: main
-    rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize, counter: true}}]
-      - id: iso-ladder
-        tracker: {track: bandwidth, leak: 1MB}
-        escalations:
-          - at: 50MB
-            actions: [{enrich: {type: filesize}}]
-          - at: 5GB
-            actions: [stop]
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	rules := Rules{Chains: []domain.Chain{{
+		Name: domain.EntryChain,
+		Rules: []domain.Rule{
+			{
+				ID:           "enrich-size",
+				FilterSource: "any",
+				Actions:      []domain.Action{{Enrich: &domain.EnrichAction{Type: "filesize", Counter: true}}},
+			},
+			{
+				ID:           "iso-ladder",
+				FilterSource: "any",
+				Tracker:      &domain.TrackerConfig{Kind: domain.TrackBandwidth, Leak: 1e6},
+				Escalations: []domain.Escalation{
+					{At: 50e6, Actions: []domain.Action{{Enrich: &domain.EnrichAction{Type: "filesize"}}}},
+					{At: 5e9, Actions: []domain.Action{{Stop: true}}},
+				},
+			},
+		},
+	}}}
 
-	plan, err := Test(cfgPath, rulesPath, identity.For("bandage"))
-	if err != nil {
-		t.Fatalf("Test error: %v", err)
-	}
+	plan := planText(Config{}, rules, identity.For("bandage"))
 	for _, want := range []string{
 		"rule enrich-size",
 		"action enrich type=filesize counter=true",

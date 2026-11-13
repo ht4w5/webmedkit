@@ -544,6 +544,10 @@ type rawEnrichAction struct {
 // kind by name, run where the rule matches (ADR 0028), and the pair's
 // Enrichment counter opt-in (GLOSSARY: Enrichment counter). The strict
 // key set is deliberately tiny: unknown keys fail load naming them.
+// The block's shape is validated before its vocabulary, so a malformed
+// block still names what it rejects; with the kind vocabulary empty
+// every enrich action then fails load, naming its type and stating
+// that no enrichment types are available.
 func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)
@@ -559,15 +563,15 @@ func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if err := val.Decode(&raw); err != nil {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: %w", id, err)
 	}
+	counter, err := parseEnrichCounter(id, &raw.Counter)
+	if err != nil {
+		return domain.Action{}, err
+	}
 	if raw.Type == "" {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: type: required %s", id, enrichmentTypeWant)
 	}
 	if !knownEnrichmentType(raw.Type) {
 		return domain.Action{}, fmt.Errorf("rules: rule %q: action enrich: type: unknown enrichment type %q %s", id, raw.Type, enrichmentTypeWant)
-	}
-	counter, err := parseEnrichCounter(id, &raw.Counter)
-	if err != nil {
-		return domain.Action{}, err
 	}
 	return domain.Action{Enrich: &domain.EnrichAction{Type: raw.Type, Counter: counter}}, nil
 }

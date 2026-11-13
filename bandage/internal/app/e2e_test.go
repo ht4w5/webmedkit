@@ -591,8 +591,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: sustained-egress
         tracker:
           track: bandwidth
@@ -1038,16 +1036,15 @@ func TestE2EStatsBuildAndCumulativeCounters(t *testing.T) {
 		}
 	}
 
-	// The tracker cache block: each parsed event read the file-size record
-	// read-only (an old-format line observes nothing, so no record exists)
-	// and wrote the tracker record; only the tracker record stays live.
+	// The tracker cache block: each parsed event wrote the tracker
+	// record; only that record stays live.
 	for _, f := range []struct {
 		field string
 		want  float64
 	}{
-		{"gets", 4},
+		{"gets", 2},
 		{"sets", 2},
-		{"misses", 3},
+		{"misses", 1},
 		{"evictions", 0},
 		{"size", 1},
 		{"entry_cap", 65536},
@@ -1065,8 +1062,7 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", bandwidthRules)
 
 	// Distinct absolutes pin each counter to its key; equal values could swap unnoticed.
-	// Nothing resets tracker state, so the enrich action's file-size record
-	// and the tracker record both keep cache_size at 2.
+	// Nothing resets tracker state, so the tracker record keeps cache_size at 1.
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 3000, "3000"))
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/big", 200, 12000, "12000"))
@@ -1091,11 +1087,11 @@ func TestE2EStatsLogAgreesWithStats(t *testing.T) {
 		{"received", "pipeline", "received", 4},
 		{"parsed", "pipeline", "parsed", 3},
 		{"dropped", "pipeline", "dropped", 1},
-		{"cache_gets", "tracker_cache", "gets", 6},
-		{"cache_sets", "tracker_cache", "sets", 6},
-		{"cache_misses", "tracker_cache", "misses", 2},
+		{"cache_gets", "tracker_cache", "gets", 3},
+		{"cache_sets", "tracker_cache", "sets", 3},
+		{"cache_misses", "tracker_cache", "misses", 1},
 		{"cache_evictions", "tracker_cache", "evictions", 0},
-		{"cache_size", "tracker_cache", "size", 2},
+		{"cache_size", "tracker_cache", "size", 1},
 	} {
 		var v int64
 		attrInto(t, recs[0], f.key, &v)
@@ -1117,21 +1113,19 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
-	// max_entries 1: the enrich action's file-size record and the tracker
-	// record share one slot, so inserting the tracker record evicts the
-	// file-size record (the observed response creates it first).
+	// max_entries 1: the second target's tracker record evicts the first
+	// target's (one slot, one live record).
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 1
 	})
 
 	d.send(nginxLineClen(eventTime1, "203.0.113.7", "GET", "/api", 200, 500, "500"))
-	d.waitProcessed(t, 1)
+	d.send(nginxLineClen(eventTime1, "203.0.113.8", "GET", "/api", 200, 500, "500"))
+	d.waitProcessed(t, 2)
 
 	_, doc := d.getStats(t)
 	for _, f := range []struct {
@@ -1150,7 +1144,6 @@ chains:
 		t.Errorf("eviction logs = %v, want 1 (logged and counted together)", evictions)
 	}
 }
-
 // TestE2EAPIPingAndUnknownPaths: GET /ping is liveness and GET /metrics is
 // the scrapeable machine contract (text exposition 0.0.4); GET / redirects
 // to the Web Panel's Stats page and both view pages serve from the daemon
@@ -1370,14 +1363,13 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}, {log: "debug,MARK:BURSTY"}]
 `
 	// max_entries 2 with a per-shard budget of one: the fixed keys place
-	// both tracker targets in one shard and the filesize record in the other.
+	// both tracker targets in one shard, so the second target's insert
+	// evicts the first target's tracker record.
 	d := startTestDaemonCfg(t, clock, "unixgram", ":memory:", rules, func(c *Config) {
 		c.Cache.MaxEntries = 2
 	})
@@ -1452,16 +1444,13 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: bursty-api
         tracker: {track: rate, leak: 0, volume: 2}
         actions: [{report: {reason: api-rate-overflow, ttl: 1h, penalty: limit-req-rate, rate: 200}}]
 `
 	// max_entries 2 with a per-shard budget of one: the fixed keys place
-	// both tracker targets in one shard and the filesize record in the
-	// other, so the second target's insert evicts the first target's
-	// tracker record (same key placement as
+	// both tracker targets in one shard, so the second target's insert
+	// evicts the first target's tracker record (same key placement as
 	// TestE2EEvictedTrackerAccumulatesFresh).
 	trigger := func(t *testing.T, d *testDaemon) {
 		t.Helper()
@@ -2226,6 +2215,7 @@ chains:
 		// contract's wire shape).
 		Time: eventTime1At, RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big",
 		Status: 200, SentBytes: 150, ContentLength: 150, ContentRangeTotal: 9000,
+		SizeBytes: 150,
 	}
 	checkLog := func(msg string, level zerolog.Level, wantRule, wantTarget string, wantTracker domain.TrackerReading) {
 		t.Helper()
@@ -2586,9 +2576,9 @@ chains:
 	}
 }
 
-// TestE2EReplayTracksFromRequestOne: the enrich-then-replay composition
-// counts a download from its very first request - one observation
-// suffices - so the third full transfer overflows volume 2.
+// TestE2EReplayTracksFromRequestOne: replay counts a download from its
+// very first request - the served size needs no warm-up - so the third
+// full transfer overflows volume 2.
 func TestE2EReplayTracksFromRequestOne(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -2596,8 +2586,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2626,7 +2614,7 @@ chains:
 		t.Errorf("tracker = %+v, want {replay 3 0 2} (value, leak and volume at trigger)", r.Tracker)
 	}
 	if r.Sample.SizeBytes != 1000 || r.Sample.SentBytes != 1000 {
-		t.Errorf("sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
+		t.Errorf("sample = %+v, want the triggering transfer with served size 1000", r.Sample)
 	}
 }
 
@@ -2640,8 +2628,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 1}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2649,9 +2635,8 @@ chains:
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
 	// Two full downloads of a small file and of a big one, from two
-	// clients: each path seeds its own estimate from its first response
-	// and accumulates on its own - and both overflow the same volume 1
-	// on their second download (2 > 1).
+	// clients: each path accumulates on its own served size - and both
+	// overflow the same volume 1 on their second download (2 > 1).
 	sendFullDownloads(d, 1734345934, "203.0.113.7", "/small.iso", 100, 2)
 	sendFullDownloads(d, 1734345944, "203.0.113.8", "/big.iso", 10000, 2)
 	d.waitProcessed(t, 4)
@@ -2667,31 +2652,30 @@ chains:
 	}
 }
 
-// TestE2ESizeEstimateTracksResponseLengthNotSentBytes: the estimate learns
-// the reported length, and cached revalidations leave it alone.
-func TestE2ESizeEstimateTracksResponseLengthNotSentBytes(t *testing.T) {
+// TestE2ESizeComesFromTheServedLengthNotSentBytes: the Filesize is the
+// reported length as served - never the bytes on the wire - and
+// size-less revalidations stay blind.
+func TestE2ESizeComesFromTheServedLengthNotSentBytes(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
 version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Five partial downloads (500 of 1000 bytes on the wire): the first
-	// seeds the estimate to the reported length 1000 from its own
-	// response, and every one counts half a download - the fifth pushes
-	// 2.5 past volume 2.
+	// Five partial downloads (500 of 1000 bytes on the wire): each
+	// counts half a download against the served size 1000 - the fifth
+	// pushes 2.5 past volume 2.
 	for i := 0; i < 5; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 500, "1000"))
 	}
-	// Cached revalidations (304, nothing on the wire) move nothing.
+	// Cached revalidations (304, nothing on the wire) move nothing:
+	// without usable size information they are blind-skipped.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345939+i), "203.0.113.7", "GET", "/releases/24.04.iso", 304, 0, ""))
 	}
@@ -2711,80 +2695,106 @@ chains:
 		t.Errorf("tracker value = %v, want 2.5 (five half-downloads at trigger; the revalidations added none)", r.Tracker.Value)
 	}
 	if r.Sample.SizeBytes != 1000 {
-		t.Errorf("sample size = %d, want the reported length 1000 (not the 500 transferred bytes)", r.Sample.SizeBytes)
+		t.Errorf("sample size = %d, want the served length 1000 (not the 500 transferred bytes)", r.Sample.SizeBytes)
 	}
 	if r.Sample.SentBytes != 500 {
 		t.Errorf("sample sent = %d, want 500", r.Sample.SentBytes)
 	}
 }
 
-// TestE2ESizeSamplingRuleAdmitRejectTable pins the Sampling rule at the
-// pipeline: which shapes observe, and that all still enrich and replay.
-func TestE2ESizeSamplingRuleAdmitRejectTable(t *testing.T) {
-	tests := []struct {
-		name     string
-		method   string
-		status   int
-		sent     int64
-		clen     string
-		crange   string
-		wantSize int64
-	}{
-		{"GET 200 observes the response length", "GET", 200, 4000, "4000", "", 2080},
-		{"HEAD 200 observes the response length", "HEAD", 200, 0, "4000", "", 2080},
-		{"304 revalidations never observe", "GET", 304, 0, "4000", "bytes 0-3999/4000", 1000},
-		{"length-less HEAD never observes", "HEAD", 200, 0, "", "", 1000},
-		{"chunked 200 bodies never observe", "GET", 200, 4000, "", "", 1000},
-		{"206 observes the Content-Range total, never its Content-Length", "GET", 206, 4000, "4000", "bytes 0-3999/5000", 2440},
-		{"206 without a usable total never observes", "GET", 206, 4000, "4000", "", 1000},
-		{"206 with a * total never observes", "GET", 206, 4000, "4000", "bytes 0-3999/*", 1000},
-		{"416 never observes its Content-Range total", "GET", 416, 4000, "", "bytes */4000", 1000},
-		{"error bodies never observe", "GET", 404, 4000, "4000", "bytes 0-3999/4000", 1000},
-		{"non-GET/HEAD never observes", "POST", 200, 4000, "4000", "bytes 0-3999/4000", 1000},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			clock := newTestClock(mustTime(t, wallBase))
-			rules := `
+// TestE2EServedSizeDerivationOutcomes pins the derivation outcomes at
+// the pipeline: each response reports its own served size - a 206 its
+// Content-Range total only (its partial Content-Length never masquerades
+// as a file size), any other response its Content-Length when greater
+// than zero - with no method or status gating beyond the 206 rule, and
+// no enrichment anywhere in the file. The logged event (the Event's
+// wire form) carries the outcome.
+func TestE2EServedSizeDerivationOutcomes(t *testing.T) {
+	const rules = `
 version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
-      - id: iso-replay
-        tracker: {track: replay, leak: 0, volume: 2}
-        actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
+      - id: seen
+        actions: [{log: "debug,SEEN:"}]
 `
+	tests := []struct {
+		name     string
+		line     string
+		wantSize int64
+	}{
+		{"200 takes its Content-Length", nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 4000, "4000"), 4000},
+		{"HEAD 200 with a Content-Length is a known size", nginxLineClen("1734345934", "203.0.113.7", "HEAD", "/f", 200, 0, "4000"), 4000},
+		{"404 with a Content-Length is a known size", nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 404, 100, "100"), 100},
+		{"POST with a Content-Length is a known size", nginxLineClen("1734345934", "203.0.113.7", "POST", "/f", 200, 4000, "4000"), 4000},
+		{"304 with a Content-Length is a known size", nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 304, 0, "4000"), 4000},
+		{"a zero Content-Length reads as unknown", nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 0, "0"), 0},
+		{"a chunked body reads as unknown", nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 4000, ""), 0},
+		{"206 takes its Content-Range total", nginxLineCrange("1734345934", "203.0.113.7", "GET", "/f", 206, 250, "250", "bytes 0-249/1000"), 1000},
+		{"206 never takes its Content-Length", nginxLineCrange("1734345934", "203.0.113.7", "GET", "/f", 206, 4000, "4000", ""), 0},
+		{"206 with an unusual Content-Range reads as unknown, never a dropped line", nginxLineCrange("1734345934", "203.0.113.7", "GET", "/f", 206, 10, "", "bytes weird"), 0},
+		{"an old flux line reads as unknown", nginxLine("1734345934", "203.0.113.7", "GET", "/f", 200, 123456), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newTestClock(mustTime(t, wallBase))
 			d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+			d.send(tt.line)
+			d.waitProcessed(t, 1)
 
-			// Seed the /f estimate to 1000 from its first response.
-			d.send(nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 1000, "1000"))
-			for i := 0; i < 2; i++ {
-				d.send(nginxLineCrange(fmt.Sprintf("%d", 1734345935+i), "203.0.113.7", tt.method, "/f", tt.status, tt.sent, tt.clen, tt.crange))
+			recs := d.logs.withMessage("SEEN:")
+			if len(recs) != 1 {
+				t.Fatalf("SEEN: records = %+v, want exactly 1 (the line is kept, whatever its size fields)", recs)
 			}
-			for i := 0; i < 2; i++ {
-				d.send(nginxLineClen(fmt.Sprintf("%d", 1734345937+i), "203.0.113.7", "GET", "/f", 200, 10000000, ""))
-			}
-			d.waitProcessed(t, 5)
-
-			doc := d.getReports(t, nil)
-			if len(doc.Reports) != 1 {
-				t.Fatalf("reports = %+v, want exactly 1 (the overflow)", doc.Reports)
-			}
-			r := doc.Reports[0]
-			if r.Tracker.Value != 3 {
-				t.Errorf("tracker value = %v, want 3 (three unit fractions at trigger)", r.Tracker.Value)
-			}
-			if r.Sample.SizeBytes != tt.wantSize {
-				t.Errorf("sample size = %d, want %d", r.Sample.SizeBytes, tt.wantSize)
+			var ev sampleEntry
+			attrInto(t, recs[0], "event", &ev)
+			if ev.SizeBytes != tt.wantSize {
+				t.Errorf("logged event size_bytes = %d, want %d", ev.SizeBytes, tt.wantSize)
 			}
 		})
 	}
 }
 
+// TestE2ESizeFiltersMatchTheServedSize: size predicates decide over the
+// served size with no enrichment anywhere in the file - `size >=` and
+// `size <=` match known sizes only, `size unknown` selects exactly the
+// responses without usable size information (zero means unknown).
+func TestE2ESizeFiltersMatchTheServedSize(t *testing.T) {
+	clock := newTestClock(mustTime(t, wallBase))
+	rules := `
+version: 0
+chains:
+  - name: main
+    rules:
+      - id: big
+        filter: 'size >= 1000'
+        actions: [{log: "debug,MARK:BIG"}]
+      - id: small
+        filter: 'size <= 500'
+        actions: [{log: "debug,MARK:SMALL"}]
+      - id: unknown
+        filter: 'size unknown'
+        actions: [{log: "debug,MARK:UNKNOWN"}]
+`
+	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
+
+	// One event per size story; every rule sees every event and only the
+	// matching ones log.
+	d.send(nginxLineClen("1734345934", "203.0.113.7", "GET", "/f", 200, 2000, "2000"))                                // 2000: >= 1000
+	d.send(nginxLineCrange("1734345935", "203.0.113.7", "GET", "/f", 206, 250, "250", "bytes 0-249/3000"))              // 3000 (the total): >= 1000
+	d.send(nginxLineClen("1734345936", "203.0.113.7", "GET", "/f", 200, 100, "100"))                                  // 100: <= 500
+	d.send(nginxLineClen("1734345937", "203.0.113.7", "GET", "/f", 200, 4000, ""))                                    // unknown
+	d.waitProcessed(t, 4)
+
+	want := []string{"MARK:BIG", "MARK:BIG", "MARK:SMALL", "MARK:UNKNOWN"}
+	if got := marks(d); !slices.Equal(got, want) {
+		t.Errorf("marks = %v, want %v (size predicates over the served size)", got, want)
+	}
+}
+
 // TestE2EResumedDownloadAccumulatesTrueFractions: range transfers count
-// as their true fraction of a download, sized by the Content-Range total.
+// as their true fraction of a download, sized by the Content-Range
+// total served with each response.
 func TestE2EResumedDownloadAccumulatesTrueFractions(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -2792,8 +2802,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 2}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -2807,8 +2815,8 @@ chains:
 	}
 
 	// The first download's four range transfers count from request one:
-	// the first range response's Content-Range total seeds the estimate
-	// to the exact total 1000, and each transfer adds its true quarter.
+	// every 206 takes its Filesize from its Content-Range total 1000,
+	// and each transfer adds its true quarter.
 	for i := range ranges {
 		sendRange(i, i)
 	}
@@ -2843,7 +2851,7 @@ chains:
 		t.Errorf("tracker volume = %v, want 2 (the rule's scalar volume)", r.Tracker.Volume)
 	}
 	if r.Sample.SizeBytes != 1000 {
-		t.Errorf("sample size = %d, want the exact total 1000 from Content-Range", r.Sample.SizeBytes)
+		t.Errorf("sample size = %d, want the Content-Range total 1000 served with the response", r.Sample.SizeBytes)
 	}
 	if r.Sample.SentBytes != 250 {
 		t.Errorf("sample sent = %d, want 250", r.Sample.SentBytes)

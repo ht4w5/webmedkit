@@ -58,9 +58,9 @@ The `tracker` reading:
 
 The `sample` is the whole event that justified the report's current
 stance - never a curated subset of its fields. Absent observations
-render under one zero-means-absent convention: `content_length`,
-`content_range_total` and `size_bytes` read `0`, and `remote_addr` and `agent`
-read empty.
+render under one zero-means-absent convention: `content_length` and
+`content_range_total` read `0`, `size_bytes` reads `0` when the served
+size is unknown, and `remote_addr` and `agent` read empty.
 
 | field | type | meaning |
 |---|---|---|
@@ -73,7 +73,7 @@ read empty.
 | `sent_bytes` | number | response payload bytes sent |
 | `content_length` | number | the response's `Content-Length` as the server reported it; `0` when absent or unusable |
 | `content_range_total` | number | the file's total size extracted from the response's `Content-Range`; `0` when absent or unusable |
-| `size_bytes` | number | the estimated total size of `path` in bytes; `0` when unknown |
+| `size_bytes` | number | the file's size as served with the response in bytes (the `Content-Range` total on a 206, the `Content-Length` otherwise when greater than zero); `0` when unknown |
 
 ### Lifecycle
 
@@ -272,7 +272,7 @@ within one leak second:
         "sent_bytes": 6000,
         "content_length": 6000,
         "content_range_total": 3000000,
-        "size_bytes": 0
+        "size_bytes": 3000000
       },
       "penalty": {
         "action": "limit-bandwidth",

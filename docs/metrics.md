@@ -63,7 +63,7 @@ gauges are bare.
 | `bandage_rule_events_total` | counter | Events evaluated against the rule since daemon start. |
 | `bandage_rule_events_matched_total` | counter | Events that matched the rule since daemon start. |
 | `bandage_enrichment_runs_total` | counter | Enrichment runs for the rule and enrichment since daemon start. |
-| `bandage_enrichment_runs_observed_total` | counter | Enrichment runs that fed the enrichment's learned state since daemon start. |
+| `bandage_enrichment_runs_observed_total` | counter | Enrichment runs that fed the kind's state since daemon start. |
 | `bandage_enrichment_runs_enriched_total` | counter | Enrichment runs that produced a non-default derived value since daemon start. |
 | `go_info` | gauge | Information about the Go environment. |
 | `go_goroutines` | gauge | Number of goroutines that currently exist. |
@@ -86,7 +86,7 @@ each carry two labels, `rule` and `enrichment`, holding the (rule,
 enrichment) pair: `bandage_enrichment_runs_total` counts the pair's
 enrichment runs since daemon start,
 `bandage_enrichment_runs_observed_total` the subset that fed the
-enrichment's learned state,
+kind's state,
 `bandage_enrichment_runs_enriched_total` the subset that produced a
 non-default derived value. Cardinality is fixed per configuration: no
 family's series count is ever a function of traffic - the rule families'
@@ -98,12 +98,10 @@ match.
 
 The enrichment families carry the **Enrichment counter**
 ([GLOSSARY.md](../GLOSSARY.md)) per (rule, enrichment) pair; its three
-quantities are fixed for every kind, meanings defined per kind. The
-Filesize enrichment's `observed` counts the runs that fed the estimate
-- its Sampling-rule-eligible responses ([GLOSSARY.md](../GLOSSARY.md))
-- and its `enriched` the runs that produced a non-default derived
-value. A kind without learned state reports `observed` equal to
-`total`, never an omitted quantity.
+quantities are fixed for every kind, meanings defined per kind. No
+enrichment kind is registered today: the families keep their names,
+labels and shape and emit no series without counter-enabled pairs -
+the per-kind semantics arrive with the first kind.
 
 The `bandage_` families mirror their **Stats** counterparts field
 for field - a dropped line is the same event on both surfaces. For the
@@ -259,7 +257,7 @@ bandage_rule_events_matched_total{rule="zeta"} 3
 # TYPE bandage_enrichment_runs_total counter
 bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
 bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
-# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the enrichment's learned state since daemon start.
+# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the kind's state since daemon start.
 # TYPE bandage_enrichment_runs_observed_total counter
 bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
 bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0

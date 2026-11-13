@@ -25,36 +25,61 @@ migration" correction.
 
 **Status:** ready-for-agent
 
-- [ ] Filesize is derived at parse time: 206 uses the Content-Range
+- [x] Filesize is derived at parse time: 206 uses the Content-Range
       total only; any other status uses the Content-Length when > 0;
       otherwise unknown; no method or status gating beyond the 206 rule
-- [ ] A 206 with a Content-Length but no usable Content-Range total
+- [x] A 206 with a Content-Length but no usable Content-Range total
       reads as unknown - partial lengths never become Filesize
-- [ ] A malformed Content-Length drops the line like any invalid
+- [x] A malformed Content-Length drops the line like any invalid
       field; an unusual Content-Range degrades to unknown and never
       drops the line
-- [ ] Filesize is original parse-time state on the Event; the
+- [x] Filesize is original parse-time state on the Event; the
       evaluation-entry derived-field reset is gone
-- [ ] The filesize enrichment and every trace of learned state (EWMA
+- [x] The filesize enrichment and every trace of learned state (EWMA
       record, cache port and store adapter, window constant, cache
       namespace) are deleted
-- [ ] The enrichment kind vocabulary is empty; every enrich Action
+- [x] The enrichment kind vocabulary is empty; every enrich Action
       fails load with an error naming the type and "no enrichment
       types are available"; the enrich action stays valid syntax
-- [ ] Replay blind-skips unknown sizes exactly as before; a 206
+- [x] Replay blind-skips unknown sizes exactly as before; a 206
       transfer counts its true fraction of the file; a full response
       counts 1; increments stay capped at 1
-- [ ] `size >=`, `size <=` and `size unknown` keep their established
+- [x] `size >=`, `size <=` and `size unknown` keep their established
       meaning over the served size (zero = unknown, nothing else)
-- [ ] Shipped and example rules files carry no enrich rules and load
+- [x] Shipped and example rules files carry no enrich rules and load
       cleanly; size predicates work with no enrichment in the file
-- [ ] Glossary defines Filesize as served size and carries no Sampling
+- [x] Glossary defines Filesize as served size and carries no Sampling
       rule; ingest, rules and metrics documents tell the served-size
       story and no longer teach the enrich-rule composition
-- [ ] Behavior lands at the existing seams: the assembled-daemon
+- [x] Behavior lands at the existing seams: the assembled-daemon
       end-to-end suite covers the derivation outcomes, chunked-download
       fractions and load errors; the parser field-contract tests cover
       the derivation table and validation asymmetry; suite passes
       race-enabled
 
 ## Comments
+
+Implementer notes (ticket 01):
+
+- Load-error wording: `action enrich: type: unknown enrichment type
+  "<type>" (no enrichment types are available)` (and
+  `type: required (no enrichment types are available)` for a missing
+  type). The block's shape checks run before the vocabulary check, so
+  a malformed `counter` still names its key.
+- Enrichment-counting tests through the assembled daemon died with the
+  demand domain (no enrich action can load); the counter surfaces'
+  explicit empty state stays pinned at the daemon seam, the block
+  entry shape and family series contract where they are
+  fixture-driven (httpapi tests), and the evaluator's counting point
+  at the evaluation seam. Counting semantics return with the first
+  kind.
+- The metrics canonical example keeps `enrichment="filesize"` sample
+  label values as fixture data (the contract pins lose only the
+  observed HELP semantics per the spec's Testing Decisions); flagging
+  in case the main agent prefers neutral label values.
+- `configs/site/rules.yml` (untracked in git) also carries a
+  `enrich-filesize` rule; not touched from the worktree.
+- Docs state the served-size contract without citing a rationale ADR;
+  ticket 03 may link ADR 0032 from the Glossary Filesize entry,
+  docs/ingest.md and docs/rules.md where the derivation is stated.
+

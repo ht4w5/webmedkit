@@ -30,10 +30,6 @@ import (
 // sweeps and the periodic stats log.
 const sweepInterval = time.Minute
 
-// File-size enrichment parameters (ADR 0019): the EWMA window.
-// Not configurable by design.
-const filesizePeriod = 5
-
 // EventParser turns one raw log line into a domain Event; an error
 // drops and counts the line.
 type EventParser interface {

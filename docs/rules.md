@@ -97,7 +97,7 @@ sees it - in the double-quoted spelling a regex `\.` must instead be
 doubled to `"\\."`.
 
 `sent` decides over the bytes the event actually transferred; `size`
-decides over the served content's Filesize estimate
+decides over the served content's Filesize
 ([GLOSSARY.md](../GLOSSARY.md)) - never conflated. A `size` comparison
 is inclusive at the boundary and considers only events whose Filesize
 is known: an event whose size is unknown is never claimed by `size >=`
@@ -105,10 +105,10 @@ or `size <=`. `size unknown` selects exactly those unknown-size events,
 the complement of every comparison; its own complement is spelled
 `not size unknown` - there is deliberately no `size known` synonym and
 no equality operator on `size`. The degenerate limits are well-defined
-because a learned size is never 0: `size >= 0` matches every known
+because a known Filesize is never 0: `size >= 0` matches every known
 size and `size <= 0` matches nothing. Size 0 means unknown
 ([ADR 0024](adr/0024-size-0-means-unknown.md)) - empty content is
-indistinguishable from not-yet-known
+indistinguishable from unknown
 ([GLOSSARY.md](../GLOSSARY.md)).
 
 `path regex '…'` and `agent regex '…'` compile their pattern when the
@@ -122,92 +122,42 @@ two are deliberately independent.
 
 ## The `enrich` action
 
-An `enrich` action in a rule's action list - `enrich: {type: filesize}`
-- runs the named enrichment for the event where that rule matches, and
+An `enrich` action in a rule's action list - `enrich: {type: <kind>}` -
+runs the named enrichment for the event where that rule matches, and
 nowhere else: demand-driven enrichment
-([ADR 0028](adr/0028-enrichment-as-rule-actions.md)). The enrich
-action's rule filter is the enrichment's **demand domain** - which
-events get enriched is decided in the same file as everything else the
-rules decide, and cannot drift from the rules it serves. An eligible
-response contributes an observation only when its event reaches an
-enrich action (the **Sampling rule**, [GLOSSARY.md](../GLOSSARY.md));
-traffic no rule asks about touches no enrichment state - no
-observation, no cache entry.
+([ADR 0028](adr/0028-enrichment-as-rule-actions.md)). The action is
+**reserved plumbing**: it stays valid rules syntax and `bandage -t`
+keeps showing it inline in its rule's action list like every other
+action (`enrich type=<kind>`, with ` counter=true` appended when the
+pair's counter is enabled), but no enrichment kinds are registered
+today - so every enrich action fails load, naming its type and stating
+that no enrichment types are available. A leftover `type: filesize`
+action is caught at load, loudly and helpfully; the kind vocabulary
+and this section's worked examples return with the first kind.
 
-The enrichments are global and static: one instance per kind, shared
-by every enrich action naming it, with no per-action instance or
-configuration - one enrichment kind means one thing across the file.
-`filesize` is the only kind today: the Filesize estimate from response
-sizes ([ADR 0019](adr/0019-filesize-from-response-sizes.md)). The
-action joins every action list - rule actions and ladder rungs alike
-(a rung's actions run only when the rung fires) - and is non-terminal:
-the event continues through the chain's remaining rules
-([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md)).
-
-**Ordering: derived fields feed the subsequent rules only.** The
-action runs where every action runs - on Match, after its own rule's
-tracker update - so a rule's tracker never consumes the derived fields
-the rule's own enrich action produced. A terminal action upstream of
-the enrich rule (`stop`, or `goto`'s "this chain ends") starves the
-estimate on that path (the stop-skew): the event never reaches the
-enrich action and never observes (accepted and recorded in ADR 0028;
-while nothing observes the path the estimate stays unknown and
-replay stays blind).
-
-The documented composition for feeding a replay tracker is therefore a
-**tracker-less enrich rule ahead of the consuming rule** - it turns
-replay's blindness to unknown sizes into live volume tracking:
-
-```yaml
-version: 0
-chains:
-  - name: main
-    rules:
-      - id: enrich-iso-size
-        filter: 'path suffix ".iso"'
-        actions: [{enrich: {type: filesize}}]
-      - id: iso-replay
-        tracker: {track: replay, leak: 0.1, volume: 3}
-        actions:
-          - report:
-              reason: iso-replay-overflow
-              ttl: 24h
-              penalty: limit-bandwidth
-              rate: 1MB
-```
-
-Nothing memoizes enrichment per event: when the rules enrich one event
-twice - two enrich actions traversed, or a chain dispatched twice for
-one event - the enrichment runs twice and observes twice. The counts
-count runs, not events, and preventing double enrichment is the rules
-author's responsibility (GLOSSARY: Enrichment counter).
-
-An enrich action may carry its own `counter` key (optional, default
-`false`), enabling that (rule, enrichment) pair's **Enrichment
-counter** ([GLOSSARY.md](../GLOSSARY.md)) - the pair's runs, the subset
-that fed the enrichment's learned state and the subset that produced a
-non-default derived value, cumulative since daemon start. As with the
-rule-level `counter`, the key is all-or-nothing: an absent key means
-the default, while a written `counter` must carry `true` or `false` -
-a written null fails load like any other typo. Pairs without `counter`
-count nothing and stay out of the operator surfaces.
-
-`bandage -t` shows each enrich action inline in its rule's action
-list, like every other action - `counter=true` appended when the
-pair's counter is enabled:
-
-```
-    action enrich type=filesize
-    action enrich type=filesize counter=true
-```
+The action joins every action list - rule actions and ladder rungs
+alike (a rung's actions run only when the rung fires) - and is
+non-terminal: the event continues through the chain's remaining rules
+([ADR 0027](adr/0027-only-goto-and-stop-are-terminal.md)). Its block
+takes exactly two keys: `type` (required) and `counter` (optional,
+default `false`). As with the rule-level `counter`, the key is
+all-or-nothing: an absent key means the default, while a written
+`counter` must carry `true` or `false` - a written null fails load
+like any other typo. Enabling it counts that (rule, enrichment) pair's
+**Enrichment counter** ([GLOSSARY.md](../GLOSSARY.md)) - the pair's
+runs and their outcomes, cumulative since daemon start - shown on
+`/api/stats`, the Web Panel's Stats page and `/metrics`; pairs without
+`counter` count nothing and stay out of the operator surfaces.
 
 Load refuses a rules file where an enrich action names an unknown
-`type` or carries an unknown key - each error naming what it rejected -
-and where the old top-level `enrichment` block appears at all: the
-block and `enrichment.filter` are gone with the pre-evaluation
-enrichment path, and the load error names the migration to enrich
-actions. Disabling an enrichment means removing its enrich actions:
-the file always describes exactly what runs.
+`type`, carries an unknown key or writes a malformed `counter` - each
+error naming what it rejected - and where the old top-level
+`enrichment` block appears at all: the block and `enrichment.filter`
+are gone with the pre-evaluation enrichment path, and the block fails
+load through the strict decoder's unknown-key refusal like any other
+removed syntax (ADR 0028's review note). Enabling or disabling an
+enrichment means editing its enrich actions: the file always
+describes exactly what runs.
 
 ## `reason_prefix`
 
@@ -580,15 +530,16 @@ validated by the same action parser as rule actions, and rung
 `goto`/`jump` targets join the same acyclic chain-graph validation.
 
 Replay measures traffic in download equivalents: each event counts its
-transferred fraction of the path's **Filesize** - the estimated total
-size of the path's content, learned from response sizes
-(`Content-Length` on GET/HEAD 200, `Content-Range` totals on GET 206),
-never from the bytes a request happened to transfer
-([GLOSSARY.md](../GLOSSARY.md),
-[ADR 0019](adr/0019-filesize-from-response-sizes.md)). While the
-estimate is unknown - the path not yet observed, or a log emitter
-without the response-size fields - replay is blind and the event adds
-nothing to the tracker.
+transferred fraction of the path's **Filesize** - the size as served
+with its own response (the `Content-Range` total on a 206, the
+`Content-Length` otherwise when greater than zero;
+[GLOSSARY.md](../GLOSSARY.md)) - never the bytes a request happened to
+transfer. A resumed download converges to one increment: each 206
+counts its true fraction of the file, a full response counts 1, and
+increments are capped at 1 per event. While the Filesize is unknown -
+the response served no usable size, or a log emitter without the
+response-size fields - replay is blind and the event adds nothing to
+the tracker.
 
 Replay's `volume` is a plain scalar in those download equivalents
 (`2` means two full downloads of the path, whatever its size)

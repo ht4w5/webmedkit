@@ -68,23 +68,9 @@ func (l *captureLogger) Log(_ domain.Level, _ string, fields map[string]any) {
 // harness assembles a service around one replay rule and exposes the
 // stubs' recorded state.
 type harness struct {
-	svc    *Service
-	sink   *stubSink
-	cch    *stubCache
-	enrich *stubEnrichments
-}
-
-// stubEnrichments is an Enrichments double: the kind's run assigns the
-// canned derived size - the value production's enrich action sets for
-// the event during evaluation.
-type stubEnrichments struct {
-	size int64
-}
-
-func (s *stubEnrichments) Enrich(_ context.Context, _ string, ev *domain.Event) (bool, bool, error) {
-	ev.SizeBytes = s.size
-	ok := s.size != domain.FilesizeUnknown
-	return ok, ok, nil
+	svc  *Service
+	sink *stubSink
+	cch  *stubCache
 }
 
 // stubEnrichCounters is an EnrichmentCounters double recording the
@@ -111,21 +97,14 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 	}
 	sink := &stubSink{}
 	cache := &stubCache{}
-	enrich := &stubEnrichments{}
 	chains := []domain.Chain{{
 		Name: domain.EntryChain,
-		Rules: []domain.Rule{
-			// The tracker-less enrich rule ahead of the consuming rule
-			// (ADR 0028): derived fields are set by enrich actions during
-			// evaluation - the entry reset wipes any pre-set value.
-			{ID: "enrich-size", Filter: matchAll{}, Actions: []domain.Action{{Enrich: &domain.EnrichAction{Type: "filesize"}}}},
-			{
-				ID:      "iso-replay",
-				Filter:  matchAll{},
-				Tracker: cfg,
-				Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "iso-replay", TTL: time.Hour}}},
-			},
-		},
+		Rules: []domain.Rule{{
+			ID:      "iso-replay",
+			Filter:  matchAll{},
+			Tracker: cfg,
+			Actions: []domain.Action{{Report: &domain.ReportAction{Reason: "iso-replay", TTL: time.Hour}}},
+		}},
 	}}
 	return &harness{
 		svc: NewService(Deps{
@@ -134,25 +113,20 @@ func newHarness(t *testing.T, cfg *domain.TrackerConfig) *harness {
 			Cache:              cache,
 			Reports:            sink,
 			Counters:           NopCounters{},
-			Enrichments:        enrich,
+			Enrichments:        NopEnrichments{},
 			EnrichmentCounters: NopEnrichmentCounters{},
 			Now:                func() time.Time { return time.Unix(1000, 0) },
 			Logger:             NopLogger{},
 		}),
-		sink:   sink,
-		cch:    cache,
-		enrich: enrich,
+		sink: sink,
+		cch:  cache,
 	}
 }
 
 func (h *harness) evaluate(t *testing.T, ev *domain.Event) {
 	t.Helper()
-	// The event's canned derived size rides the stub enrichment: the
-	// entry reset wipes pre-set derived fields, so the enrich action is
-	// what feeds the tracker in this model.
-	if h.enrich != nil {
-		h.enrich.size = ev.SizeBytes
-	}
+	// The event's Filesize is parse-time state (the size as served),
+	// carried by the event itself - no enrichment feeds the tracker.
 	if err := h.svc.Evaluate(context.Background(), ev); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
 	}
@@ -162,9 +136,6 @@ func (h *harness) evaluate(t *testing.T, ev *domain.Event) {
 // propagate (a failed write aborts the action list).
 func (h *harness) evaluateErr(t *testing.T, ev *domain.Event) {
 	t.Helper()
-	if h.enrich != nil {
-		h.enrich.size = ev.SizeBytes
-	}
 	if err := h.svc.Evaluate(context.Background(), ev); err == nil {
 		t.Fatalf("Evaluate error = nil, want the failed report write to propagate")
 	}
@@ -216,7 +187,7 @@ func event(at int64, path string, sent, size int64) *domain.Event {
 	}
 }
 
-// Unknown size estimates are skipped entirely: no increment, no decay, no
+// Unknown served sizes are skipped entirely: no increment, no decay, no
 // cache touch - no Match is possible while the size stays unknown.
 func TestReplaySkipsUnknownSize(t *testing.T) {
 	h := newHarness(t, &domain.TrackerConfig{
@@ -232,8 +203,8 @@ func TestReplaySkipsUnknownSize(t *testing.T) {
 	}
 }
 
-// The increment is the transferred fraction of the estimated size, capped
-// at 1 per event.
+// The increment is the transferred fraction of the response's served
+// Filesize, capped at 1 per event.
 func TestReplayFractionIncrement(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -323,7 +294,7 @@ func TestReplayDecayAndOverflow(t *testing.T) {
 }
 
 // The reading's volume is the rule's plain scalar - constant per rule,
-// whatever the event's estimated file size (spec: Volume-method removal).
+// whatever the event's served file size (spec: Volume-method removal).
 func TestReplayReadingVolumeConstantPerRule(t *testing.T) {
 	cfg := &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0, Volume: 2}
 	h := newHarness(t, cfg)
@@ -354,7 +325,7 @@ func TestReplayTTLDerivedPerEvent(t *testing.T) {
 	cfg := &domain.TrackerConfig{Kind: domain.TrackReplay, Leak: 0.5, Volume: 2}
 	h := newHarness(t, cfg)
 
-	// Every event carries the same TTL whatever the estimated size: the
+	// Every event carries the same TTL whatever the served size: the
 	// volume is constant per rule (spec: Volume-method removal).
 	h.evaluate(t, event(100, "/a", 100, 100))
 	h.evaluate(t, event(101, "/a", 2000, 2000))
@@ -604,8 +575,8 @@ func TestEvaluateCountsOneEnrichRunPerTraversal(t *testing.T) {
 	chains := []domain.Chain{{Name: domain.EntryChain, Rules: []domain.Rule{{
 		ID: "enrich-twice", Filter: matchAll{},
 		Actions: []domain.Action{
-			{Enrich: &domain.EnrichAction{Type: "filesize"}},
-			{Enrich: &domain.EnrichAction{Type: "filesize"}},
+			{Enrich: &domain.EnrichAction{Type: "probe"}},
+			{Enrich: &domain.EnrichAction{Type: "probe"}},
 		},
 	}}}}
 	svc := NewService(Deps{
@@ -617,12 +588,12 @@ func TestEvaluateCountsOneEnrichRunPerTraversal(t *testing.T) {
 	if err := svc.Evaluate(context.Background(), event(100, "/a", 100, 0)); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
 	}
-	if !slices.Equal(enrich.kinds, []string{"filesize", "filesize"}) {
+	if !slices.Equal(enrich.kinds, []string{"probe", "probe"}) {
 		t.Errorf("enrichment invocations = %v, want one per enrich action traversed, by kind name (no memoization)", enrich.kinds)
 	}
 	want := []enrichCountCall{
-		{ruleID: "enrich-twice", kind: "filesize", observed: true},
-		{ruleID: "enrich-twice", kind: "filesize", observed: true},
+		{ruleID: "enrich-twice", kind: "probe", observed: true},
+		{ruleID: "enrich-twice", kind: "probe", observed: true},
 	}
 	if !slices.Equal(counts.calls, want) {
 		t.Errorf("counting points = %+v, want %+v (one Run per run, carrying its outcomes)", counts.calls, want)

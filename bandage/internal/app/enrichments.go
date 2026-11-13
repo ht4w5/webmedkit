@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/HT4w5/webmedkit/bandage/internal/domain"
-	"github.com/HT4w5/webmedkit/bandage/internal/domain/enrichment"
 	"github.com/HT4w5/webmedkit/bandage/internal/infra/cache/memory"
 )
 
@@ -24,26 +23,29 @@ type enrichmentRunner interface {
 // instance. It is the single source both the loader validates enrich
 // action types against and daemon assembly builds from, so the
 // vocabulary the loader accepts and the instances the daemon serves
-// cannot drift.
-var enrichmentBuilders = map[string]func(cache *memory.Store) (enrichmentRunner, error){
-	"filesize": func(cache *memory.Store) (enrichmentRunner, error) {
-		return enrichment.NewFilesizeEnricher(memory.NewFilesize(cache), filesizePeriod)
-	},
-}
+// cannot drift. The vocabulary is empty today - no enrichment kind is
+// registered - so every enrich action fails load; the map stays as the
+// seam the first kind lands in.
+var enrichmentBuilders = map[string]func(cache *memory.Store) (enrichmentRunner, error){}
 
 // enrichmentTypeWant names the closed vocabulary for load errors,
-// built from the single source (enrichmentBuilders): (want "filesize").
+// built from the single source (enrichmentBuilders): (want "filesize")
+// for one kind; the empty vocabulary states that no enrichment types
+// are available.
 var enrichmentTypeWant = func() string {
 	names := make([]string, 0, len(enrichmentBuilders))
 	for name := range enrichmentBuilders {
 		names = append(names, fmt.Sprintf("%q", name))
 	}
 	slices.Sort(names)
-	last := len(names) - 1
-	if last == 0 {
+	switch last := len(names) - 1; {
+	case last < 0:
+		return "(no enrichment types are available)"
+	case last == 0:
 		return "(want " + names[0] + ")"
+	default:
+		return "(want " + strings.Join(names[:last], ", ") + " or " + names[last] + ")"
 	}
-	return "(want " + strings.Join(names[:last], ", ") + " or " + names[last] + ")"
 }()
 
 // knownEnrichmentType reports whether type names a known enrichment
