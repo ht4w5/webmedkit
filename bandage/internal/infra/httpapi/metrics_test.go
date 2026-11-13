@@ -120,7 +120,7 @@ bandage_rule_events_matched_total{rule="zeta"} 3
 # TYPE bandage_enrichment_runs_total counter
 bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
 bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
-# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the enrichment's learned state since daemon start.
+# HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the kind's state since daemon start.
 # TYPE bandage_enrichment_runs_observed_total counter
 bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
 bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0

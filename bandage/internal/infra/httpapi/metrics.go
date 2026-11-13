@@ -165,7 +165,7 @@ var metricFamilies = []metricFamily{
 	{
 		name:   "bandage_enrichment_runs_observed_total",
 		kind:   metricCounter,
-		help:   "Enrichment runs that fed the enrichment's learned state since daemon start.",
+		help:   "Enrichment runs that fed the kind's state since daemon start.",
 		series: enrichmentSeries(func(ec EnrichmentCounter) float64 { return float64(ec.Observed) }),
 	},
 	{

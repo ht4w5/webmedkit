@@ -21,21 +21,13 @@ Distinct from the Web Panel's client-side report filter.
 _Avoid_: where clause, condition
 
 **Filesize**:
-The total size of a path's content, learned from observed response sizes
-(Content-Length on GET/HEAD 200, Content-Range totals on GET 206). A
-path's estimate exists from its first observation and each later
-observation refines it. Unknown until that first observation. Empty
-content is indistinguishable from not-yet-known.
-_Avoid_: size index, file length
-
-**Sampling rule**:
-The fixed, non-configurable rule deciding which observations are eligible
-for the Filesize estimate - GET/HEAD 200 with a non-empty Content-Length,
-GET 206 with a non-empty Content-Range total. Eligibility alone never
-observes: an observation happens when an enrichment runs for the event, and
-one event may contribute several. Not a
-Filter.
-_Avoid_: ewma filter, eligibility filter
+The size of a path's content as served with a response: the
+`Content-Range` total on a 206, the `Content-Length` otherwise when
+greater than zero. Each response reports its own representation's
+size; a response without usable size information has unknown Filesize.
+Zero means unknown and nothing else: empty content is
+indistinguishable from unknown.
+_Avoid_: size index, file length, estimate
 
 ### Rules
 
@@ -207,7 +199,7 @@ _Avoid_: tally, rule stats, hit counter
 
 **Enrichment counter**:
 The accounting of one enrichment's runs at one rule: the runs (its
-`total`), the subset that fed the enrichment's learned state (its
+`total`), the subset that fed the kind's state (its
 `observed`), and the subset that produced its non-default derived value
 (its `enriched`), cumulative since daemon start. Where the Rule counter
 counts events per rule, an Enrichment counter counts an enrichment's
