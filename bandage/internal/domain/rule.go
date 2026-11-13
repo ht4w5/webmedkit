@@ -13,8 +13,8 @@ const (
 	TrackRate TrackKind = "rate"
 	// TrackBandwidth accumulates sent bytes (flux BYTE-BUCKET).
 	TrackBandwidth TrackKind = "bandwidth"
-	// TrackReplay accumulates the transferred fraction of an estimated
-	// file size (flux FILE-RATIO-BUCKET); keyed per (Target, path).
+	// TrackReplay accumulates the transferred fraction of the file's
+	// served size (flux FILE-RATIO-BUCKET); keyed per (Target, path).
 	TrackReplay TrackKind = "replay"
 )
 

@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// FilesizeUnknown marks an event whose estimated file size is not known
-// yet (the path has never been observed).
+// FilesizeUnknown marks an event whose Filesize is unknown - no usable
+// size as served. Zero means unknown and nothing else (ADR 0024): empty
+// content is indistinguishable from unknown.
 const FilesizeUnknown int64 = 0
 
 // Event is a single parsed access-log record as it flows through
@@ -42,9 +43,10 @@ type Event struct {
 	// ContentRangeTotal is the file's total size extracted from the
 	// response's Content-Range; 0 means absent or unusable.
 	ContentRangeTotal int64 `json:"content_range_total"`
-
-	// Derived fields, set by enrichment.
 	// SizeBytes renders under its contract key "size_bytes", the
-	// estimated total size of Path in bytes.
+	// Filesize: the file's size as served with this response (GLOSSARY:
+	// Filesize) - the Content-Range total on a 206, the Content-Length
+	// otherwise when greater than zero. It is parse-time state; 0 means
+	// unknown (FilesizeUnknown).
 	SizeBytes int64 `json:"size_bytes"`
 }

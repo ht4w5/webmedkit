@@ -2,11 +2,14 @@ package nginx
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/HT4w5/webmedkit/bandage/internal/domain"
 )
 
 // fullLine is a full-shape bandage nginx log format line (optional, reserved
@@ -45,8 +48,58 @@ func TestParseFieldMapping(t *testing.T) {
 	if ev.Agent != "Wget/1.21" {
 		t.Errorf("Agent = %q, want %q", ev.Agent, "Wget/1.21")
 	}
-	if ev.SizeBytes != 0 {
-		t.Errorf("SizeBytes = %d, want 0 (file size unknown until enrichment)", ev.SizeBytes)
+	if ev.SizeBytes != 234567 {
+		t.Errorf("SizeBytes = %d, want 234567 (the served size: the Content-Length on a non-206)", ev.SizeBytes)
+	}
+}
+
+// TestParseServedSizeDerivation pins the Filesize derivation table: a
+// 206 takes its Content-Range total only - its partial Content-Length
+// never masquerades as a file size - any other response its
+// Content-Length when greater than zero; otherwise unknown. No method
+// or status gating beyond the 206 rule.
+func TestParseServedSizeDerivation(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		status int
+		clen   string // the raw JSON member; "<absent>" omits it
+		crange string
+		want   int64  // the Filesize; 0 = unknown
+	}{
+		{"200 takes its Content-Length", "GET", 200, `"4000"`, "<absent>", 4000},
+		{"200 with a zero Content-Length is unknown", "GET", 200, `"0"`, "<absent>", 0},
+		{"200 without a Content-Length is unknown", "GET", 200, "<absent>", "<absent>", 0},
+		{"200 with only a Content-Range is unknown", "GET", 200, "<absent>", `"bytes 0-3999/5000"`, 0},
+		{"206 takes its Content-Range total over its Content-Length", "GET", 206, `"4000"`, `"bytes 0-3999/5000"`, 5000},
+		{"206 never takes its Content-Length", "GET", 206, `"4000"`, "<absent>", 0},
+		{"206 unsatisfied range takes the total", "GET", 206, "<absent>", `"bytes */5000"`, 5000},
+		{"206 with a star total is unknown", "GET", 206, `"4000"`, `"bytes 0-3999/*"`, 0},
+		{"206 with an unusual Content-Range is unknown", "GET", 206, `"4000"`, `"bytes weird"`, 0},
+		{"304 takes its Content-Length", "GET", 304, `"4000"`, "<absent>", 4000},
+		{"HEAD 200 takes its Content-Length", "HEAD", 200, `"4000"`, "<absent>", 4000},
+		{"404 takes its Content-Length", "GET", 404, `"4000"`, "<absent>", 4000},
+		{"POST 200 takes its Content-Length", "POST", 200, `"4000"`, "<absent>", 4000},
+		{"416 ignores its Content-Range total", "GET", 416, "<absent>", `"bytes */4000"`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := fmt.Sprintf(`{"time":"1734345934","client":"203.0.113.7","method":%q,"url":"/f","status":%d,"sent":0`, tt.method, tt.status)
+			if tt.clen != "<absent>" {
+				line += `,"clen":` + tt.clen
+			}
+			if tt.crange != "<absent>" {
+				line += `,"crange":` + tt.crange
+			}
+			line += `}`
+			ev, err := New().Parse([]byte(line))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if ev.SizeBytes != tt.want {
+				t.Errorf("SizeBytes = %d, want %d", ev.SizeBytes, tt.want)
+			}
+		})
 	}
 }
 
@@ -129,6 +182,9 @@ func TestParseShippedLogFormatLine(t *testing.T) {
 	}
 	if ev.ContentRangeTotal != 234567 {
 		t.Errorf("ContentRangeTotal = %d, want 234567 (the total the shipped crange carries)", ev.ContentRangeTotal)
+	}
+	if ev.SizeBytes != 234567 {
+		t.Errorf("SizeBytes = %d, want 234567 (the served size: the Content-Length on a non-206)", ev.SizeBytes)
 	}
 	if ev.Agent != "curl/8.5.0" {
 		t.Errorf("Agent = %q, want %q", ev.Agent, "curl/8.5.0")
@@ -228,6 +284,9 @@ func TestParseOldFluxLineUnchanged(t *testing.T) {
 	}
 	if ev.ContentRangeTotal != 0 {
 		t.Errorf("ContentRangeTotal = %d, want 0 (old flux lines carry no response range)", ev.ContentRangeTotal)
+	}
+	if ev.SizeBytes != domain.FilesizeUnknown {
+		t.Errorf("SizeBytes = %d, want %d (old flux lines read as unknown sizes)", ev.SizeBytes, domain.FilesizeUnknown)
 	}
 	if ev.SentBytes != 123456 || ev.Path != "/releases/24.04.iso" || ev.Agent != "Wget/1.21" {
 		t.Errorf("event = %+v, want the old line's fields unchanged", ev)

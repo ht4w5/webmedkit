@@ -477,8 +477,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 1, volume: 1}
         actions: [{report: {reason: iso-replay, penalty: limit-bandwidth, rate: 1MB}}]
