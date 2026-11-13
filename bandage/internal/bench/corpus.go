@@ -160,16 +160,6 @@ func (ec eventContent) line(shape LineShape) string {
 
 // event renders the content as the domain Event its line parses to (nginx.Parser mapping).
 func (ec eventContent) event() domain.Event {
-	// The Filesize is derived at parse time (the size as served): the
-	// Content-Range total on a 206, the Content-Length otherwise when
-	// greater than zero.
-	size := domain.FilesizeUnknown
-	switch {
-	case ec.status == 206 && ec.crange > 0:
-		size = ec.crange
-	case ec.status != 206 && ec.clen > 0:
-		size = ec.clen
-	}
 	return domain.Event{
 		Time:       time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
 		RemoteAddr: netip.MustParseAddr(ec.client),
@@ -178,7 +168,9 @@ func (ec eventContent) event() domain.Event {
 		Agent:      ec.agent,
 		Status:     ec.status,
 		SentBytes:  ec.sent,
-		SizeBytes:  size,
+		// The Filesize is the size as served, derived like the parser
+		// derives it (domain.ServedFilesize).
+		SizeBytes: domain.ServedFilesize(ec.status, ec.clen, ec.crange),
 	}
 }
 

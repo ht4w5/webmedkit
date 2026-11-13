@@ -223,17 +223,8 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	}
 
 	// The Filesize is the size as served with this response (GLOSSARY:
-	// Filesize): a 206 takes its Content-Range total only - its partial
-	// Content-Length would masquerade as a file size - any other
-	// response its Content-Length when greater than zero. No method or
-	// status gating beyond the 206 rule; an unusable or absent source
-	// stays unknown (zero means unknown, ADR 0024).
-	switch {
-	case ev.Status == 206 && contentRangeTotal > 0:
-		ev.SizeBytes = contentRangeTotal
-	case ev.Status != 206 && contentLength > 0:
-		ev.SizeBytes = contentLength
-	}
+	// Filesize; ADR 0032): derived from the validated fields above.
+	ev.SizeBytes = domain.ServedFilesize(ev.Status, contentLength, contentRangeTotal)
 
 	// agent is optional; when present it must be a string (null = absent).
 	if raw = fields.Agent; raw.present && !isNull(raw) {

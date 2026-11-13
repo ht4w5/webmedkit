@@ -13,6 +13,23 @@ import (
 // content is indistinguishable from unknown.
 const FilesizeUnknown int64 = 0
 
+// ServedFilesize derives the Filesize from a response as served
+// (GLOSSARY: Filesize): the Content-Range total on a 206 - its partial
+// Content-Length must never masquerade as a file size - and the
+// Content-Length otherwise when greater than zero. There is no method
+// gating, and an unusable or absent source reads as unknown
+// (FilesizeUnknown). The derivation is fixed and total (ADR 0032):
+// every response yields exactly one Filesize.
+func ServedFilesize(status int, contentLength, contentRangeTotal int64) int64 {
+	switch {
+	case status == 206 && contentRangeTotal > 0:
+		return contentRangeTotal
+	case status != 206 && contentLength > 0:
+		return contentLength
+	}
+	return FilesizeUnknown
+}
+
 // Event is a single parsed access-log record as it flows through
 // enrichment and evaluation. A report's Sample carries the Event whole
 // (ADR 0021), and the JSON tags below are the report contract's sample
