@@ -9,7 +9,7 @@ import (
 const DefaultTTL = time.Hour
 
 // MinTTL is the smallest cache-entry TTL: sub-second volume/leak
-// truncates up to it; zero TTL is reserved for the filesize namespace.
+// truncates up to it.
 const MinTTL = time.Second
 
 // maxDurationSecs is the max seconds representable as a time.Duration.

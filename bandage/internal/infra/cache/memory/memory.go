@@ -215,11 +215,8 @@ func (s *Store) evictLocked(sh *shard) []*entry {
 }
 
 // evictionAttrs renders an eviction's identity per the domain's key convention:
-// tracker keys decode to the true Target (plus path), the filesize namespace logs its path.
+// tracker keys decode to the true Target (plus path).
 func evictionAttrs(ev *zerolog.Event, ent *entry) *zerolog.Event {
-	if ent.ns == domain.FilesizeNamespace {
-		return ev.Str("namespace", ent.ns).Str("path", ent.key)
-	}
 	target, path := domain.SplitTrackerKey(ent.key)
 	ev = ev.Str("namespace", ent.ns).Str("target", target)
 	if path != "" {

@@ -24,9 +24,11 @@ func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
 		rules   string
 		wantErr string
 	}{
-		// An unknown enrichment type names the type - a typo can never
-		// silently enrich nothing (story 12).
-		{name: "enrich unknown type names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (want "filesize")`},
+		// An unknown enrichment type names the type and states that no
+		// enrichment types are available - a typo or a leftover enrich
+		// action can never silently enrich nothing.
+		{name: "enrich unknown type names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: fileszie}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "fileszie" (no enrichment types are available)`},
+		{name: "the retired filesize type is caught at load", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: my-rule\n        actions: [{enrich: {type: filesize}}]\n", wantErr: `rule "my-rule": action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
 
 		// Unknown keys in the enrich block fail load naming the key
 		// (story 13).

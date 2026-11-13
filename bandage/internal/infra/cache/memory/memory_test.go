@@ -117,27 +117,6 @@ func TestStoreEvictionLogsTrueTargetAndPath(t *testing.T) {
 	}
 }
 
-// TestStoreEvictionFilesizeLogsPathOnly: filesize evictions carry the path as
-// the record's key and never invent a Target.
-func TestStoreEvictionFilesizeLogsPathOnly(t *testing.T) {
-	buf := &bytes.Buffer{}
-	s := newStore(1, 1, newTestClock(time.Time{}).Now, testLogger(buf))
-
-	update(t, s, domain.FilesizeNamespace, "/a", 0, 1)
-	update(t, s, domain.FilesizeNamespace, "/b", 0, 1) // caps
-
-	logs := buf.String()
-	if !strings.Contains(logs, "namespace=filesize") {
-		t.Errorf("eviction log missing the filesize namespace:\n%s", logs)
-	}
-	if !strings.Contains(logs, "path=/a") {
-		t.Errorf("eviction log missing the path:\n%s", logs)
-	}
-	if strings.Contains(logs, "target=") {
-		t.Errorf("filesize eviction log invents a Target:\n%s", logs)
-	}
-}
-
 // reenterWriter proves the eviction record is emitted outside the shard lock:
 // its Write re-enters the store, which would deadlock under the lock.
 type reenterWriter struct {
@@ -228,12 +207,12 @@ func TestStoreNoTTLEntrySurvivesSweeps(t *testing.T) {
 	clock := newTestClock(time.Time{})
 	s := newStore(4, 1, clock.Now, testLogger(&bytes.Buffer{}))
 
-	update(t, s, domain.FilesizeNamespace, "/releases/24.04.iso", 0, 0.5)
+	update(t, s, "rule-one", "203.0.113.7", 0, 0.5)
 	clock.Advance(48 * time.Hour)
 	s.SweepExpired()
 	s.SweepExpired()
 
-	rec := update(t, s, domain.FilesizeNamespace, "/releases/24.04.iso", 0, 0.25)
+	rec := update(t, s, "rule-one", "203.0.113.7", 0, 0.25)
 	if rec.Value != 0.75 {
 		t.Errorf("no-TTL record = %v, want 0.75 (never expired, never reset)", rec.Value)
 	}

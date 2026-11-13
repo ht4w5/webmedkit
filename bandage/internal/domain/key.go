@@ -5,10 +5,6 @@ import "strings"
 // Tracker-cache key convention: state is stored as (namespace, key)
 // pairs; namespace is the rule ID, key is Target or Target+KeySep.
 
-// FilesizeNamespace is the reserved tracker-cache namespace for
-// file-size enrichment state (keyed by path, no TTL, no Target).
-const FilesizeNamespace = "filesize"
-
 // KeySep joins a Target and a path in a per-(Target, path) tracker key.
 // NUL occurs in neither a Target nor a path, so the join is unambiguous.
 const KeySep = "\x00"
