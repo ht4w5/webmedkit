@@ -34,14 +34,13 @@ var metricsFixture = metricsSnapshot{
 			{ID: "zeta", Total: 12, Matched: 3},
 			{ID: "alpha", Total: 0, Matched: 0},
 		},
-		// Enrichment in rules-file order of pairs (zeta before alpha), so
-		// the golden pins that enrichment series render in rules-file
-		// order - deliberately unsorted, unlike the rule families' rule-ID
-		// order; alpha's zero counts pin the zero series.
-		Enrichment: []EnrichmentCounter{
-			{Rule: "zeta", Enrichment: "filesize", Total: 7, Observed: 5, Enriched: 2},
-			{Rule: "alpha", Enrichment: "filesize", Total: 0, Observed: 0, Enriched: 0},
-		},
+		// No counter-enabled (rule, enrichment) pairs - no enrichment
+		// kind is registered - so the golden pins the enrichment
+		// families' explicit empty state: HELP and TYPE lines, no
+		// series. The series contract (rule and enrichment labels,
+		// rules-file order of pairs) stays pinned fixture-driven in
+		// TestMetricsEnrichmentSeriesRenderInRulesFileOrder.
+		Enrichment: nil,
 	},
 	runtime: Runtime{
 		Version:        "go1.27.0",
@@ -118,16 +117,10 @@ bandage_rule_events_matched_total{rule="alpha"} 0
 bandage_rule_events_matched_total{rule="zeta"} 3
 # HELP bandage_enrichment_runs_total Enrichment runs for the rule and enrichment since daemon start.
 # TYPE bandage_enrichment_runs_total counter
-bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
-bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
 # HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the kind's state since daemon start.
 # TYPE bandage_enrichment_runs_observed_total counter
-bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
-bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0
 # HELP bandage_enrichment_runs_enriched_total Enrichment runs that produced a non-default derived value since daemon start.
 # TYPE bandage_enrichment_runs_enriched_total counter
-bandage_enrichment_runs_enriched_total{rule="zeta",enrichment="filesize"} 2
-bandage_enrichment_runs_enriched_total{rule="alpha",enrichment="filesize"} 0
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1
@@ -257,6 +250,42 @@ func TestMetricsEnrichmentFamiliesRenderNoSeriesWithoutCounters(t *testing.T) {
 			if strings.HasPrefix(line, family) {
 				t.Errorf("body renders a %s sample with no counter configured: %q", family, line)
 			}
+		}
+	}
+}
+
+// The enrichment families' series contract, fixture-driven (the
+// canonical example shows the empty state instead): one series per
+// counter-enabled (rule, enrichment) pair carrying the rule and
+// enrichment labels, rendering in rules-file order of pairs -
+// deliberately unsorted, unlike the rule families' rule-ID order.
+func TestMetricsEnrichmentSeriesRenderInRulesFileOrder(t *testing.T) {
+	snap := metricsFixture
+	// Synthetic kind names, deliberately unsorted across the pairs.
+	snap.stats.Enrichment = []EnrichmentCounter{
+		{Rule: "zeta", Enrichment: "kind-two", Total: 7, Observed: 5, Enriched: 2},
+		{Rule: "alpha", Enrichment: "kind-one", Total: 1, Observed: 0, Enriched: 0},
+	}
+	w := metricsRequest(t, snap, http.MethodGet)
+	body := w.Body.String()
+	for _, tt := range []struct {
+		family string
+		zeta   string
+		alpha  string
+	}{
+		{"bandage_enrichment_runs_total", `bandage_enrichment_runs_total{rule="zeta",enrichment="kind-two"} 7`, `bandage_enrichment_runs_total{rule="alpha",enrichment="kind-one"} 1`},
+		{"bandage_enrichment_runs_observed_total", `bandage_enrichment_runs_observed_total{rule="zeta",enrichment="kind-two"} 5`, `bandage_enrichment_runs_observed_total{rule="alpha",enrichment="kind-one"} 0`},
+		{"bandage_enrichment_runs_enriched_total", `bandage_enrichment_runs_enriched_total{rule="zeta",enrichment="kind-two"} 2`, `bandage_enrichment_runs_enriched_total{rule="alpha",enrichment="kind-one"} 0`},
+	} {
+		zi, ai := strings.Index(body, tt.zeta), strings.Index(body, tt.alpha)
+		if zi < 0 {
+			t.Errorf("body lacks %s sample %q", tt.family, tt.zeta)
+		}
+		if ai < 0 {
+			t.Errorf("body lacks %s sample %q", tt.family, tt.alpha)
+		}
+		if zi >= 0 && ai >= 0 && zi > ai {
+			t.Errorf("%s samples render out of rules-file order: %q before %q", tt.family, tt.alpha, tt.zeta)
 		}
 	}
 }

@@ -206,7 +206,11 @@ the severities to taste.
 ## Example
 
 A complete `GET /metrics` response over a fixed sample snapshot -
-family order and every byte:
+family order and every byte. The snapshot carries no counter-enabled
+(rule, enrichment) pairs and no enrichment kind is registered, so the
+enrichment families render their explicit empty state - their `# HELP`
+and `# TYPE` lines and no series - exactly as a kind-free daemon
+serves them:
 
 ```text
 # HELP bandage_start_time_seconds Seconds since the Unix epoch at which the daemon started.
@@ -255,16 +259,10 @@ bandage_rule_events_matched_total{rule="alpha"} 0
 bandage_rule_events_matched_total{rule="zeta"} 3
 # HELP bandage_enrichment_runs_total Enrichment runs for the rule and enrichment since daemon start.
 # TYPE bandage_enrichment_runs_total counter
-bandage_enrichment_runs_total{rule="zeta",enrichment="filesize"} 7
-bandage_enrichment_runs_total{rule="alpha",enrichment="filesize"} 0
 # HELP bandage_enrichment_runs_observed_total Enrichment runs that fed the kind's state since daemon start.
 # TYPE bandage_enrichment_runs_observed_total counter
-bandage_enrichment_runs_observed_total{rule="zeta",enrichment="filesize"} 5
-bandage_enrichment_runs_observed_total{rule="alpha",enrichment="filesize"} 0
 # HELP bandage_enrichment_runs_enriched_total Enrichment runs that produced a non-default derived value since daemon start.
 # TYPE bandage_enrichment_runs_enriched_total counter
-bandage_enrichment_runs_enriched_total{rule="zeta",enrichment="filesize"} 2
-bandage_enrichment_runs_enriched_total{rule="alpha",enrichment="filesize"} 0
 # HELP go_info Information about the Go environment.
 # TYPE go_info gauge
 go_info{version="go1.27.0"} 1

@@ -64,8 +64,10 @@ Implementer notes (ticket 01):
 - Load-error wording: `action enrich: type: unknown enrichment type
   "<type>" (no enrichment types are available)` (and
   `type: required (no enrichment types are available)` for a missing
-  type). The block's shape checks run before the vocabulary check, so
-  a malformed `counter` still names its key.
+  type). Corrected in the review-fix pass: the type check fires before
+  the block's shape checks, so a doubly-broken block names the type
+  (or its absence), never the `counter` key - the counter key's strict
+  boolean shape returns with the first kind.
 - Enrichment-counting tests through the assembled daemon died with the
   demand domain (no enrich action can load); the counter surfaces'
   explicit empty state stays pinned at the daemon seam, the block
@@ -73,10 +75,12 @@ Implementer notes (ticket 01):
   fixture-driven (httpapi tests), and the evaluator's counting point
   at the evaluation seam. Counting semantics return with the first
   kind.
-- The metrics canonical example keeps `enrichment="filesize"` sample
-  label values as fixture data (the contract pins lose only the
-  observed HELP semantics per the spec's Testing Decisions); flagging
-  in case the main agent prefers neutral label values.
+- Corrected in the review-fix pass: the metrics canonical example
+  shows the enrichment families' explicit empty state (HELP and TYPE
+  lines, no series) instead of keeping `enrichment="filesize"` sample
+  label values as fixture data; the families' series contract stays
+  pinned fixture-driven in `httpapi/metrics_test.go` with synthetic
+  kind values.
 - `configs/site/rules.yml` (untracked in git) also carries a
   `enrich-filesize` rule; not touched from the worktree.
 - Docs state the served-size contract without citing a rationale ADR;

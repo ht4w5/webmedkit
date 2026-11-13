@@ -218,25 +218,27 @@ func TestParseRulesCounterFlag(t *testing.T) {
 	}
 }
 
-// TestParseRulesEnrichActionCounterKeyShape: with the kind vocabulary
-// empty the enrich action's counter key keeps its documented shape
-// (GLOSSARY: Enrichment counter) - a well-formed block rides the
-// vocabulary refusal naming its type, a written non-boolean fails load
-// naming the key.
-func TestParseRulesEnrichActionCounterKeyShape(t *testing.T) {
+// TestParseRulesEnrichActionTypeErrorFirst: with the kind vocabulary
+// empty every enrich action fails load at the type check first - a
+// doubly-broken block names its type (or its absence) and states that
+// no enrichment types are available, never the counter key (story
+// 13). The counter key's strict boolean shape (GLOSSARY: Enrichment
+// counter) returns with the first kind.
+func TestParseRulesEnrichActionTypeErrorFirst(t *testing.T) {
 	tests := []struct {
 		name    string
-		extra   string
+		block   string
 		wantErr string
 	}{
-		{"omitted rides the vocabulary refusal", "", `unknown enrichment type "filesize" (no enrichment types are available)`},
-		{"true rides the vocabulary refusal", ", counter: true", `unknown enrichment type "filesize" (no enrichment types are available)`},
-		{"false rides the vocabulary refusal", ", counter: false", `unknown enrichment type "filesize" (no enrichment types are available)`},
-		{"a written non-boolean names the key", `, counter: "true"`, "action enrich: counter: must be true or false"},
+		{"omitted counter rides the vocabulary refusal", "type: filesize", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"true counter rides the vocabulary refusal", "type: filesize, counter: true", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"false counter rides the vocabulary refusal", "type: filesize, counter: false", `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"a written non-boolean names the type first", `type: filesize, counter: "true"`, `unknown enrichment type "filesize" (no enrichment types are available)`},
+		{"a malformed counter without a type names the missing type", `counter: "true"`, `action enrich: type: required (no enrichment types are available)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize" + tt.extra + "}}]\n"
+			yaml := "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {" + tt.block + "}}]\n"
 			_, err := ParseRules([]byte(yaml))
 			if err == nil {
 				t.Fatalf("ParseRules succeeded, want error containing %q", tt.wantErr)

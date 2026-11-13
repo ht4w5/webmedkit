@@ -34,14 +34,17 @@ func TestE2EPointedLoadFailuresNameWhatTheyReject(t *testing.T) {
 		// (story 13).
 		{name: "enrich unknown key names the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, enabled: true}}]\n", wantErr: `action enrich: unknown key "enabled"`},
 
-		// The counter key is strictly boolean when written - every
-		// written non-boolean fails load naming the key (story 11,
-		// GLOSSARY: Enrichment counter).
-		{name: "enrich quoted counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: \"true\"}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich numeric counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: 1}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich sequence counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: [true]}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich null counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: null}}]\n", wantErr: "action enrich: counter: must be true or false"},
-		{name: "enrich empty counter value rejected naming the key", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: }}]\n", wantErr: "action enrich: counter: must be true or false"},
+		// The type check fires before the counter key's shape check: a
+		// doubly-broken block names its type and states that no
+		// enrichment types are available, never the counter key (story
+		// 13). The counter key's strict boolean shape (GLOSSARY:
+		// Enrichment counter) returns with the first kind.
+		{name: "enrich quoted counter value still names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: \"true\"}}]\n", wantErr: `action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich numeric counter value still names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: 1}}]\n", wantErr: `action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich sequence counter value still names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: [true]}}]\n", wantErr: `action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich null counter value still names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: null}}]\n", wantErr: `action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich empty counter value still names the type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {type: filesize, counter: }}]\n", wantErr: `action enrich: type: unknown enrichment type "filesize" (no enrichment types are available)`},
+		{name: "enrich malformed counter without a type names the missing type", rules: "version: 0\nchains:\n  - name: main\n    rules:\n      - id: r\n        actions: [{enrich: {counter: \"true\"}}]\n", wantErr: `action enrich: type: required (no enrichment types are available)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
