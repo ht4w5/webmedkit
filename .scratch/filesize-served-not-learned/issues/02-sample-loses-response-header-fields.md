@@ -12,7 +12,7 @@ removed keys keep parsing; unknown keys are tolerated by construction.
 **Blocked by:** 01 - Served-size Filesize from the parser (the deleted
 enrichment is the fields' last consumer)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The Event carries no Content-Length or Content-Range total
       fields; the sample wire form renders only the remaining keys

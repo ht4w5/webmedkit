@@ -23,7 +23,7 @@ migration" correction.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Filesize is derived at parse time: 206 uses the Content-Range
       total only; any other status uses the Content-Length when > 0;

@@ -16,7 +16,7 @@ its empty kind vocabulary.
 **Blocked by:** 01 - Served-size Filesize from the parser, and
 02 - The sample loses its response-header fields (it records both)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] One new ADR, "Filesize is served, not learned", covers the
       semantic flip and the wire-key removal
