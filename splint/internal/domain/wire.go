@@ -47,16 +47,14 @@ type Tracker struct {
 // mirrored field for field but acted on by nothing - ban-rule
 // derivation stays Target and Penalty only.
 type Sample struct {
-	Time              string `json:"time"`
-	RemoteAddr        string `json:"remote_addr"`
-	Method            string `json:"method"`
-	Path              string `json:"path"`
-	Agent             string `json:"agent"`
-	Status            int    `json:"status"`
-	SentBytes         int64  `json:"sent_bytes"`
-	ContentLength     int64  `json:"content_length"`
-	ContentRangeTotal int64  `json:"content_range_total"`
-	SizeBytes         int64  `json:"size_bytes"`
+	Time       string `json:"time"`
+	RemoteAddr string `json:"remote_addr"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Agent      string `json:"agent"`
+	Status     int    `json:"status"`
+	SentBytes  int64  `json:"sent_bytes"`
+	SizeBytes  int64  `json:"size_bytes"`
 }
 
 // Penalty is the advisory enforcement stance a report carries

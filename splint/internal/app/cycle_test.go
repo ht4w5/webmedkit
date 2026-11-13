@@ -330,16 +330,14 @@ func TestParseDocumentMirrorsTheCanonicalExampleSample(t *testing.T) {
 		t.Fatalf("reports = %+v, want the canonical example's one entry", doc.Reports)
 	}
 	want := domain.Sample{
-		Time:              "2025-10-17T17:59:35Z",
-		RemoteAddr:        "203.0.113.7",
-		Method:            "GET",
-		Path:              "/releases/24.04.iso",
-		Agent:             "Wget/1.21",
-		Status:            206,
-		SentBytes:         6000,
-		ContentLength:     6000,
-		ContentRangeTotal: 3000000,
-		SizeBytes:         3000000,
+		Time:       "2025-10-17T17:59:35Z",
+		RemoteAddr: "203.0.113.7",
+		Method:     "GET",
+		Path:       "/releases/24.04.iso",
+		Agent:      "Wget/1.21",
+		Status:     206,
+		SentBytes:  6000,
+		SizeBytes:  3000000,
 	}
 	if s := doc.Reports[0].Sample; s != want {
 		t.Errorf("sample = %+v, want %+v (the mirror decodes every contract key)", s, want)
