@@ -57,10 +57,11 @@ The `tracker` reading:
 | `volume` | number | the overflow threshold `value` exceeded; the base of a dynamic entry's death line (below) |
 
 The `sample` is the whole event that justified the report's current
-stance - never a curated subset of its fields. Absent observations
-render under one zero-means-absent convention: `size_bytes` reads `0`
-when the served size is unknown, and `remote_addr` and `agent` read
-empty.
+stance - never a curated subset of its fields. Absent text fields
+render empty: `remote_addr` and `agent` read empty when the log line
+carried none. `size_bytes` reads `0` when the served size is unknown -
+zero means unknown and nothing else
+([ADR 0024](adr/0024-size-0-means-unknown.md)).
 
 | field | type | meaning |
 |---|---|---|
