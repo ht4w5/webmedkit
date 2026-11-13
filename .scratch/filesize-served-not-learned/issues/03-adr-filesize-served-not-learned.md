@@ -18,15 +18,15 @@ its empty kind vocabulary.
 
 **Status:** ready-for-agent
 
-- [ ] One new ADR, "Filesize is served, not learned", covers the
+- [x] One new ADR, "Filesize is served, not learned", covers the
       semantic flip and the wire-key removal
-- [ ] The two learning ADRs carry "Superseded by" trailing notes; the
+- [x] The two learning ADRs carry "Superseded by" trailing notes; the
       two bent ADRs carry "Amended by" trailing notes (new ADR stands
       alone, older ones carry the note)
-- [ ] The rationale records the 206 decision and its chunked-download
+- [x] The rationale records the 206 decision and its chunked-download
       scenario, the validation-asymmetry re-justification, and the
       reserved enrichment plumbing with an empty kind vocabulary
-- [ ] Considered-and-rejected options are recorded (per-event partial
+- [x] Considered-and-rejected options are recorded (per-event partial
       length on 206; keeping the learned estimate; removing the
       enrichment plumbing wholesale)
 
