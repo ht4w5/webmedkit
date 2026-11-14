@@ -427,12 +427,12 @@ chains:
 	if r.Tracker.Value != 160 || r.Tracker.Volume != 150 {
 		t.Errorf("tracker reading = %+v, want value 160 with the overriding rung's threshold 150", r.Tracker)
 	}
-	// The overriding event whole - client address, method and content
-	// observations included (the report's current stance is what it
+	// The overriding event whole - client address, method and served
+	// size included (the report's current stance is what it
 	// justifies).
 	checkSample(t, r.Sample, sampleEntry{
 		Time: eventTime2At, RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big2",
-		Status: 200, SentBytes: 100, ContentLength: 100, ContentRangeTotal: 3000,
+		Status: 200, SentBytes: 100, SizeBytes: 100,
 	})
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T18:30:00Z" || r.ExpiresAt != "2025-10-17T20:30:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 18:30 write with the 2h ttl",
@@ -456,7 +456,7 @@ chains:
 	// The overriding event whole.
 	checkSample(t, r.Sample, sampleEntry{
 		Time: "2024-12-16T10:45:36Z", RemoteAddr: "203.0.113.7", Method: "GET", Path: "/big3",
-		Status: 200, SentBytes: 120, ContentLength: 120, ContentRangeTotal: 5000,
+		Status: 200, SentBytes: 120, SizeBytes: 120,
 	})
 	if r.CreatedAt != wallBase || r.UpdatedAt != "2025-10-17T19:00:00Z" || r.ExpiresAt != "2025-10-18T19:00:00Z" {
 		t.Errorf("created_at/updated_at/expires_at = %q/%q/%q, want created_at frozen and the 19:00 write with the 24h ttl",

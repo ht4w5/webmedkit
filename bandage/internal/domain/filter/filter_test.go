@@ -144,7 +144,7 @@ func TestFilterMatch(t *testing.T) {
 		{"sent g is binary", "sent >= 1g", func(e *domain.Event) { e.SentBytes = 1 << 30 }, true},
 		{"sent zero limit", "sent >= 0", nil, true},
 
-		// size: >= / <= over the Filesize estimate, inclusive at the boundary.
+		// size: >= / <= over the Filesize, inclusive at the boundary.
 		// The base event's Filesize is unknown; these set a known one.
 		{"size gte inclusive boundary", "size >= 1024", func(e *domain.Event) { e.SizeBytes = 1024 }, true},
 		{"size gte above", "size >= 1023", func(e *domain.Event) { e.SizeBytes = 1024 }, true},

@@ -49,3 +49,9 @@ Sampling rule alone still decides what it contributes.
 Amended by ADR 0029: the warm-up gate is gone - a path's estimate
 exists from its first observation and each later observation refines
 it.
+
+Superseded by ADR 0032: Filesize is no longer learned at all - it is
+the served size of each response, derived at parse time. The Sampling
+rule, the EWMA and the learned records die with the learning model,
+and with them the blending and the observation tuning this decision
+kept refining.

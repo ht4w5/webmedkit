@@ -8,9 +8,27 @@ import (
 	"time"
 )
 
-// FilesizeUnknown marks an event whose estimated file size is not known
-// yet (the path has never been observed).
+// FilesizeUnknown marks an event whose Filesize is unknown - no usable
+// size as served. Zero means unknown and nothing else (ADR 0024): empty
+// content is indistinguishable from unknown.
 const FilesizeUnknown int64 = 0
+
+// ServedFilesize derives the Filesize from a response as served
+// (GLOSSARY: Filesize): the Content-Range total on a 206 - its partial
+// Content-Length must never masquerade as a file size - and the
+// Content-Length otherwise when greater than zero. There is no method
+// gating, and an unusable or absent source reads as unknown
+// (FilesizeUnknown). The derivation is fixed and total (ADR 0032):
+// every response yields exactly one Filesize.
+func ServedFilesize(status int, contentLength, contentRangeTotal int64) int64 {
+	switch {
+	case status == 206 && contentRangeTotal > 0:
+		return contentRangeTotal
+	case status != 206 && contentLength > 0:
+		return contentLength
+	}
+	return FilesizeUnknown
+}
 
 // Event is a single parsed access-log record as it flows through
 // enrichment and evaluation. A report's Sample carries the Event whole
@@ -35,16 +53,10 @@ type Event struct {
 	// SentBytes renders under its contract key "sent_bytes", the
 	// response payload bytes sent.
 	SentBytes int64 `json:"sent_bytes"`
-	// ContentLength is the response's Content-Length as the server
-	// reported it; 0 means absent or unusable (the wire form renders
-	// the same zero-means-absent convention).
-	ContentLength int64 `json:"content_length"`
-	// ContentRangeTotal is the file's total size extracted from the
-	// response's Content-Range; 0 means absent or unusable.
-	ContentRangeTotal int64 `json:"content_range_total"`
-
-	// Derived fields, set by enrichment.
 	// SizeBytes renders under its contract key "size_bytes", the
-	// estimated total size of Path in bytes.
+	// Filesize: the file's size as served with this response (GLOSSARY:
+	// Filesize) - the Content-Range total on a 206, the Content-Length
+	// otherwise when greater than zero. It is parse-time state; 0 means
+	// unknown (FilesizeUnknown).
 	SizeBytes int64 `json:"size_bytes"`
 }

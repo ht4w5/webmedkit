@@ -144,7 +144,7 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 		return domain.Event{}, fmt.Errorf("parse nginx json: %w", legacyLineError(line, err))
 	}
 
-	ev := domain.Event{SizeBytes: domain.FilesizeUnknown}
+	ev := domain.Event{}
 
 	raw, err := require(fields.Time, "time")
 	if err != nil {
@@ -204,18 +204,27 @@ func (p *Parser) Parse(line []byte) (domain.Event, error) {
 	ev.SentBytes = sent
 
 	// clen is optional (absent, null, "" = no size information); when present
-	// it must be a non-negative integer, strict like sent - malformed drops the line.
+	// it must be a non-negative integer, strict like sent - malformed drops the
+	// line. It is parse-time state feeding the Filesize derivation below, not
+	// Event state.
+	var contentLength int64
 	if raw = fields.Clen; raw.present && !isNull(raw) {
-		if ev.ContentLength, err = parseContentLength(raw); err != nil {
+		if contentLength, err = parseContentLength(raw); err != nil {
 			return domain.Event{}, &FieldError{Field: "clen", Msg: err.Error()}
 		}
 	}
 
 	// crange is optional and lenient: "bytes <a>-<b>/<total>" and "bytes
-	// */<total>" yield the total; anything else yields 0 and never drops the line.
+	// */<total>" yield the total; anything else yields 0 and never drops the
+	// line. Like clen, it only feeds the derivation below.
+	var contentRangeTotal int64
 	if raw = fields.Crange; raw.present && !isNull(raw) {
-		ev.ContentRangeTotal = parseContentRangeTotal(raw)
+		contentRangeTotal = parseContentRangeTotal(raw)
 	}
+
+	// The Filesize is the size as served with this response (GLOSSARY:
+	// Filesize; ADR 0032): derived from the validated fields above.
+	ev.SizeBytes = domain.ServedFilesize(ev.Status, contentLength, contentRangeTotal)
 
 	// agent is optional; when present it must be a string (null = absent).
 	if raw = fields.Agent; raw.present && !isNull(raw) {

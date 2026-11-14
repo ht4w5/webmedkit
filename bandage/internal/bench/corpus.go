@@ -161,16 +161,16 @@ func (ec eventContent) line(shape LineShape) string {
 // event renders the content as the domain Event its line parses to (nginx.Parser mapping).
 func (ec eventContent) event() domain.Event {
 	return domain.Event{
-		Time:              time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
-		RemoteAddr:        netip.MustParseAddr(ec.client),
-		Method:            ec.method,
-		Path:              ec.path,
-		Agent:             ec.agent,
-		Status:            ec.status,
-		SentBytes:         ec.sent,
-		ContentLength:     ec.clen,
-		ContentRangeTotal: ec.crange,
-		SizeBytes:         domain.FilesizeUnknown,
+		Time:       time.Unix(ec.sec, ec.msec*int64(time.Millisecond)).UTC(),
+		RemoteAddr: netip.MustParseAddr(ec.client),
+		Method:     ec.method,
+		Path:       ec.path,
+		Agent:      ec.agent,
+		Status:     ec.status,
+		SentBytes:  ec.sent,
+		// The Filesize is the size as served, derived like the parser
+		// derives it (domain.ServedFilesize).
+		SizeBytes: domain.ServedFilesize(ec.status, ec.clen, ec.crange),
 	}
 }
 

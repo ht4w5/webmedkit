@@ -16,3 +16,8 @@ the rest (ADRs 0019, 0021).
   for empty content - and the change would reinterpret every stored
   `size_bytes: 0` report row still within its TTL while putting the
   replay division and volume math at risk.
+
+Amended by ADR 0032: zero-means-unknown stands on a new rationale -
+there is no Sampling rule and no estimate to start at 1, and a served
+size that is zero, absent or unusable reads as unknown. The size
+Filter consequences and the rejected option stand unchanged.

@@ -54,8 +54,8 @@ func (NopCounters) Match(string) {}
 // daemon owns the instances behind it; the evaluator owns the
 // invocation point. Implementations report the run's outcomes for the
 // Enrichment counter (GLOSSARY): observed is true when the run fed the
-// kind's learned state, enriched true when it produced a non-default
-// derived value.
+// kind's state, enriched true when it produced a non-default derived
+// value.
 type Enrichments interface {
 	// Enrich runs the named enrichment for the event, setting its
 	// derived fields. Nothing memoizes per event: one event may run one
@@ -162,21 +162,11 @@ func NewService(d Deps) *Service {
 // Evaluate enters the entry chain for the event; every other chain runs
 // only when a goto/jump action dispatches to it.
 func (s *Service) Evaluate(ctx context.Context, event *domain.Event) error {
-	// The single derived-field reset (ADR 0019): once per event at
-	// evaluation entry, before any rule runs - not per chain dispatch.
-	resetDerived(event)
 	ci, ok := s.byName[domain.EntryChain]
 	if !ok {
 		return fmt.Errorf("evaluate: entry chain %q not found", domain.EntryChain)
 	}
 	return s.runChain(ctx, ci, event)
-}
-
-// resetDerived resets every derived Event field to its default - the
-// single reset reserved for future enrichments, so none can leak stale
-// state (ADR 0019).
-func resetDerived(event *domain.Event) {
-	event.SizeBytes = domain.FilesizeUnknown
 }
 
 // matchContext is one fired rung in progress: rule, chain, event and the
@@ -306,7 +296,7 @@ func (s *Service) runNamedChain(ctx context.Context, rule *domain.Rule, name str
 }
 
 // updateTracker feeds the rule's tracker (when it has one) and reports the
-// post-accumulation reading. fed is false only for replay with an unknown size (a never-observed path).
+// post-accumulation reading. fed is false only for replay with an unknown size (no usable size as served).
 func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *domain.Event) (domain.TrackerReading, bool, error) {
 	if rule.Tracker == nil {
 		// Tracker-less rules match on filter alone.
@@ -322,12 +312,12 @@ func (s *Service) updateTracker(ctx context.Context, rule *domain.Rule, event *d
 		increment = float64(event.SentBytes)
 	case domain.TrackReplay:
 		if event.SizeBytes == domain.FilesizeUnknown {
-			// Blind skip of unknown sizes (a never-observed path): no
+			// Blind skip of unknown sizes (no usable size as served): no
 			// increment, no decay, no cache touch.
 			return domain.TrackerReading{}, false, nil
 		}
-		// Increment is the transferred fraction of the estimated size, capped
-		// at 1 per event.
+		// Increment is the transferred fraction of the response's served
+		// Filesize, capped at 1 per event.
 		size := float64(event.SizeBytes)
 		increment = math.Min(float64(event.SentBytes)/size, 1)
 		// The reading's volume is the rule's constant scalar; a ladder's

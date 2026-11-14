@@ -20,8 +20,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -102,8 +100,9 @@ chains:
 }
 
 // TestE2EReplayLadderUnknownSizeSkipsTheTrackerEntirely: replay's
-// blind skipping of unknown sizes is unchanged - a never-observed
-// path's events add nothing and never touch the tracker record.
+// blind skipping of unknown sizes is unchanged - responses without
+// usable size information add nothing and never touch the tracker
+// record.
 func TestE2EReplayLadderUnknownSizeSkipsTheTrackerEntirely(t *testing.T) {
 	clock := newTestClock(mustTime(t, wallBase))
 	rules := `
@@ -111,8 +110,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -123,45 +120,43 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// The /api/stats counters prove the lookups reach the store and
-	// nothing else: every ineligible run reads the file-size record
-	// read-only (gets and misses) and no run writes (no sets, no record)
-	// - an unknown size means the path was never observed. The tracker
-	// record is never touched.
+	// The /api/stats counters prove the blind skip touches no cache
+	// state at all: no lookups, no writes, no records - an unknown size
+	// serves no increment.
 	for i := 0; i < 4; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, ""))
 	}
 	d.waitProcessed(t, 4)
 	if got := marks(d); len(got) != 0 {
-		t.Fatalf("marks on an unobserved path = %v, want none", got)
+		t.Fatalf("marks on an unknown-size response = %v, want none", got)
 	}
 	if doc := d.getReports(t, nil); len(doc.Reports) != 0 {
-		t.Fatalf("reports on an unobserved path = %+v, want none", doc.Reports)
+		t.Fatalf("reports on unknown-size responses = %+v, want none", doc.Reports)
 	}
 	_, stats := d.getStats(t)
-	for field, want := range map[string]float64{"gets": 4, "sets": 0, "misses": 4, "size": 0} {
+	for field, want := range map[string]float64{"gets": 0, "sets": 0, "misses": 0, "size": 0} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (read-only lookups only: the ineligible runs never write)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (the blind skip touches no cache state)", field, got, want)
 		}
 	}
 
-	// Only the known-size samples climb: the first observation seeds the
-	// estimate, and the report's reading counts the three transfers.
+	// Only the known-size samples climb: each counts its full served
+	// size, and the report's reading counts the three transfers.
 	for i := 4; i < 7; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases.iso", 200, 1000, "1000"))
 	}
 	d.waitProcessed(t, 7)
 	doc := d.getReports(t, nil)
 	if len(doc.Reports) != 1 {
-		t.Fatalf("reports after the first observations = %+v, want 1", doc.Reports)
+		t.Fatalf("reports after the first known sizes = %+v, want 1", doc.Reports)
 	}
 	if v := doc.Reports[0].Tracker.Value; v != 3 {
 		t.Errorf("tracker value = %v, want 3 (the unknown-size events never incremented)", v)
 	}
 	_, stats = d.getStats(t)
-	for field, want := range map[string]float64{"gets": 10, "sets": 6, "misses": 6, "size": 2} {
+	for field, want := range map[string]float64{"gets": 3, "sets": 3, "misses": 1, "size": 1} {
 		if got := statsNum(t, stats, "tracker_cache", field); got != want {
-			t.Errorf("tracker_cache.%s = %v, want %v (the writes resume with the first known sample: the tracker record appears and both records stay live)", field, got, want)
+			t.Errorf("tracker_cache.%s = %v, want %v (the writes resume with the first known size: one tracker record)", field, got, want)
 		}
 	}
 }
@@ -174,8 +169,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 1}
         escalations:
@@ -222,8 +215,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:
@@ -273,7 +264,7 @@ chains:
 			r.CreatedAt, r.UpdatedAt, r.ExpiresAt, wallBase)
 	}
 	if r.Sample.Path != "/releases.iso" || r.Sample.SentBytes != 1000 || r.Sample.SizeBytes != 1000 {
-		t.Errorf("sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
+		t.Errorf("sample = %+v, want the triggering transfer with served size 1000", r.Sample)
 	}
 	if r.Penalty == nil || r.Penalty.Action != "drop" || r.Penalty.Rate != nil {
 		t.Errorf("penalty = %+v, want drop without rate", r.Penalty)
@@ -288,8 +279,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-ladder
         tracker: {track: replay, leak: 0}
         escalations:

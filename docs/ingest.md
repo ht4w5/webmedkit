@@ -30,8 +30,9 @@ mapped fields (`time`, `client`, `method`, `url`, `status`, `sent`,
 `access_log <path> bandage;` - no field contract to reverse-engineer.
 
 `sent` is the response payload bytes the request actually transferred;
-the two response-size fields feed the Filesize estimate
-([GLOSSARY.md](../GLOSSARY.md)) instead:
+the two response-size fields carry the Filesize
+([GLOSSARY.md](../GLOSSARY.md)) - the size as served with the
+response - instead:
 
 - `clen` (`$sent_http_content_length`) - the response's
   `Content-Length` header as a quoted string, `""` when the header was
@@ -46,21 +47,28 @@ the two response-size fields feed the Filesize estimate
   anything unparsable carry no size information and never drop the
   line.
 
-What feeds the estimate is the Sampling rule ([GLOSSARY.md](../GLOSSARY.md),
-[ADR 0019](adr/0019-filesize-from-response-sizes.md)): `clen` on
-GET/HEAD 200 and the `crange` total on GET 206 - response sizes, never
-the bytes a request happened to transfer.
+The Filesize is derived from these two fields as served (GLOSSARY:
+Filesize): a `206` takes its `crange` total only - the partial `clen`
+would masquerade as a file size - and any other response its `clen`
+when greater than zero; no method gating. The validation asymmetry is
+deliberate: `clen` is a typed field, so a malformed value is an
+invalid field and drops the line like any other; `crange` is free-form
+header text, so an unusual value degrades to no size and never drops
+the line. Sizes as served, never the bytes a request happened to
+transfer.
 
 Migration (flux-compatible): lines from an existing flux `log_format`
 keep parsing unchanged - its extra `host`/`server`/`duration` fields
 (and any others) are accepted and ignored, and lines without `clen` and
-`crange` simply carry no size information - while the `bandage` format
+`crange` read as unknown sizes - while the `bandage` format
 name never collides with an existing `flux` definition.
 
-**Rollout ordering:** deploy the updated nginx log format before
-upgrading bandage. The other order is safe - the daemon runs unchanged
-against old log lines - but the Filesize estimate stays unknown (replay
-stays blind) until the emitter is upgraded and paths are re-observed.
+**Rollout ordering:** either order is safe - the `bandage` log format
+keeps `clen` and `crange` unchanged, so upgrading the daemon alone
+flips the semantics in one step and nothing on the emitter side.
+Legacy flux lines read as unknown sizes (replay stays blind on that
+traffic) until the emitter is upgraded; every upgraded line carries
+its served size at once - no re-observation needed.
 
 ## Recommendation: udp or unixgram at high rate
 

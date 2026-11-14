@@ -399,13 +399,13 @@ func (fsatm *FilterSentAtMost) Match(event *domain.Event) bool {
 	return event.SentBytes <= fsatm.limit
 }
 
-// sizeKnown reports whether the event's Filesize estimate is known; size 0
+// sizeKnown reports whether the event's Filesize is known; size 0
 // means unknown (ADR 0024).
 func sizeKnown(event *domain.Event) bool {
 	return event.SizeBytes != domain.FilesizeUnknown
 }
 
-// FilterSizeAtLeast matches events whose Filesize estimate is known and at
+// FilterSizeAtLeast matches events whose Filesize is known and at
 // least limit bytes (inclusive); an unknown-size event is never matched
 // (size 0 means unknown, ADR 0024).
 type FilterSizeAtLeast struct {
@@ -414,7 +414,7 @@ type FilterSizeAtLeast struct {
 }
 
 // NewFilterSizeAtLeast returns a filter matching events whose known Filesize
-// estimate is at least limit bytes (inclusive).
+// is at least limit bytes (inclusive).
 func NewFilterSizeAtLeast(limit int64) (*FilterSizeAtLeast, error) {
 	if limit < 0 {
 		return nil, errors.New("limit must be greater or equal to 0")
@@ -426,7 +426,7 @@ func (fsizl *FilterSizeAtLeast) Match(event *domain.Event) bool {
 	return sizeKnown(event) && event.SizeBytes >= fsizl.limit
 }
 
-// FilterSizeAtMost matches events whose Filesize estimate is known and at
+// FilterSizeAtMost matches events whose Filesize is known and at
 // most limit bytes (inclusive); an unknown-size event is never matched
 // (size 0 means unknown, ADR 0024).
 type FilterSizeAtMost struct {
@@ -435,7 +435,7 @@ type FilterSizeAtMost struct {
 }
 
 // NewFilterSizeAtMost returns a filter matching events whose known Filesize
-// estimate is at most limit bytes (inclusive).
+// is at most limit bytes (inclusive).
 func NewFilterSizeAtMost(limit int64) (*FilterSizeAtMost, error) {
 	if limit < 0 {
 		return nil, errors.New("limit must be greater or equal to 0")
@@ -447,7 +447,7 @@ func (fsizm *FilterSizeAtMost) Match(event *domain.Event) bool {
 	return sizeKnown(event) && event.SizeBytes <= fsizm.limit
 }
 
-// FilterSizeUnknown matches events whose Filesize estimate is unknown - the
+// FilterSizeUnknown matches events whose Filesize is unknown - the
 // complement of the size comparisons (size 0 means unknown, ADR 0024). Like
 // any/none it takes no argument and is built directly, with no constructor.
 type FilterSizeUnknown struct{}

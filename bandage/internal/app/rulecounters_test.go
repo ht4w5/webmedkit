@@ -220,8 +220,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         counter: true
         tracker: {track: replay, leak: 0, volume: 2}
@@ -229,7 +227,7 @@ chains:
 `
 	d := startTestDaemon(t, clock, "unixgram", ":memory:", rules)
 
-	// Never-observed traffic (unknown size): the skips are visits,
+	// Unknown-size traffic: the skips are visits,
 	// never Matches.
 	for i := range 4 {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, ""))
@@ -238,10 +236,10 @@ chains:
 	want := []ruleCounterDoc{{ID: "iso-replay", Total: 4, Matched: 0}}
 	_, doc := d.getStats(t)
 	if got := statsRules(t, doc); !slices.Equal(got, want) {
-		t.Fatalf("rules block on an unobserved path = %+v, want %+v (skips are visits, not Matches)", got, want)
+		t.Fatalf("rules block on unknown-size traffic = %+v, want %+v (skips are visits, not Matches)", got, want)
 	}
 
-	// The observed samples match on the third (value 3 > volume 2).
+	// The known-size samples match on the third (value 3 > volume 2).
 	for i := 4; i < 7; i++ {
 		d.send(nginxLineClen(fmt.Sprintf("%d", 1734345934+i), "203.0.113.7", "GET", "/releases/24.04.iso", 200, 1000, "1000"))
 	}

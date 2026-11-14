@@ -544,6 +544,11 @@ type rawEnrichAction struct {
 // kind by name, run where the rule matches (ADR 0028), and the pair's
 // Enrichment counter opt-in (GLOSSARY: Enrichment counter). The strict
 // key set is deliberately tiny: unknown keys fail load naming them.
+// The type check fires before the counter key's shape check, so with
+// the kind vocabulary empty every enrich action fails load naming its
+// type (or its absence) and stating that no enrichment types are
+// available - a doubly-broken block never names the counter first
+// (story 13).
 func parseEnrichAction(id, name string, val *yaml.Node) (domain.Action, error) {
 	if val == nil {
 		return domain.Action{}, wantsOptions(id, name)

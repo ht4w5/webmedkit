@@ -482,8 +482,6 @@ chains:
         actions: [{report: {reason: egress-overflow, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}, {log: "debug,MARK:FLAG"}]
   - name: replay
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 1}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}]
@@ -511,14 +509,14 @@ chains:
 	if r := byRule["egress"]; r.UpdatedAt != wallBase || r.Sample.Time != "2024-12-16T10:45:34Z" {
 		t.Errorf("egress report = %+v, want it frozen at the first Trigger's write", r)
 	}
-	// ...while the flagged Target's events still fed Filesize and the replay
-	// tracker.
+	// ...while the flagged Target's events still fed the replay tracker
+	// with their served sizes.
 	r := byRule["iso-replay"]
 	if r.Tracker.Track != "replay" || r.Tracker.Value != 2 || r.Tracker.Volume != 1 {
 		t.Errorf("iso-replay tracker = %+v, want {replay 2 0 1}", r.Tracker)
 	}
 	if r.Sample.SizeBytes != 1000 || r.Sample.SentBytes != 1000 {
-		t.Errorf("iso-replay sample = %+v, want the triggering transfer with enriched size 1000", r.Sample)
+		t.Errorf("iso-replay sample = %+v, want the triggering transfer with served size 1000", r.Sample)
 	}
 
 	// The flagging rule ran its actions for every event; nothing was dropped.
@@ -540,8 +538,6 @@ version: 0
 chains:
   - name: main
     rules:
-      - id: enrich-size
-        actions: [{enrich: {type: filesize}}]
       - id: iso-replay
         tracker: {track: replay, leak: 0, volume: 1}
         actions: [{report: {reason: iso-replay, ttl: 1h, penalty: limit-bandwidth, rate: 1MB}}, {log: "debug,MARK:REPLAY"}]
